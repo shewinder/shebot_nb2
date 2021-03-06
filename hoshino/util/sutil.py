@@ -44,27 +44,6 @@ def get_md5(val: Union[bytes, str]) -> str:
     m.update(val)
     return m.hexdigest()
 
-async def broadcast(msg,groups=None,sv_name=None):
-    bot = nonebot.get_bot()
-    #当groups指定时，在groups中广播；当groups未指定，但sv_name指定，将在开启该服务的群广播
-    svs = Service.get_loaded_services()
-    if not groups and sv_name not in svs:
-        raise ValueError(f'不存在服务 {sv_name}')
-    if sv_name:
-        enable_groups = await svs[sv_name].get_enable_groups()
-        send_groups = enable_groups.keys() if not groups else groups
-    else:
-        send_groups = groups
-    for gid in send_groups:
-        try:
-            await bot.send_group_msg(group_id=gid,message=msg)
-            logger.info(f'群{gid}投递消息成功')
-            await asyncio.sleep(0.5)
-        except ActionFailed as e:
-            logger.error(f'在群{gid}投递消息失败,  retcode={e.retcode}')
-        except Exception as e:
-            logger.exception(e)
-
 def extract_url_from_event(event: Event) -> List[str]:
     urls = re.findall(r'http.*?term=\d', str(event.message))
     return urls
