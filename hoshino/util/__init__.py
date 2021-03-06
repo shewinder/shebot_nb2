@@ -30,7 +30,7 @@ from nonebot.permission import SUPERUSER
 from nonebot.plugin import CommandGroup, on_command
 from nonebot.rule import Rule, to_me
 DEFAULTFONT = ImageFont.truetype(
-    R.img('priconne/gadget/SourceHanSerif-Regular.ttc'), size=48)
+    'msyh.ttf', size=48)
 
 
 class FreqLimiter:

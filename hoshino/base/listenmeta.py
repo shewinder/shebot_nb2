@@ -22,4 +22,5 @@ lisenlife = on_metaevent(rule=lifecycle)
 async def _(bot: Bot, event: LifecycleMetaEvent):
     if event.sub_type == 'connect':
         for su in hsn_config.superusers:
-            await bot.send_private_msg(user_id=int(su), message='生命周期上线~')
+            pass
+            #await bot.send_private_msg(user_id=int(su), message='生命周期上线~')

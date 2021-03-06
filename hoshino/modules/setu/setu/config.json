@@ -1,0 +1,14 @@
+{
+  "apikey": "610940955e9e90fb1372a2",
+  "online_mode": true,
+  "with_url": false,
+  "daily_max_num": 15,
+  "delete_after": 30,
+  "r18_groups": [
+    142738227,
+    1004941232
+  ],
+  "delete_groups": [],
+  "exceed_notice": "您今天已经冲过15次了，请明早5点后再来！",
+  "too_frequent_notic": "您冲得太快了，请稍后再来~"
+}
