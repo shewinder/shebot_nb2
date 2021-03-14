@@ -35,5 +35,15 @@ class SignUpRecordManager:
         except Exception as e:
             logger.exception(e)
         return True if rec else False
+    
+    def del_signup_record(qqid, practice_id):
+        try:
+            rec: SignUpRecord = SignUpRecord.get_or_none(uid=qqid, practice_id=practice_id)
+            if rec:
+                return rec.delete_instance()
+            else:
+                return 0
+        except Exception as e:
+            logger.exception(e)      
 
 

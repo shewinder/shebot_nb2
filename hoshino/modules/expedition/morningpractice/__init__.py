@@ -4,15 +4,17 @@ import time
 from collections import defaultdict
 
 from peewee import IntegrityError
+from nonebot.permission import USER
 
 from hoshino import Bot, Event, Service
-from hoshino import permission
-from hoshino.permission import ADMIN
 from hoshino.typing import T_State
 from .data import *
 from .practice import PracticeManager, SignUpRecordManager
 from .user import UserManager
 from .exception import UserError
+from .config import admins
+
+ADMIN = USER(*admins)
 
 # 初始化数据库
 db_file = 'data/db/expedition.db'
@@ -73,33 +75,12 @@ async def choose_practice(bot: Bot, event: Event, state: T_State):
     except:
         await bot.send(event, '输入不合法, 请输入正确的序号')
 
-
-
 deadline = sv.on_command('deadline', 
                     aliases={'报名截止', '截止报名'}, 
                     only_group=False, 
                     permission=ADMIN)
-@deadline.handle()
-async def _(bot: Bot, event: Event, state: T_State):
-    # 判断当前是否存在正在进行的早训
-    prts = PracticeManager.get_current_practice()
-    if not prts:
-        await show.finish('当前没有正在进行的早训') 
-    if len(prts) == 1:
-        state['which'] = 0
-    else:
-        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
-        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
-    state['prts'] = prts                    
-@deadline.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        state['prt'] = state['prts'][index]
-    except IndexError:
-        await bot.send(event, '输入超限!')
-    except:
-        await bot.send(event, '输入不合法, 请输入正确的序号')
+deadline.handle()(judge_exist)               
+deadline.got('which')(choose_practice)
 @deadline.handle()
 async def _(bot: Bot, event: Event, state: T_State):
     prt = state['prt']
@@ -111,32 +92,12 @@ async def _(bot: Bot, event: Event, state: T_State):
     except Exception as e:
         sv.logger.exception(e) 
 
-
 cancel = sv.on_command('cancel practice', 
                         aliases={'取消早训'}, 
                         only_group=False, 
                         permission=ADMIN)
-@cancel.handle()
-async def _(bot: Bot, event: Event, state: T_State):
-    # 判断当前是否存在正在进行的早训
-    prts = PracticeManager.get_current_practice()
-    if not prts:
-        await show.finish('当前没有正在进行的早训') 
-    if len(prts) == 1:
-        state['which'] = 0
-    else:
-        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
-        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
-    state['prts'] = prts                    
-@cancel.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        state['prt'] = state['prts'][index]
-    except IndexError:
-        await bot.send(event, '输入超限!')
-    except:
-        await bot.send(event, '输入不合法, 请输入正确的序号')
+cancel.handle()(judge_exist)     
+cancel.got('which')(choose_practice)
 @cancel.got('notice', prompt='是否私聊通知报名成员?')
 async def cancel_practice(bot: Bot, event: Event, state: T_State):
     prt = state['prt']
@@ -168,25 +129,12 @@ async def cancel_practice(bot: Bot, event: Event, state: T_State):
 
     # 删除当前的早训提醒
 
-    
-
 signup = sv.on_command('sign up', aliases={'报名早训', '报名'}, only_group=False)
+signup.handle()(judge_exist)     
+signup.got('which')(choose_practice)
 @signup.handle()
 async def _(bot: Bot, event: Event, state: T_State):
-    # 判断当前是否存在正在进行的早训
-    prts = PracticeManager.get_current_practice()
-    if not prts:
-        await signup.finish('当前没有正在进行的早训')
-    prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
-    await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))
-    state['prts'] = prts
-@signup.got('which')
-async def _(bot: Bot, event: Event, state: T_State):
-    try:
-        index = int(state['which'])
-    except:
-        await signup.send('输入不合法, 请输入正确的序号')
-    prt = state['prts'][index]
+    prt = state['prt']
     # 判断是否已经报名
     qqid = event.get_user_id()
     rec = SignUpRecord.get_or_none(uid=qqid, practice_id=prt.id_)
@@ -211,7 +159,17 @@ async def _(bot: Bot, event: Event, state: T_State):
         sv.logger.exception(f'{e} exception occured when signing up')
 
 cancel_signup = sv.on_command('cancel sign up', aliases={'取消报名'}, only_group=False)
-
+cancel_signup.handle()(judge_exist)
+cancel_signup.got('which')(choose_practice)
+@cancel_signup.handle()
+async def _(bot: Bot, event: Event, state: T_State):
+    prt = state['prt']
+    # 判断是否报名此活动
+    qqid = int(event.get_user_id())
+    if SignUpRecordManager.del_signup_record(qqid, prt.id_):
+        await cancel_signup.send('成功取消报名')
+    else:
+        await cancel_signup.send('您未报名此活动')
 
 bind = sv.on_command('bind', aliases={'绑定', '绑定QQ'}, only_group=False)
 @bind.handle()
@@ -233,27 +191,11 @@ show = sv.on_command('show signup',
                      aliases={'查看报名', '查看报名人员', '查看报名名单'}, 
                      only_group=False, 
                      permission=ADMIN)
+show.handle()(judge_exist)     
+show.got('which')(choose_practice)
 @show.handle()
 async def _(bot: Bot, event: Event, state: T_State):
-    # 判断当前是否存在正在进行的早训
-    prts = PracticeManager.get_current_practice()
-    if not prts:
-        await show.finish('当前没有正在进行的早训') 
-    if len(prts) == 1:
-        state['which'] = 0
-    else:
-        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
-        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
-    state['prts'] = prts
-@show.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        prt = state['prts'][index]
-    except IndexError:
-        await show.send('输入超限!')
-    except:
-        await show.send('输入不合法, 请输入正确的序号')
+    prt = state['prt']
     # 获取报名人员
     recs = SignUpRecordManager.get_signup_records(prt.id_)
     if not recs:
@@ -269,7 +211,6 @@ async def _(bot: Bot, event: Event, state: T_State):
     else:
         await show.send('人数过多，请在网页上查看\nhttp://140.143.122.138:9000/too_long_show')
         pass
-
 show_prt = sv.on_command('show practice', aliases={'查看早训', '查看训练'}, only_group=False)
 @show_prt.handle()
 async def _(bot: Bot, event: Event, state: T_State):
@@ -288,27 +229,8 @@ alter = sv.on_command('alter',
                       only_group=False, 
                       permission=ADMIN)
 
-@alter.handle()
-async def _(bot: Bot, event: Event, state: T_State):
-    # 判断当前是否存在正在进行的早训
-    prts = PracticeManager.get_current_practice()
-    if not prts:
-        await show.finish('当前没有正在进行的早训') 
-    if len(prts) == 1:
-        state['which'] = 0
-    else:
-        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
-        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
-    state['prts'] = prts                    
-@alter.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        state['prt'] = state['prts'][index]
-    except IndexError:
-        await bot.send(event, '输入超限!')
-    except:
-        await bot.send(event, '输入不合法, 请输入正确的序号')
+alter.handle()(judge_exist)     
+alter.got('which')(choose_practice)
 @alter.got('content', prompt='请发送要修改的内容')
 async def _(bot: Bot, event: Event, state: T_State):
     # 判断当前是否存在正在进行的早训
@@ -320,7 +242,6 @@ async def _(bot: Bot, event: Event, state: T_State):
     except Exception as e:
         sv.logger.exception(e)
     state['content'] = cont
-
 @alter.got('notice', prompt='是否私聊报名成员？')
 async def _(bot: Bot, event: Event, state: T_State):
     notice = state['notice']
@@ -343,27 +264,8 @@ start_checkin = sv.on_command('start check',
                               aliases={'开启签到', '开启打卡', '开始打卡', '开始签到'}, 
                               only_group=False, 
                               permission=ADMIN)
-@start_checkin.handle()
-async def _(bot: Bot, event: Event, state: T_State):
-    # 判断当前是否存在正在进行的早训
-    prts = PracticeManager.get_current_practice()
-    if not prts:
-        await show.finish('当前没有正在进行的早训') 
-    if len(prts) == 1:
-        state['which'] = 0
-    else:
-        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
-        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
-    state['prts'] = prts                    
-@start_checkin.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        state['prt'] = state['prts'][index]
-    except IndexError:
-        await bot.send(event, '输入超限!')
-    except:
-        await bot.send(event, '输入不合法, 请输入正确的序号')
+start_checkin.handle()(judge_exist)     
+start_checkin.got('which')(choose_practice)
 
 @start_checkin.handle()
 async def _(bot: Bot, event: Event, state: T_State):
@@ -376,21 +278,7 @@ async def _(bot: Bot, event: Event, state: T_State):
     prt.save()
     await bot.send_private_msg(user_id=event.get_user_id(), message=f'本次签到口令为{_token}')
 
-"""     # 如果管理忘记结束签到，5分组后自动结算
-    await asyncio.sleep(300) 
-    global _checkins
-    try:
-        prt.status = 10 # practice状态设置结束
-        prt.save()
-    except Exception as e:
-        sv.logger.exception(e)
-    for chk in _checkins:
-        try:
-            chk.save()
-        except Exception as e:
-            sv.logger.exception(e)
-    await bot.send_private_msg(user_id=event.get_user_id(), message=f'自动结束签到') """
-            
+           
 _checkins = defaultdict(list)
 checkin = sv.on_command('check in', aliases={'签到', '打卡'}, only_group= False)
 @checkin.handle()
@@ -405,15 +293,7 @@ async def _(bot: Bot, event: Event, state: T_State):
         prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
         await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
     state['prts'] = prts                    
-@checkin.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        state['prt'] = state['prts'][index]
-    except IndexError:
-        await bot.send(event, '输入超限!')
-    except:
-        await bot.send(event, '输入不合法, 请输入正确的序号')
+checkin.got('which')(choose_practice)
 
 @checkin.got('token', prompt='请输入本次签到口令')
 async def _(bot: Bot, event: Event, state: T_State):
@@ -460,15 +340,8 @@ async def _(bot: Bot, event: Event, state: T_State):
         prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
         await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
     state['prts'] = prts                    
-@end_checkin.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        state['prt'] = state['prts'][index]
-    except IndexError:
-        await bot.send(event, '输入超限!')
-    except:
-        await bot.send(event, '输入不合法, 请输入正确的序号')
+
+end_checkin.got('which')(choose_practice)
 
 @end_checkin.handle()
 async def _(bot: Bot, event: Event, state: T_State):
@@ -520,27 +393,8 @@ async def _(bot: Bot, event: Event, state: T_State):
         pass 
 
 bc = sv.on_command('broadcast', aliases={'广播'}, only_group=False, permission=ADMIN)
-@bc.handle()
-async def _(bot: Bot, event: Event, state: T_State):
-    # 判断当前是否存在正在进行的早训
-    prts = PracticeManager.get_current_practice()
-    if not prts:
-        await show.finish('当前没有正在进行的早训') 
-    if len(prts) == 1:
-        state['which'] = 0
-    else:
-        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
-        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
-    state['prts'] = prts                    
-@bc.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        state['prt'] = state['prts'][index]
-    except IndexError:
-        await bot.send(event, '输入超限!')
-    except:
-        await bot.send(event, '输入不合法, 请输入正确的序号')
+bc.handle()(judge_exist)     
+bc.got('which')(choose_practice)
 @bc.got('content', prompt='请发送要广播的内容')
 async def _(bot: Bot, event: Event, state: T_State):
     prt = state['prt']
@@ -560,7 +414,7 @@ help = sv.on_command('help', aliases={'帮助', '帮助手册'}, only_group=Fals
 async def _(bot: Bot, event: Event, state: T_State):
     await help.send('http://140.143.122.138:9000/help')
 
-repr_checkin = sv.on_command('check in', aliases={'代签到', '代签'}, only_group= False, permission=ADMIN)
+repr_checkin = sv.on_command('represent', aliases={'代签到', '代签'}, only_group= False, permission=ADMIN)
 @repr_checkin.handle()
 async def _(bot: Bot, event: Event, state: T_State):
     # 判断当前是否存在正在进行的早训
@@ -573,15 +427,8 @@ async def _(bot: Bot, event: Event, state: T_State):
         prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
         await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
     state['prts'] = prts                    
-@repr_checkin.got('which')
-async def _(bot: Bot, event: Event, state: T_State): 
-    try:
-        index = int(state['which'])
-        state['prt'] = state['prts'][index]
-    except IndexError:
-        await bot.send(event, '输入超限!')
-    except:
-        await bot.send(event, '输入不合法, 请输入正确的序号')
+repr_checkin.got('which')(choose_practice)
+
 @repr_checkin.got('qqid', prompt='请输入代签的qq号， 空格分开')
 async def _(bot: Bot, event: Event, state: T_State): 
     prt = state['prt']
@@ -596,15 +443,15 @@ async def _(bot: Bot, event: Event, state: T_State):
             chk_name = UserManager.get_name_by_qqid(qqid)
         except UserError:
             sv.logger.exception(f'{qqid} try to check in  without binding name with qq')
-            await signup.finish('无法获取用户名')
+            await repr_checkin.finish(f'无法获取QQ{qqid}用户名')
         global _checkins
         for chk in _checkins[prt.id_]:
             if chk.uid == qqid:
-                await checkin.finish('已经签到过了')
+                await checkin.finish(f'{qqid}已经签到过了')
                 break
         try:
             chk_rec = CheckInRecord(uid=qqid, name=chk_name, practice_id=prt.id_)
             _checkins[prt.id_].append(chk_rec)
-            await checkin.send('成功签到')
+            await checkin.send(f'成功为{chk_name}签到')
         except Exception as e:
             sv.logger.exception(e)
