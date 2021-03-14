@@ -37,8 +37,7 @@ async def _(req: Request, call_next: Callable):
 
 origins = [
     "http://localhost",
-    "http://localhost:8080",
-    "http://localhost:8000",
+    "http://localhost:8080"
 ]
 
 app.add_middleware(

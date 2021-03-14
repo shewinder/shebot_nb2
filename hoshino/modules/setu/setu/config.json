@@ -5,8 +5,9 @@
   "daily_max_num": 15,
   "delete_after": 30,
   "r18_groups": [
+    1004941232,
     142738227,
-    1004941232
+    812806104
   ],
   "delete_groups": [],
   "exceed_notice": "您今天已经冲过15次了，请明早5点后再来！",
