@@ -15,7 +15,7 @@ dgk = sv.on_keyword('迫害龙王')
 async def tease_dragonking(bot: Bot, event: GroupMessageEvent):
     uid = event.user_id
     if not _nlt.check(uid):
-        await dgk.finish(event, conf.exceed_notice)
+        await dgk.finish(conf.exceed_notice)
 
     gid = event.group_id
     try:
@@ -24,7 +24,7 @@ async def tease_dragonking(bot: Bot, event: GroupMessageEvent):
     except:
         await dgk.finish('获取龙王失败')
     if dragon_id == event.self_id:
-        antitease_pic = R.get_random_image(folder='antitease')
+        antitease_pic = R.get_random_img(folder='antitease').cqcode
         await bot.send(event, antitease_pic)
     else:
         tease_pic = R.get_random_image(folder='龙王')

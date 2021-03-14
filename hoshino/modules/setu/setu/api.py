@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import requests
+import sqlite3
 import os
 from io import BytesIO
 from PIL import Image
@@ -32,6 +33,7 @@ def get_setu(r18,keyword,num,size1200):
                 author = item['author']
                 setu = Setu(pid,title,url,r18,tags,author)
                 setu_list.append(setu)
+            insert_database(setu_list)
             return setu_list
     except Exception as ex:
         print(ex)
@@ -86,6 +88,28 @@ def get_final_setu(storePath,num=1,r18=2,keyword='',size1200='false'):
 async def get_final_setu_async(storePath,num=1,r18=2,keyword='',size1200='false'):
     setu_list = get_setu(r18=r18,num=num,keyword=keyword,size1200=size1200)
     return setu_list
+
+def insert_database(setus):
+    db_name = 'setu.db3'
+    with sqlite3.connect(os.path.join(os.path.dirname(__file__),db_name)) as conn:
+        cur = conn.cursor()
+        for setu in setus:
+            pid = setu.pid
+            author = setu.author
+            title = setu.title
+            url = setu.url
+            r18 = setu.r18
+            tags = str(setu.tags)
+            sql = f'insert into setu (pid,author,title,url,r18,tags) values(?,?,?,?,?,?)'
+            data = [pid,author,title,url,r18,tags]
+            try:
+                cur.execute(sql,data)
+            except Exception as er:
+                print(er)
+    conn.commit()
+    cur.close()
+    conn.close()
+
 
 
 

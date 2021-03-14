@@ -1,0 +1,5 @@
+{
+  "daily_max_num": 5,
+  "exceed_notice": "您今天已经冲过了，请明早5点后再来！",
+  "too_frequent_notice": "慢点,会受不了的~"
+}

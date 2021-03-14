@@ -48,7 +48,8 @@ common_setu = sv.on_regex(r'^来?([1-5])?[份点张]?[涩色瑟]图(.{0,10})$', 
 async def send_common_setu(bot, event: Event, state: T_State):
     uid = event.user_id
     self_id = event.self_id
-    gid = event.group_id
+    gid = None if not isinstance(event, GroupMessageEvent) else event.group_id
+    
     is_to_delete = True if gid in conf.delete_groups else False
 
     if not _num_limiter.check(uid):
