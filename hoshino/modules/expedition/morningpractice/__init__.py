@@ -52,6 +52,29 @@ async def _(bot: Bot, event: Event, state: T_State):
     sv.logger.info(f'notice time is {time_str}')
     # TODO
 
+async def judge_exist(bot: Bot, event: Event, state: T_State):
+    # 判断当前是否存在正在进行的早训
+    prts = PracticeManager.get_current_practice()
+    if not prts:
+        await show.finish('当前没有正在进行的早训') 
+    if len(prts) == 1:
+        state['which'] = 0
+    else:
+        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
+        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
+    state['prts'] = prts  
+
+async def choose_practice(bot: Bot, event: Event, state: T_State): 
+    try:
+        index = int(state['which'])
+        state['prt'] = state['prts'][index]
+    except IndexError:
+        await bot.send(event, '输入超限!')
+    except:
+        await bot.send(event, '输入不合法, 请输入正确的序号')
+
+
+
 deadline = sv.on_command('deadline', 
                     aliases={'报名截止', '截止报名'}, 
                     only_group=False, 
@@ -187,6 +210,9 @@ async def _(bot: Bot, event: Event, state: T_State):
     except Exception as e:
         sv.logger.exception(f'{e} exception occured when signing up')
 
+cancel_signup = sv.on_command('cancel sign up', aliases={'取消报名'}, only_group=False)
+
+
 bind = sv.on_command('bind', aliases={'绑定', '绑定QQ'}, only_group=False)
 @bind.handle()
 async def _(bot: Bot, event: Event, state: T_State):
@@ -199,6 +225,7 @@ async def _(bot: Bot, event: Event, state: T_State):
     qqid = event.get_user_id()
     try:
         User.create(qqid=qqid, name=name)
+        await bot.send(event, '绑定成功')
     except IntegrityError:
         await bind.finish('您已经绑定过QQ了')
 
@@ -240,7 +267,7 @@ async def _(bot: Bot, event: Event, state: T_State):
     if len(reply) < 30:
         await show.send('\n'.join(reply))
     else:
-        await show.send('人数过多，请在网页上查看')
+        await show.send('人数过多，请在网页上查看\nhttp://140.143.122.138:9000/too_long_show')
         pass
 
 show_prt = sv.on_command('show practice', aliases={'查看早训', '查看训练'}, only_group=False)
@@ -465,7 +492,7 @@ async def _(bot: Bot, event: Event, state: T_State):
             reply.append(name)
     await end_checkin.send('\n'.join(reply))
 
-@end_checkin.got('confirm', prompt='请校对签到情况是否正确')    
+@end_checkin.got('confirm', prompt='请校对签到情况是否正确,发送是|否|取消')    
 async def _(bot: Bot, event: Event, state: T_State):
     confirm = state['confirm']
     prt = state['prt']
@@ -475,6 +502,7 @@ async def _(bot: Bot, event: Event, state: T_State):
         for chk in _checkins[prt.id_]:
             try:
                 sv.logger.info(f'saving check in record of {chk.name}')
+
                 chk.save(force_insert = True) # I dont know why force_insert must be used here
                 sv.logger.info(f'saved check in record of {chk.name}')
             except Exception as e:
@@ -483,9 +511,100 @@ async def _(bot: Bot, event: Event, state: T_State):
         prt.status = 10
         prt.save()
         await end_checkin.send('本次早训已归档')
-    else:
+    elif confirm == '否':
         del _checkins[prt.id_]
         prt.status = 1
         prt.save()
         await end_checkin.send('本次签到取消,请重新签到')
+    else:
+        pass 
 
+bc = sv.on_command('broadcast', aliases={'广播'}, only_group=False, permission=ADMIN)
+@bc.handle()
+async def _(bot: Bot, event: Event, state: T_State):
+    # 判断当前是否存在正在进行的早训
+    prts = PracticeManager.get_current_practice()
+    if not prts:
+        await show.finish('当前没有正在进行的早训') 
+    if len(prts) == 1:
+        state['which'] = 0
+    else:
+        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
+        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
+    state['prts'] = prts                    
+@bc.got('which')
+async def _(bot: Bot, event: Event, state: T_State): 
+    try:
+        index = int(state['which'])
+        state['prt'] = state['prts'][index]
+    except IndexError:
+        await bot.send(event, '输入超限!')
+    except:
+        await bot.send(event, '输入不合法, 请输入正确的序号')
+@bc.got('content', prompt='请发送要广播的内容')
+async def _(bot: Bot, event: Event, state: T_State):
+    prt = state['prt']
+    cont = state['content']
+    signups = SignUpRecordManager.get_signup_records(prt.id_)
+    name = UserManager.get_name_by_qqid(int(event.get_user_id()))
+    for i in signups:
+        try:
+            await bot.send_private_msg(user_id=i.uid, message=f'您收到来自{name}的温馨提醒：\n{cont}')
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            sv.logger.exception(e)
+    sv.logger.info(f'共投递{len(signups)}条消息')
+
+help = sv.on_command('help', aliases={'帮助', '帮助手册'}, only_group=False)
+@help.handle()
+async def _(bot: Bot, event: Event, state: T_State):
+    await help.send('http://140.143.122.138:9000/help')
+
+repr_checkin = sv.on_command('check in', aliases={'代签到', '代签'}, only_group= False, permission=ADMIN)
+@repr_checkin.handle()
+async def _(bot: Bot, event: Event, state: T_State):
+    # 判断当前是否存在正在进行的早训
+    prts = PracticeManager.get_practice_by_status(2)
+    if not prts:
+        await show.finish('当前没有正在签到的早训') 
+    if len(prts) == 1:
+        state['which'] = 0
+    else:
+        prt_titles = [f'{i}:  {prt.title}' for i, prt in enumerate(prts)]
+        await signup.send('以下为所有的早训,发送对应序号选择\n' + '\n'.join(prt_titles))      
+    state['prts'] = prts                    
+@repr_checkin.got('which')
+async def _(bot: Bot, event: Event, state: T_State): 
+    try:
+        index = int(state['which'])
+        state['prt'] = state['prts'][index]
+    except IndexError:
+        await bot.send(event, '输入超限!')
+    except:
+        await bot.send(event, '输入不合法, 请输入正确的序号')
+@repr_checkin.got('qqid', prompt='请输入代签的qq号， 空格分开')
+async def _(bot: Bot, event: Event, state: T_State): 
+    prt = state['prt']
+    qq_str = state['qqid']
+    qqids = qq_str.split()
+    for qqid in qqids:
+        try:
+            qqid = int(qqid)
+        except:
+            await bot.send(event, '输入不合法')
+        try:
+            chk_name = UserManager.get_name_by_qqid(qqid)
+        except UserError:
+            sv.logger.exception(f'{qqid} try to check in  without binding name with qq')
+            await signup.finish('无法获取用户名')
+        global _checkins
+        for chk in _checkins[prt.id_]:
+            if chk.uid == qqid:
+                await checkin.finish('已经签到过了')
+                break
+        try:
+            chk_rec = CheckInRecord(uid=qqid, name=chk_name, practice_id=prt.id_)
+            _checkins[prt.id_].append(chk_rec)
+            await checkin.send('成功签到')
+        except Exception as e:
+            sv.logger.exception(e)
