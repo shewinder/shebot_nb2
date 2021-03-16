@@ -11,7 +11,7 @@ from typing import List, Union
 import aiohttp
 import filetype
 import nonebot
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from hoshino import Event
 
@@ -72,4 +72,14 @@ async def get_img_from_url(url) -> Image.Image:
             cont = await resp.read()
             img = Image.open(BytesIO(cont))
             return img
+
+def add_text_to_img(img: Image.Image, text:str, textsize:int, font='msyh.ttf', textfill='black', position:tuple=(0,0)):
+    #textsize 文字大小
+    #font 字体，默认微软雅黑
+    #textfill 文字颜色，默认黑色
+    #position 文字偏移（0,0）位置，图片左上角为起点
+    img_font = ImageFont.truetype(font=font,size=textsize)
+    draw = ImageDraw.Draw(img)
+    draw.text(xy=position,text=text,font=img_font,fill=textfill)
+
 

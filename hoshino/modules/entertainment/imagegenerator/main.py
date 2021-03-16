@@ -35,7 +35,7 @@ async def img(bot, ev, msg, uid):
     if font_length[0]>5:
         draw.text((image_font_center[0]-font_length[0]/2, image_font_center[1]-font_length[1]/2),
                     msg, fill=color,font=ttfront)
-        img.save(image_path)
-        pic_path = path.join(path.dirname(__file__), f'image-generate/image/{uid}.jpg')
-        pic = R.image(pic_path)
-        await bot.send(ev, pic, at_sender=False)
+        #img.save(image_path)
+        #pic_path = path.join(path.dirname(__file__), f'image-generate/image/{uid}.jpg')
+        #pic = R.image(pic_path)
+        await bot.send(ev, R.image_from_memory(img), at_sender=False)
