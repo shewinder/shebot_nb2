@@ -34,7 +34,7 @@ class ResImg:
         else:
             return MessageSegment.text('【图片丢了】')
 
-    def open(self) -> Image:
+    def open(self) -> Image.Image:
         try:
             return Image.open(self.path)
         except FileNotFoundError:
