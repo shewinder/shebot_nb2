@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from os import path
 
@@ -10,7 +11,7 @@ from hoshino.permission import SUPERUSER
 from hoshino.util import DailyNumberLimiter, FreqLimiter
 from hoshino.util.sutil import download_async
 from hoshino.sres import Res as R
-from .api import *
+from .getsetu import *
 from .config import Config, plugin_config as pc
 from .data_source import load_config, save_config, SetuWarehouse, send_setus
 
@@ -43,7 +44,7 @@ _freq_limiter = FreqLimiter(5)
 
 sv = Service('色图')
 
-common_setu = sv.on_regex(r'^来?([1-5])?[份点张]?[涩色瑟]图(.{0,10})$', only_group=False)
+common_setu = sv.on_regex(r'^来?([1-5])?[份点张]?(.{1,10})?[涩色瑟]图(.{0,10})$', only_group=False)
 @common_setu.handle()
 async def send_common_setu(bot, event: Event, state: T_State):
     uid = event.user_id
@@ -70,12 +71,12 @@ async def send_common_setu(bot, event: Event, state: T_State):
     _num_limiter.increase(uid,num)
     _freq_limiter.start_cd(uid,num*5)
 
-    keyword = match.group(2).strip()
+    keyword = match.group(2) or match.group(3).strip() 
 
     if not conf.online_mode and not keyword:
         logger.info('发送本地涩图')
         _num_limiter.increase(uid)
-        pic = R.get_random_image('nr18_setu')
+        pic = R.get_random_img('nr18_setu').cqcode
         ret = await bot.send(event,  pic)
         msg_id = ret['message_id']
         if is_to_delete:
@@ -87,15 +88,22 @@ async def send_common_setu(bot, event: Event, state: T_State):
         await bot.send(event, '正在搜索，请稍等~')
         _freq_limiter.start_cd(uid, 30) # To relieve net pressure
         logger.info(f'含有关键字{keyword}，尝试搜索')
-        if not await SUPERUSER(bot, event): # SUPERUSER 搜图可以搜出r18, 给自己用
-            setus = await get_final_setu_async(search_path,keyword=keyword,r18=0)
-        else:
-            setus = await get_final_setu_async(search_path,keyword=keyword,r18=2,num=3) 
-        if not setus:
-            await bot.send(event, f'没有找到关键字{keyword}的涩图')
-            #_freq_limiter.start_cd(uid, 60)
-            logger.info(f'{uid} searched keyword {keyword} and returned no result')
-            return
+
+        if conf.search_strategy == 0: # 优先api
+            if await SUPERUSER(bot, event): # SUPERUSER 搜图可以搜出r18, 给自己用
+                setus = get_setu(r18=2, keyword=keyword, num=2) or search_in_database(keyword, 2, 2)
+            else:
+                setus = get_setu(r18=0, keyword=keyword, num=1) or search_in_database(keyword, 1, 0)
+        elif conf.search_strategy == 1:
+            if await SUPERUSER(bot, event): # SUPERUSER 搜图可以搜出r18, 给自己用
+                setus = search_in_database(keyword, 2, 2) or get_setu(r18=2, keyword=keyword, num=2)
+            else:
+                setus = search_in_database(keyword, 1, 0) or get_setu(r18=0, keyword=keyword, num=1)          
+
+            if not setus:
+                await bot.send(event, f'没有找到关键字{keyword}的涩图')
+                logger.info(f'{uid} searched keyword {keyword} and returned no result')
+                return
 
         for setu in setus:
             pic_path = await download_async(setu.url, search_path, str(setu.pid))
@@ -156,67 +164,4 @@ async def send_r18_setu(bot: Bot, event: Event, state: T_State):
     logger.info('发送r18图片')
     await send_setus(bot, event, 'r18_setu', setus, conf.with_url, is_to_delete)
 
-""" @sv.on_message()
-async def switch(bot, event):
-    global g_delete_groups
-    global g_config
-    global g_r18_groups
-    msg = event['raw_message']
-    gid = event.get('group_id')
-    if not check_priv(event, SUPERUSER):
-        return
 
-    elif msg == '本群涩图撤回':
-        g_delete_groups.add(gid)
-        g_config['delete_groups'] = list(g_delete_groups)
-        save_config(g_config)
-        await bot.send(event,'本群涩图撤回',at_sender=True)
-
-    elif msg == '本群涩图不撤回':
-        g_delete_groups.discard(gid)
-        g_config['delete_groups'] = list(g_delete_groups)
-        save_config(g_config)
-        await bot.send(event,'本群涩图不撤回',at_sender=True)
-
-    elif re.match(r'群(\d{5,12})?涩图撤回',msg):
-        gid = int(re.match(r'群(\d{5,12})?涩图撤回',msg).group(1))
-        g_delete_groups.add(gid)
-        g_config['delete_groups'] = list(g_delete_groups)
-        save_config(g_config)
-        await bot.send(event,f'群{gid}涩图撤回')
-
-    elif re.match(r'群(\d{5,12})?涩图不撤回',msg):
-        gid = int(re.match(r'群(\d{5,12})?涩图不撤回',msg).group(1))
-        g_delete_groups.discard(gid)
-        g_config['delete_groups'] = list(g_delete_groups)
-        save_config(g_config)
-        await bot.send(event,f'群{gid}涩图不撤回')
-
-    elif msg == '本群r18开启':
-        g_r18_groups.add(gid)
-        g_config['r18_groups'] = list(g_r18_groups)
-        save_config(g_config)
-        await bot.send(event,'本群r18开启',at_sender=True)
-
-    elif msg == '本群r18关闭':
-        g_r18_groups.discard(gid)
-        g_config['r18_groups'] = list(g_r18_groups)
-        save_config(g_config)
-        await bot.send(event,'本群r18关闭',at_sender=True)
-
-    elif re.match(r'群(\d{5,12})r18开启',msg):
-        gid = int(re.match(r'群(\d{5,12})r18开启',msg).group(1))
-        g_r18_groups.add(gid)
-        g_config['r18_groups'] = list(g_r18_groups)
-        save_config(g_config)
-        await bot.send(event,f'群{gid}r18开启')
-
-    elif re.match(r'群(\d{5,12})r18关闭',msg):
-        gid = int(re.match(r'群(\d{5,12})r18关闭',msg).group(1))
-        g_r18_groups.discard(gid)
-        g_config['r18_groups'] = list(g_r18_groups)
-        save_config(g_config)
-        await bot.send(event,f'群{gid}r18关闭')
-
-    else:
-        pass """

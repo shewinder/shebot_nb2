@@ -10,6 +10,7 @@ class Config(BaseConfig):
     delete_after: int = 30                                           # 色图撤回时间，单位为s
     r18_groups: Set[int] = []                                        # 允许r18的群聊列表
     delete_groups: Set[int] = []                                     # 涩图撤回的列表
+    search_strategy: int = 1                                         # 搜图策略 0 api优先 1 本地数据库优先
     exceed_notice: str = f'您今天已经冲过{daily_max_num}次了，请明早5点后再来！' 
     too_frequent_notic: str = f'您冲得太快了，请稍后再来~'
 

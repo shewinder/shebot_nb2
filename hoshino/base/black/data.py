@@ -28,3 +28,4 @@ if not os.path.exists(db_path):
     db.connect()
     db.create_tables([black])
     db.close()
+

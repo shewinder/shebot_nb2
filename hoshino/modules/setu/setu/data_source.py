@@ -1,7 +1,10 @@
 import asyncio
 import os
 import json
-from .api import get_final_setu
+
+from peewee import *
+
+from .getsetu import get_final_setu
 from queue import Queue
 
 from hoshino import MessageSegment
@@ -28,7 +31,7 @@ class SetuWarehouse:
     def keep_supply(self):
         while True:
             print('正在补充色图')
-            setus = get_final_setu(num=8,storePath=self.store_path,r18=self.r18)
+            setus = get_final_setu(num=8, save_dir=self.store_path, r18=self.r18)
             for setu in setus:
                 self.warehouse.put(setu)
                 print(f'补充一张色图，库存{self.count()}张\n')
@@ -66,7 +69,7 @@ from hoshino.sres import Res as R
 async def send_setus(bot,ctx,folder,setus,with_url=False,is_to_delete=False):
     reply = MessageSegment.text('')
     for setu in setus:
-        pic = R.image(f'{folder}/{setu.pid}')
+        pic = R.image(f'{folder}/{setu.url.split("/")[-1]}')
         reply += MessageSegment.text(f'{setu.title}\n画师：{setu.author}\npid:{setu.pid}')
         reply += pic
     ret = await bot.send(ctx, reply ,at_sender=False)
@@ -80,3 +83,4 @@ async def send_setus(bot,ctx,folder,setus,with_url=False,is_to_delete=False):
         self_id = ctx.self_id
         await asyncio.sleep(pc.config.delete_after)
         await bot.delete_msg(self_id=self_id, message_id=msg_id)
+
