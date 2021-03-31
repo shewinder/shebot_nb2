@@ -1,12 +1,12 @@
 {
   "apikey": "610940955e9e90fb1372a2",
-  "online_mode": true,
+  "online_mode": false,
   "with_url": false,
   "daily_max_num": 30,
   "delete_after": 30,
   "r18_groups": [],
   "delete_groups": [],
   "search_strategy": 1,
-  "exceed_notice": "您今天已经冲过30次了，请明早5点后再来！",
+  "exceed_notice": "您今天冲太多了，请明早5点后再来！",
   "too_frequent_notic": "您冲得太快了，请稍后再来~"
 }

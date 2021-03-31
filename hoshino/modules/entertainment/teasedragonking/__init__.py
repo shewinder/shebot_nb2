@@ -41,6 +41,7 @@ async def whois_dragonking(bot: Bot, event: GroupMessageEvent):
         dragon_nickname = talktive['current_talkative']['nickname']
     except:
         await dkg_query.finish('获取龙王失败')
-    icon = await R.image_from_url(f'http://q1.qlogo.cn/g?b=qq&nk={dragon_id}&s=160', cache=False)
+    icon = await R.img_from_url(f'http://q1.qlogo.cn/g?b=qq&nk={dragon_id}&s=160', cache=False)
+    ico = icon.cqcode
     reply = f'本群龙王是{dragon_nickname}{icon}'
     await bot.send(event, reply)
