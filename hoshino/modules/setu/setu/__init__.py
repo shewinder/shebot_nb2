@@ -44,7 +44,7 @@ _freq_limiter = FreqLimiter(5)
 
 sv = Service('色图')
 
-common_setu = sv.on_regex(r'^来?([1-5])?[份点张]?(.{1,10})?[涩色瑟]图(.{0,10})$', only_group=False)
+common_setu = sv.on_regex(r'^来?([1-3])?[份点张]?(.{1,10})?[涩色瑟]图(.{0,10})$', only_group=False)
 @common_setu.handle()
 async def send_common_setu(bot, event: Event, state: T_State):
     uid = event.user_id

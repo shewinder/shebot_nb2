@@ -14,7 +14,7 @@ from .config import plugin_config as pc
 
 class SetuWarehouse:
     def __init__(self,store_path,r18=0):
-        self.warehouse = Queue(4)
+        self.warehouse = Queue(5)
         self.r18 = r18
         if os.path.exists(store_path):
             self.store_path = store_path

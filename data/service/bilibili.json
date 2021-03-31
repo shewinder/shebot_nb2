@@ -1,0 +1,7 @@
+{
+  "name": "bilibili",
+  "enable_group": [],
+  "disable_group": [
+    1004941232
+  ]
+}

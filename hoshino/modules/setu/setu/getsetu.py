@@ -79,19 +79,19 @@ async def download_one(session: aiohttp.ClientSession, setu: Setu, save_dir, set
     except Exception as ex:
         print(ex)
 
-
-
 def get_final_setu(save_dir, num: int=1, r18: int=2, keyword: str=''):
     _pics = []
     setus = get_setu(r18, keyword, num)
     async def gather():
-        session = aiohttp.ClientSession()
-        tasks = []
-        for setu in setus:
-            task = asyncio.create_task(download_one(session, setu, save_dir, _pics))
-            tasks.append(task)
-        await asyncio.gather(*tasks)
-        await session.close()
+        try:
+            async with aiohttp.ClientSession() as session:
+                tasks = []
+                for setu in setus:
+                    task = asyncio.create_task(download_one(session, setu, save_dir, _pics))
+                    tasks.append(task)
+                await asyncio.gather(*tasks)
+        except Exception as e:
+            logger.exception(e)
     asyncio.run(gather())
     return _pics
  
