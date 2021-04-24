@@ -3,6 +3,8 @@ import os
 import json
 
 from peewee import *
+from PIL import Image
+from random import randint
 
 from .getsetu import get_final_setu
 from queue import Queue
@@ -83,4 +85,12 @@ async def send_setus(bot,ctx,folder,setus,with_url=False,is_to_delete=False):
         self_id = ctx.self_id
         await asyncio.sleep(pc.config.delete_after)
         await bot.delete_msg(self_id=self_id, message_id=msg_id)
+
+def anti_harmony(img: Image.Image) -> Image.Image:
+    img = img.convert('RGB')
+    W, H = img.size[0], img.size[1]
+    pos = randint(1, W - 1), randint(1, H - 1)
+    img.putpixel(pos,(255,255,200))
+    return img
+
 

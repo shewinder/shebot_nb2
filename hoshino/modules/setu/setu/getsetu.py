@@ -97,7 +97,7 @@ def get_final_setu(save_dir, num: int=1, r18: int=2, keyword: str=''):
  
 def search_in_database(keyword: str, num: int, r18: int):
     if r18 == 2:
-        sql = SQL('tags like ? or title like ?', params=[f'%{keyword}%',r18])
+        sql = SQL('tags like ? or title like ?', params=[f'%{keyword}%', f'%{keyword}%'])
     else:
         sql = SQL('(tags like ? or title like ?) and r18=?', params=[f'%{keyword}%',f'%{keyword}%',r18])
     logger.info(f'searching {keyword} in database')
@@ -112,7 +112,5 @@ def search_in_database(keyword: str, num: int, r18: int):
     except Exception as e:
         logger.exception(e)
         return None
-
-
 
 

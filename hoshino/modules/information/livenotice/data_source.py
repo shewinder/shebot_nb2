@@ -83,9 +83,6 @@ class Live:
         if not groups:
             sub.delete_instance()
         
-        
-
-
 class BiliBiliLive(Live):
     api_url = 'https://api.live.bilibili.com/room/v1/Room/get_info'
 
@@ -143,10 +140,9 @@ class BiliBiliLive(Live):
         # 根据直播时间检查所有直播间是否更新
         subs: List[SubscribedLive] = SubscribedLive.select().where(SubscribedLive.platform == 'bilibili')
         if not subs:
-            logger.info('检查直播： 当前未订阅直播')
+            logger.info('检查直播： 当前未订阅bilibili直播')
             return
         for sub in subs:
-            last_date = sub.date
             resp = await self._get_bilibili_live_info(sub.room_id, use_proxy=True)
             if not resp:
                 logger.warning(f'检查B站直播间{sub.room_id}出错')
@@ -157,7 +153,7 @@ class BiliBiliLive(Live):
             data = resp['data']
             # 刷新一次，防止多个任务同时推送
             sub = SubscribedLive.get_or_none(SubscribedLive.platform == 'bilibili', SubscribedLive.room_id == sub.room_id)
-            if last_date != data['live_time'] and data['live_status'] == 1:
+            if sub.date != data['live_time'] and data['live_status'] == 1:
                 logger.info(f'检测到B站直播间{sub.room_id}更新')
                 sub.date = data['live_time']
                 sub.save()
@@ -223,7 +219,7 @@ class DouyuLive(Live):
         # 根据直播时间检查所有直播间是否更新
         subs: List[SubscribedLive] = SubscribedLive.select().where(SubscribedLive.platform == 'douyu')
         if not subs:
-            logger.info('检查直播： 当前未订阅直播')
+            logger.info('检查直播： 当前未订阅douyu直播')
             return
         for sub in subs:
             last_date = sub.date
@@ -248,21 +244,3 @@ class DouyuLive(Live):
         data = await cls._get_douyu_live_info(room_id)
         return data 
         
-
-            
-
-            
-
-
-        
-        
-
-    
-
-
-
-
-        
-
-
-

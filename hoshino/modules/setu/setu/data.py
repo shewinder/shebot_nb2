@@ -19,3 +19,5 @@ class Setu(pw.Model):
 if not os.path.exists(db_path):
     if not Setu.table_exists():
         Setu.create_table()
+
+
