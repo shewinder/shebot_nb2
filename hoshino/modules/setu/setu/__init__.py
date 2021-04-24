@@ -106,9 +106,9 @@ async def send_common_setu(bot, event: Event, state: T_State):
                 return
 
         for setu in setus:
-            pic_path = await download_async(setu.url, search_path, str(setu.pid))
+            pic_path = await download_async(setu.url, search_path, setu.url.split('/')[-1])
             img = R.img(pic_path).open()
-            pic = R.image_from_memory(img)
+            pic = R.image_from_memory(anti_harmony(img))
             reply = MessageSegment.text(f'{setu.title}\n画师：{setu.author}\npid:{setu.pid}')
             reply += pic
             try:
