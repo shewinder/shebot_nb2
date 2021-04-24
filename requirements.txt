@@ -12,3 +12,6 @@ beautifulsoup4>=4.9.3
 feedparser>=6.0.2
 brotli>=1.0.9
 psutil>=5.8.0
+filetype>=1.0.7
+opencv-python>=4.5.1.48
+aiofiles>=0.6.0
