@@ -13,7 +13,8 @@ cache/
 logs
 static
 hoshino/service_config
-.db
+*.db
+*.gif
 
 
 # C extensions
