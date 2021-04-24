@@ -13,7 +13,7 @@ from hoshino.util.sutil import download_async
 from hoshino.sres import Res as R
 from .getsetu import *
 from .config import Config, plugin_config as pc
-from .data_source import load_config, save_config, SetuWarehouse, send_setus
+from .data_source import SetuWarehouse, send_setus, anti_harmony
 
 conf: Config = pc.config
 
@@ -107,7 +107,8 @@ async def send_common_setu(bot, event: Event, state: T_State):
 
         for setu in setus:
             pic_path = await download_async(setu.url, search_path, str(setu.pid))
-            pic = R.image(pic_path)
+            img = R.img(pic_path).open()
+            pic = R.image_from_memory(img)
             reply = MessageSegment.text(f'{setu.title}\n画师：{setu.author}\npid:{setu.pid}')
             reply += pic
             try:
