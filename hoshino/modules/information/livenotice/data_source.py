@@ -5,6 +5,7 @@ import abc
 from typing import List
 
 import aiohttp
+from nonebot.adapters.cqhttp.message import MessageSegment
 import peewee as pw
 import requests
 
@@ -53,13 +54,16 @@ class Live:
         raise NotImplementedError
 
     @staticmethod
-    async def notice(sub: SubscribedLive, title: str, url: str):
+    async def notice(sub: SubscribedLive, title: str, url: str, cover: MessageSegment=None):
         bot: Bot = get_bot_list()[0]
         groups = sub.groups.split(',')
         for gid in groups:
             gid = int(gid)
             try:
-                await bot.send_group_msg(group_id=gid, message=f'{sub.name}开播啦\n{title}\n{url}')
+                if cover:
+                    await bot.send_group_msg(group_id=gid, message=f'{sub.name}开播啦\n{title}\n{url}{cover}')
+                else:
+                    await bot.send_group_msg(group_id=gid, message=f'{sub.name}开播啦\n{title}\n{url}')
             except Exception as e:
                 logger.exception(e)
             await asyncio.sleep(0.5)
@@ -151,11 +155,16 @@ class BiliBiliLive(Live):
                 logger.warning(f'检查B站直播间{sub.room_id}: {resp["message"]}')
                 continue
             data = resp['data']
+            # 刷新一次，防止多个任务同时推送
+            sub = SubscribedLive.get_or_none(SubscribedLive.platform == 'bilibili', SubscribedLive.room_id == sub.room_id)
             if last_date != data['live_time'] and data['live_status'] == 1:
                 logger.info(f'检测到B站直播间{sub.room_id}更新')
                 sub.date = data['live_time']
                 sub.save()
-                await self.notice(sub, data['title'], f'https://live.bilibili.com/{sub.room_id}')
+                await self.notice(sub, 
+                                  data['title'], 
+                                  f'https://live.bilibili.com/{sub.room_id}', 
+                                  MessageSegment.image(data['user_cover']))
     
     @classmethod
     async def check_room_exists(cls, room_id: int) -> bool:
@@ -223,11 +232,16 @@ class DouyuLive(Live):
                 logger.warning(f'检查斗鱼直播间{sub.room_id}出错')
                 continue
             data = resp['data']
+            # 刷新一次，防止多个任务同时推送
+            sub = SubscribedLive.get_or_none(SubscribedLive.platform == 'douyu', SubscribedLive.room_id == sub.room_id)
             if last_date != data['start_time'] and data['room_status'] == '1':
                 logger.info(f'检测到斗鱼直播间{sub.room_id}更新')
                 sub.date = data['start_time']
                 sub.save()
-                await self.notice(sub, data['room_name'], f'https://www.douyu.com/{data["room_id"]}')
+                await self.notice(sub, 
+                                  data['room_name'], 
+                                  f'https://www.douyu.com/{data["room_id"]}', 
+                                  cover=MessageSegment.image(data['avatar']))
     
     @classmethod
     async def check_room_exists(cls, room_id: int) -> bool:
