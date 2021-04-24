@@ -3,7 +3,7 @@ import os
 import json
 
 from peewee import *
-from PIL import Image
+from PIL import Image, ImageFile
 from random import randint
 
 from .getsetu import get_final_setu
@@ -13,6 +13,7 @@ from hoshino import MessageSegment
 
 from .config import plugin_config as pc
 
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 class SetuWarehouse:
     def __init__(self,store_path,r18=0):
@@ -89,8 +90,10 @@ async def send_setus(bot,ctx,folder,setus,with_url=False,is_to_delete=False):
 def anti_harmony(img: Image.Image) -> Image.Image:
     #img = img.convert('RGB')
     W, H = img.size[0], img.size[1]
-    pos = randint(1, W - 1), randint(1, H - 1)
-    img.putpixel(pos,(255,255,200))
+    pos1 = 1,1
+    pos2 = W-1,H-1
+    img.putpixel(pos1,(255,255,200))
+    img.putpixel(pos2,(255,255,200))
     return img
 
 
