@@ -19,7 +19,8 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import time
 import os
-BASE_URL = "https://rsshub.akiraxie.me/"
+#BASE_URL = "https://rsshub.akiraxie.me/"
+BASE_URL = "https://81.70.165.122:1200/"
 
 
 

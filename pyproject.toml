@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "shebot_nb2"
+version = "0.1.0"
+description = ""
+authors = ["shewinder"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+peewee = "3.14.0"
+aiohttp = "3.7.3"
+zhconv = "1.4.1"
+requests = "2.25.1"
+nonebot-adapter-cqhttp = "2.0.0a11.post2"
+nonebot2 = "2.0.0a11"
+numpy = "1.20.1"
+pillow = "8.1.0"
+nonebot-plugin-apscheduler = "0.1.2"
+lxml = "4.6.2"
+beautifulsoup4 = "4.9.3"
+feedparser = "6.0.2"
+Brotli = "1.0.9"
+psutil = "5.8.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
