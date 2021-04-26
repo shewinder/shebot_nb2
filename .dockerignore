@@ -1,0 +1,14 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Repository-customized
+.idea
+.vscode
+*.bak
+.env.prod.example
+cache/
+logs
+*.db
+!setu.db
