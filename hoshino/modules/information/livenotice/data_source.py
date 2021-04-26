@@ -32,6 +32,7 @@ class SubscribedLive(pw.Model):
     name = pw.TextField()
     date = pw.TextField()
     groups = pw.TextField()
+    users = pw.TextField()
 
     class Meta:
         database = db
@@ -42,7 +43,7 @@ if not os.path.exists(db_path):
     db.create_tables([SubscribedLive])
     db.close()
 
-class Live:
+class BaseLive:
     @property
     def platform(self):
         raise NotImplementedError
@@ -57,8 +58,12 @@ class Live:
     async def notice(sub: SubscribedLive, title: str, url: str, cover: MessageSegment=None):
         bot: Bot = get_bot_list()[0]
         groups = sub.groups.split(',')
+        users = sub.users.split(',')
         for gid in groups:
-            gid = int(gid)
+            try:
+                gid = int(gid)
+            except:
+                continue
             try:
                 if cover:
                     await bot.send_group_msg(group_id=gid, message=f'{sub.name}开播啦\n{title}\n{url}{cover}')
@@ -67,10 +72,28 @@ class Live:
             except Exception as e:
                 logger.exception(e)
             await asyncio.sleep(0.5)
+        for uid in users:
+            try:
+                uid = int(uid)
+            except:
+                continue
+            try:
+                if cover:
+                    await bot.send_private_msg(user_id=uid, message=f'{sub.name}开播啦\n{title}\n{url}{cover}')
+                else:
+                    await bot.send_private_msg(user_id=uid, message=f'{sub.name}开播啦\n{title}\n{url}')
+            except Exception as e:
+                logger.exception(e)
+            await asyncio.sleep(0.5)
 
     @staticmethod
-    def get_group_subscrib(group_id: int) -> List[SubscribedLive]:
+    def get_group_subscribe(group_id: int) -> List[SubscribedLive]:
         sql = pw.SQL('groups like ?', params=[f'%{group_id}%'])
+        return SubscribedLive.select().where(sql)
+
+    @staticmethod
+    def get_user_subscribe(user_id: int) -> List[SubscribedLive]:
+        sql = pw.SQL('users like ?', params=[f'%{user_id}%'])
         return SubscribedLive.select().where(sql)
 
     @staticmethod
@@ -80,10 +103,54 @@ class Live:
             groups.remove(str(group_id))
             sub.groups = ','.join(groups)
             sub.save()
-        if not groups:
+        if not groups and not sub.users:
             sub.delete_instance()
-        
-class BiliBiliLive(Live):
+
+    @staticmethod
+    def delete_user_live(user_id: int, sub: SubscribedLive):
+        users: List[str] = sub.users.split(',')
+        if str(user_id) in users:
+            users.remove(str(user_id))
+            sub.users = ','.join(users)
+            sub.save()
+        if not users and not sub.groups:
+            sub.delete_instance()
+
+    @staticmethod
+    def add_group(group_id: int, platform: str, room_id: str):
+        defaults = {
+            'name': '',
+            'groups': '',
+            'users': '',
+            'date': ''
+        }
+        sub, created = SubscribedLive.get_or_create(platform = platform, room_id = room_id, defaults=defaults)
+        groups: List[str] = sub.groups.split(',')
+        groups.remove('')
+        if str(group_id) in groups:
+            raise ValueError('duplicated group')
+        groups.append(str(group_id))
+        sub.groups = ','.join(groups)
+        sub.save()
+
+    @staticmethod
+    def add_user(user_id: int, platform: str, room_id: str):
+        defaults = {
+            'name': '',
+            'groups': '',
+            'users': '',
+            'date': ''
+        }
+        sub, created = SubscribedLive.get_or_create(platform = platform, room_id = room_id, defaults=defaults)
+        users: List[str] = sub.users.split(',')
+        users.remove('')
+        if str(user_id) in users:
+            raise ValueError('duplicated user')
+        users.append(str(user_id))
+        sub.users = ','.join(users)
+        sub.save()
+
+class BiliBiliLive(BaseLive):
     api_url = 'https://api.live.bilibili.com/room/v1/Room/get_info'
 
     @property
@@ -170,7 +237,7 @@ class BiliBiliLive(Live):
                 return True
         return False
 
-class DouyuLive(Live):
+class DouyuLive(BaseLive):
     api_url = 'http://open.douyucdn.cn/api/RoomApi/room'
 
     @property

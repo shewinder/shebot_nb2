@@ -11,4 +11,4 @@ __pycache__/
 cache/
 logs
 *.db
-!setu.db
+/data
