@@ -305,15 +305,14 @@ class DouyuLive(BaseLive):
             logger.info('检查直播： 当前未订阅douyu直播')
             return
         for sub in subs:
-            last_date = sub.date
             resp = await self._get_douyu_live_info(sub.room_id, use_proxy=True)
             if not resp:
                 logger.warning(f'检查斗鱼直播间{sub.room_id}出错')
                 continue
             data = resp['data']
             # 刷新一次，防止多个任务同时推送
-            sub = SubscribedLive.get_or_none(SubscribedLive.platform == 'douyu', SubscribedLive.room_id == sub.room_id)
-            if last_date != data['start_time'] and data['room_status'] == '1':
+            sub: SubscribedLive = SubscribedLive.get_or_none(SubscribedLive.platform == 'douyu', SubscribedLive.room_id == sub.room_id)
+            if sub.date != data['start_time'] and data['room_status'] == '1':
                 logger.info(f'检测到斗鱼直播间{sub.room_id}更新')
                 sub.date = data['start_time']
                 sub.save()
