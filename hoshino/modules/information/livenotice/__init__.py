@@ -21,7 +21,7 @@ async def _(bot: Bot, event: Event, state: T_State):
         platform = platforms[int(state['choice'])]
         state['platform'] = platform
     except:
-        add_live.reject('输入有误')
+        await add_live.reject('输入有误, 请重新输入')
 
 @add_live.got('room_id', prompt='请发送房间号')
 async def _(bot: Bot, event: Event, state: T_State):
@@ -29,7 +29,7 @@ async def _(bot: Bot, event: Event, state: T_State):
     try:
         room_id = int(state['room_id'])
     except:
-        add_live.reject('输入有误')
+        await add_live.reject('输入有误, 请重新输入')
 
     if not await eval(platform).check_room_exists(room_id):
         await add_live.finish('未查询到该房间')
