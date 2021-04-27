@@ -39,25 +39,23 @@ async def _(bot: Bot, event: Event, state: T_State):
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     platform = state['platform']
     room_id = state['room_id']
-    name = await eval(platform).get_name_from_room(room_id)
     gid = event.group_id
     try:
-        BaseLive.add_group(gid, platform, room_id)
-        await add_live.finish(f'成功订阅{name}的直播间')
+        sub = await eval(platform).add_group(gid, platform, room_id)
+        await add_live.finish(f'成功订阅{sub.name}的直播间')
     except ValueError as e:
-        await add_live.finish(e)
+        await add_live.finish(str(e))
 
 @add_live.handle()
 async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
     platform = state['platform']
     room_id = state['room_id']
-    name = await eval(platform).get_name_from_room(room_id)
     uid = event.user_id
     try:
-        BaseLive.add_user(uid, platform, room_id)
-        await add_live.finish(f'成功订阅{name}的直播间')
+        sub = await eval(platform).add_user(uid, platform, room_id)
+        await add_live.finish(f'成功订阅{sub.name}的直播间')
     except ValueError as e:
-        await add_live.finish(e)
+        await add_live.finish(str(e))
 
 
 del_live = sv.on_command('del_live', aliases={'删除直播', '删除订阅'}, only_group=False)

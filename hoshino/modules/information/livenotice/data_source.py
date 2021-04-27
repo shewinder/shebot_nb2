@@ -116,40 +116,6 @@ class BaseLive:
         if not users and not sub.groups:
             sub.delete_instance()
 
-    @staticmethod
-    def add_group(group_id: int, platform: str, room_id: str):
-        defaults = {
-            'name': '',
-            'groups': '',
-            'users': '',
-            'date': ''
-        }
-        sub, created = SubscribedLive.get_or_create(platform = platform, room_id = room_id, defaults=defaults)
-        groups: List[str] = sub.groups.split(',')
-        groups.remove('')
-        if str(group_id) in groups:
-            raise ValueError('duplicated group')
-        groups.append(str(group_id))
-        sub.groups = ','.join(groups)
-        sub.save()
-
-    @staticmethod
-    def add_user(user_id: int, platform: str, room_id: str):
-        defaults = {
-            'name': '',
-            'groups': '',
-            'users': '',
-            'date': ''
-        }
-        sub, created = SubscribedLive.get_or_create(platform = platform, room_id = room_id, defaults=defaults)
-        users: List[str] = sub.users.split(',')
-        users.remove('')
-        if str(user_id) in users:
-            raise ValueError('duplicated user')
-        users.append(str(user_id))
-        sub.users = ','.join(users)
-        sub.save()
-
 class BiliBiliLive(BaseLive):
     api_url = 'https://api.live.bilibili.com/room/v1/Room/get_info'
 
@@ -158,7 +124,7 @@ class BiliBiliLive(BaseLive):
         return 'bilibili'
     
     @classmethod
-    async def get_name_from_room(cls, room_id: int) -> dict:
+    async def get_name_from_room(cls, room_id: int) -> str:
         headers = {
             'Referer': 'https://link.bilibili.com/p/center/index',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36'
@@ -229,6 +195,56 @@ class BiliBiliLive(BaseLive):
                                   f'https://live.bilibili.com/{sub.room_id}', 
                                   MessageSegment.image(data['user_cover']))
     
+    @classmethod
+    async def add_group(cls, group_id: int, platform: str, room_id: str):
+        sub = SubscribedLive.get_or_none(platform = platform, room_id = room_id)
+        if sub:
+            groups: List[str] = sub.groups.split(',')
+            if str(group_id) in groups:
+                raise ValueError('重复订阅')
+            groups.append(str(group_id))
+            sub.groups = ','.join(groups)
+            sub.save()
+        else:
+            if not await cls.check_room_exists(room_id):
+                raise ValueError('不存在的直播间')
+            name = await cls.get_name_from_room(room_id)
+            try:
+                sub = SubscribedLive.create(platform = platform,
+                                            room_id = room_id,
+                                            name = name,
+                                            groups = str(group_id),
+                                            users = '',
+                                            date = '')
+                return sub
+            except Exception as e:
+                raise ValueError(e)
+
+    @classmethod
+    async def add_user(cls, user_id: int, platform: str, room_id: str):
+        sub = SubscribedLive.get_or_none(platform = platform, room_id = room_id)
+        if sub:
+            users: List[str] = sub.users.split(',')
+            if str(user_id) in users:
+                raise ValueError('重复订阅')
+            users.append(str(user_id))
+            sub.users = ','.join(users)
+            sub.save()
+        else:
+            if not await cls.check_room_exists(room_id):
+                raise ValueError('不存在的直播间')
+            name = await cls.get_name_from_room(room_id)
+            try:
+                sub = SubscribedLive.create(platform = platform,
+                                            room_id = room_id,
+                                            name = name,
+                                            users = str(user_id),
+                                            groups = '',
+                                            date = '')
+                return sub
+            except Exception as e:
+                raise ValueError(e)
+
     @classmethod
     async def check_room_exists(cls, room_id: int) -> bool:
         resp = await cls._get_bilibili_live_info(room_id)
@@ -310,4 +326,54 @@ class DouyuLive(BaseLive):
     async def check_room_exists(cls, room_id: int) -> bool:
         data = await cls._get_douyu_live_info(room_id)
         return data 
+
+    @classmethod
+    async def add_group(cls, group_id: int, platform: str, room_id: str):
+        sub = SubscribedLive.get_or_none(platform = platform, room_id = room_id)
+        if sub:
+            groups: List[str] = sub.groups.split(',')
+            if str(group_id) in groups:
+                raise ValueError('重复订阅')
+            groups.append(str(group_id))
+            sub.groups = ','.join(groups)
+            sub.save()
+        else:
+            if not await cls.check_room_exists(room_id):
+                raise ValueError('不存在的直播间')
+            name = await cls.get_name_from_room(room_id)
+            try:
+                sub = SubscribedLive.create(platform = platform,
+                                            room_id = room_id,
+                                            name = name,
+                                            groups = str(group_id),
+                                            users = '',
+                                            date = '')
+                return sub
+            except Exception as e:
+                raise ValueError(e)
+
+    @classmethod
+    async def add_user(cls, user_id: int, platform: str, room_id: str):
+        sub = SubscribedLive.get_or_none(platform = platform, room_id = room_id)
+        if sub:
+            users: List[str] = sub.users.split(',')
+            if str(user_id) in users:
+                raise ValueError('重复订阅')
+            users.append(str(user_id))
+            sub.users = ','.join(users)
+            sub.save()
+        else:
+            if not await cls.check_room_exists(room_id):
+                raise ValueError('不存在的直播间')
+            name = await cls.get_name_from_room(room_id)
+            try:
+                sub = SubscribedLive.create(platform = platform,
+                                            room_id = room_id,
+                                            name = name,
+                                            users = str(user_id),
+                                            groups = '',
+                                            date = '')
+                return sub
+            except Exception as e:
+                raise ValueError(e)
         
