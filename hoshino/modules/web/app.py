@@ -21,7 +21,7 @@ async def root():
 @app.middleware('http')
 async def _(req: Request, call_next: Callable):
     path = req.scope['path']
-    if path == '/login': # 访问登录  路由不拦截
+    if path == '/api/login': # 访问登录  路由不拦截
         resp = await call_next(req)
         return resp
     else:

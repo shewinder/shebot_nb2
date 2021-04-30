@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from hoshino.modules.web.util.util import create_token
 
-router = APIRouter()
+router = APIRouter(prefix='/api')
 
 class User(BaseModel):
     username: str
