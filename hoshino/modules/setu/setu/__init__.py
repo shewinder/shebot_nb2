@@ -128,9 +128,10 @@ r18_setu = sv.on_command('就这不够色', only_group=False)
 @r18_setu.handle()
 async def send_r18_setu(bot: Bot, event: Event, state: T_State):
     uid = event.get_user_id
-    if not isinstance(event, GroupMessageEvent):
-        gid = None
-    gid = event.group_id
+    if isinstance(event, GroupMessageEvent):
+        gid = event.group_id
+    else:
+        gid = 0
     is_to_delete = True if gid in conf.delete_groups else False
     self_id = event.self_id
 
