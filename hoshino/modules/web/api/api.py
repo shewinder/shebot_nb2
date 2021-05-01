@@ -17,7 +17,7 @@ from loguru import logger
 
 import os
 
-router = APIRouter()
+router = APIRouter(prefix='/api')
 
 @router.get('/get_group_list')
 async def get_group_list():

@@ -108,7 +108,7 @@ async def _(bot: Bot, event: PrivateMessageEvent):
     await bot.send(event, '您的订阅如下\n' + '\n'.join(lives))   
 
 
-@scheduled_job('interval', seconds=5, id='B站直播', max_instances=10)
+@scheduled_job('interval', seconds=5, id='B站直播', max_instances=30)
 async def _():
     sv.logger.info('start checking live')
     for v in platforms.values():

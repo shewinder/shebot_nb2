@@ -127,16 +127,18 @@ async def send_common_setu(bot, event: Event, state: T_State):
 r18_setu = sv.on_command('就这不够色', only_group=False)
 @r18_setu.handle()
 async def send_r18_setu(bot: Bot, event: Event, state: T_State):
+
     uid = event.get_user_id
     if isinstance(event, GroupMessageEvent):
         gid = event.group_id
     else:
         gid = 0
+
     is_to_delete = True if gid in conf.delete_groups else False
     self_id = event.self_id
 
     if gid not in conf.r18_groups and gid!= 0:
-        await bot.send(event,'本群未开启r18色图')
+        await bot.send(event, '本群未开启r18色图')
         return
 
     if not _num_limiter.check(uid):
