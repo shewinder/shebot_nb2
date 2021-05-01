@@ -1,7 +1,7 @@
 import aiohttp
 
 async def detect_img_url(url: str):
-    api_url = 'http://81.70.165.122:9051/nsfw'
+    api_url = 'http://api.shewinder.win/nsfw'
     async with aiohttp.ClientSession() as session:
         params = {'imgUrl': url}
         async with session.get(api_url, params=params) as resp:
