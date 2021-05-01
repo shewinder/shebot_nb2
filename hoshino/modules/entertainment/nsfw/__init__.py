@@ -1,4 +1,5 @@
 import random
+from loguru import logger
 
 from nonebot.typing import T_State
 from hoshino import Service, Bot, Event
@@ -28,7 +29,7 @@ async def _(bot:Bot, event: Event, state: T_State):
     await detect.send('\n'.join(reply))
 
 sv1 = Service('nsfw-for-fun')
-fun = sv.on_message()
+fun = sv1.on_message()
 replys = ['还有吗？多来点', '就这？', '多发点，我朋友爱看', '摩多摩多']
 @fun.handle()
 async def _(bot:Bot, event: Event):
@@ -38,7 +39,10 @@ async def _(bot:Bot, event: Event):
     url = urls[0]
     rst = await detect_img_url(url)
     hentai = rst['hentai']
-    if hentai > 0.65:
-        if random.random() < 0.1:
+    sv1.logger.info(f'hentai: {hentai}')
+    if hentai > 0.5:
+        rand = random.random()
+        sv1.logger.info(f'nsfw for fun rand {rand}')
+        if rand < 0.4:
             await fun.send(random.choice(replys))
 
