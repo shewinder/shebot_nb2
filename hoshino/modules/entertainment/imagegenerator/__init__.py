@@ -24,12 +24,15 @@ async def switch_img(bot: Bot, event: GroupMessageEvent):
 gen = sv.on_regex('(.{1,15})\.jpg')
 @gen.handle()
 async def generate_img(bot: Bot, event: GroupMessageEvent, state: T_State):
+    m = str(event.get_message())
+    if len(m) > 20:
+        return
     match = state['match']
     msg = match.group(1)
     uid = event.user_id
     await main.img(bot, event, msg, uid)
 
-help = sv.on_command('help', aliases={'表情包帮助','imghelp'})   
+help = sv.on_command('img_help', aliases={'表情包帮助','imghelp'})   
 @help.handle()
 async def imgen_help(bot: Bot, event: GroupMessageEvent):
     msg = '''
