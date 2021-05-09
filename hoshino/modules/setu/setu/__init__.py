@@ -128,6 +128,8 @@ r18_setu = sv.on_command('就这不够色', only_group=False)
 @r18_setu.handle()
 async def send_r18_setu(bot: Bot, event: Event, state: T_State):
     uid = event.get_user_id()
+    if isinstance(event, GroupMessageEvent):
+        gid = ev
     gid = event.group_id
     if not isinstance(event, GroupMessageEvent):
         gid = 0
