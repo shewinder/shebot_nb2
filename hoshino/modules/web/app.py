@@ -13,9 +13,6 @@ from hoshino.modules.web.api import login
 app: FastAPI = nonebot.get_app()
 app.include_router(api.router)
 app.include_router(login.router)
-@app.get("/")
-async def root():
-    return {"message": "Hello Bigger Applications!"}
 
 # 设置拦截
 @app.middleware('http')
