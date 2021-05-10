@@ -15,7 +15,6 @@ sv = Service('入群欢迎')
 set_greet = sv.on_command('设置入群欢迎')
 @set_greet.got('greet', prompt='请输入欢迎词')
 async def set_greet(bot: "Bot", event: "Event", state: T_State):
-    await R.save_image(event)
     greet_word = state['greet']
     global greetings
     gid = event.group_id
@@ -24,15 +23,17 @@ async def set_greet(bot: "Bot", event: "Event", state: T_State):
     await bot.send(event, '设置成功', at_sender=True)
         
 greet = sv.on_notice('group_increase')
+@greet.handle()
 async def greet(bot: "Bot", event: "GroupIncreaseNoticeEvent"):
     gid = event.group_id
     newer_id = event.user_id
-    pic = R.get_random_img('入群欢迎').cqcode
+    pic = R.get_random_img('nr18_setu').cqcode
     greet_word = greetings.get(str(gid), MessageSegment.text('欢迎新朋友~收下这份涩图吧')+pic)
     greet_word = MessageSegment.at(newer_id) + greet_word
     await bot.send(event, greet_word)
 
 leave = sv.on_notice('group_decrease')
+@leave.handle()
 async def _(bot: "Bot", event: "GroupDecreaseNoticeEvent"):
     id = event.user_id
     await leave.send(f'{id}跑了')
