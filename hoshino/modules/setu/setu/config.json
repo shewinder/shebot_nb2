@@ -5,7 +5,8 @@
   "daily_max_num": 30,
   "delete_after": 30,
   "r18_groups": [
-    812806104
+    812806104,
+    942908552
   ],
   "delete_groups": [],
   "search_strategy": 1,

@@ -39,10 +39,15 @@ async def _(bot:Bot, event: Event):
     url = urls[0]
     rst = await detect_img_url(url)
     hentai = rst['hentai']
+    porn = rst['porn']
     sv1.logger.info(f'hentai: {hentai}')
     if hentai > 0.5:
         rand = random.random()
         sv1.logger.info(f'nsfw for fun rand {rand}')
         if rand < 0.4:
             await fun.send(random.choice(replys))
+    if porn > 0.8:
+        rand = random.random()
+        if rand < 0.3:
+            await fun.send('来点二次元')
 

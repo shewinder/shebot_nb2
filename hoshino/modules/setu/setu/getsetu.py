@@ -70,7 +70,8 @@ async def download_one(session: aiohttp.ClientSession, setu: Setu, save_dir, set
                 elif r18==1:
                     img = Image.open(BytesIO(content))
                     img = img.convert('RGB')
-                    img = img.transpose(Image.ROTATE_90)
+                    #img = img.transpose(Image.ROTATE_90)
+                    img = anti_harmony(img)
                     out = BytesIO()
                     img.save(out,format='JPEG')
                     f.write(out.getvalue())
@@ -112,5 +113,14 @@ def search_in_database(keyword: str, num: int, r18: int):
     except Exception as e:
         logger.exception(e)
         return None
+
+def anti_harmony(img: Image.Image) -> Image.Image:
+    #img = img.convert('RGB')
+    W, H = img.size[0], img.size[1]
+    pos1 = 1,1
+    pos2 = W-1,H-1
+    img.putpixel(pos1,(255,255,200))
+    img.putpixel(pos2,(255,255,200))
+    return img
 
 

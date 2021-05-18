@@ -1,7 +1,7 @@
 import os
 
 from nonebot.adapters.cqhttp import GroupIncreaseNoticeEvent, GroupDecreaseNoticeEvent
-from nonebot.adapters.cqhttp.message import MessageSegment
+from nonebot.adapters.cqhttp.message import MessageSegment, Message
 from nonebot.typing import T_State
 
 from hoshino import Service, Bot, Event
@@ -28,7 +28,7 @@ async def greet(bot: "Bot", event: "GroupIncreaseNoticeEvent"):
     gid = event.group_id
     newer_id = event.user_id
     pic = R.get_random_img('nr18_setu').cqcode
-    greet_word = greetings.get(str(gid), MessageSegment.text('欢迎新朋友~收下这份涩图吧')+pic)
+    greet_word = greetings.get(str(gid), MessageSegment.text('欢迎新朋友~收下这份涩图吧')+Message(pic))
     greet_word = MessageSegment.at(newer_id) + greet_word
     await bot.send(event, greet_word)
 

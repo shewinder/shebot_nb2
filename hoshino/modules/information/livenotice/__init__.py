@@ -94,7 +94,7 @@ async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
     BaseLive.delete_user_live(event.user_id, sub)
     await bot.send(event, f'已经删除{sub.name}的直播订阅')
 
-show_live = sv.on_command('show_live', aliases={'查看直播订阅', '查看直播', '查看订阅', '看看订阅'}, only_group=False)
+show_live = sv.on_command('show_live', aliases={'查看直播订阅', '查看直播', '看看订阅'}, only_group=False)
 @show_live.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
     subs = BaseLive.get_group_subscribe(event.group_id)

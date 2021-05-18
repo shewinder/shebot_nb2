@@ -13,7 +13,7 @@ from hoshino.util.sutil import download_async
 from hoshino.sres import Res as R
 from .getsetu import *
 from .config import Config, plugin_config as pc
-from .data_source import SetuWarehouse, send_setus, anti_harmony
+from .data_source import SetuWarehouse, send_setus
 
 conf: Config = pc.config
 
