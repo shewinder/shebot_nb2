@@ -14,7 +14,7 @@ logs
 static
 hoshino/service_config
 *.db
-*.gif
+output.gif
 
 
 # C extensions
