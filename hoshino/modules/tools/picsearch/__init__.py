@@ -28,6 +28,7 @@ async def _(bot: "Bot", event: "Event", state: T_State):
     url = urls[0] 
     await bot.send(event, '正在搜索，请稍后~')
     results = get_saucenao_results(url)
+    results = results[0:3] if len(results) >= 3 else results
     if results:
         reply = '以下结果来自souceNao\n'
         for r in results:
@@ -37,6 +38,8 @@ async def _(bot: "Bot", event: "Event", state: T_State):
             if isinstance(r.data, TwitterData):
                 reply += await twitter_format(r)
         await bot.send(event, reply)
+    else:
+        await bot.send(event, '没有找到呢~')
 
 search_anime = sv.on_command('search anime', aliases={'搜番', '找番'}, only_group= False)
 
@@ -63,3 +66,5 @@ async def _(bot: "Bot", event: "Event", state: T_State):
         for r in results:
             reply += await tracemoe_format(r) + '\n\n'
         await bot.send(event, reply)
+    else:
+        await bot.send(event, '没有找到呢~')

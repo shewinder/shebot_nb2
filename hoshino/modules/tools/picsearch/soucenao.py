@@ -27,7 +27,7 @@ def get_saucenao_results(pic_url):
         for i in results:
             try:
                 r = SoucenaoResult(**i)
-                if r.header.similarity < 50:
+                if r.header.similarity < 70:
                     continue
                 res_list.append(r)
             except ValidationError:
@@ -62,8 +62,7 @@ class SoucenaoResult(BaseModel):
 async def pixiv_format(r: SoucenaoResult):
     img = await R.img_from_url(r.header.thumbnail)
     img = img.cqcode
-    return r.header.similarity \
-        + img \
+    return  img + f'{r.header.similarity}' \
         + f'标题: {r.data.title}\n' \
         + f'pid: {r.data.pixiv_id}\n' \
         + f'作者: {r.data.member_name}\n' \
@@ -72,8 +71,7 @@ async def pixiv_format(r: SoucenaoResult):
 async def twitter_format(r: SoucenaoResult):
     img = await R.img_from_url(r.header.thumbnail)
     img = img.cqcode
-    return r.header.similarity \
-        + img \
-        + f'用户id: {r.data.member_id}\n' \
-        + f'用户名: {r.data.member_name}\n' \
+    return  img + f'{r.header.similarity}' \
+        + f'tweet_id: {r.data.tweet_id}\n' \
+        + f'twitter_user_id: {r.data.twitter_user_id}\n' \
         + f'链接： {r.data.ext_urls[0]}'
