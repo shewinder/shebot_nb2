@@ -1,7 +1,7 @@
 from hoshino import Service, Event, Bot, Message
 import random
 sv = Service('chooseone')
-co = sv.on_command('选择', only_group=False, priority=2)
+co = sv.on_command('选择', only_group=False)
 
 
 @co.handle()
