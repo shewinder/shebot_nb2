@@ -1,40 +1,47 @@
-import requests
+from typing import List, Optional, Union
+
+import aiohttp
 from pydantic import BaseModel, ValidationError
 
 class TracemoeResult(BaseModel):
-    filename: str
-    episode: int
+    filename: Optional[str]
+    episode: Optional[int]
     similarity: float # 0.xxxx
-    anilist_id: int
-    anime: str
-    at: float
+    anilist_id: Optional[int]
+    anime: Optional[str]
+    at: Optional[float]
     is_adult: bool
-    mal_id: int
-    season: str
-    title: str
-    title_chinese: str
-    title_english: str
-    title_native: str
-    title_romaji: str
-    tokenthumb: str
+    mal_id: Optional[int]
+    season: Optional[str]
+    title: Optional[str]
+    title_chinese: Optional[str]
+    title_english: Optional[str]
+    title_native: Optional[str]
+    title_romaji: Optional[str]
+    tokenthumb: Optional[str]
 
-def get_tracemoe_results(pic_url):
+async def get_tracemoe_results(pic_url, min_simirality):
+    """
+    min_simirality 0-1
+    """
     url = 'https://trace.moe/api/search'
     params = {
         'url' : pic_url
     }
-    res_list = []
-    with requests.get(url,params) as resp:
-        try:
-            results = resp.json()['docs']
-        except:
-            return []
-        for i in results:
-            r = TracemoeResult(**i)
-            if r.similarity < 0.5:
-                continue
-            res_list.append(r)
-        return res_list
+    res_list: List[TracemoeResult] = []
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params) as resp:
+            try:
+                results = await resp.json()
+                results = results['docs']
+            except:
+                return []
+            for i in results:
+                r = TracemoeResult(**i)
+                if r.similarity < min_simirality:
+                    continue
+                res_list.append(r)
+            return res_list
 
 async def tracemoe_format(r: TracemoeResult):
     reply = [

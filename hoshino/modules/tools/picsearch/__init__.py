@@ -27,7 +27,7 @@ async def _(bot: "Bot", event: "Event", state: T_State):
 
     url = urls[0] 
     await bot.send(event, '正在搜索，请稍后~')
-    results = get_saucenao_results(url)
+    results = await get_saucenao_results(url)
     results = results[0:3] if len(results) >= 3 else results
     if results:
         reply = '以下结果来自souceNao\n'
@@ -35,11 +35,21 @@ async def _(bot: "Bot", event: "Event", state: T_State):
             if isinstance(r.data, PixivData):
                 # pixiv结果
                 reply += await pixiv_format(r)
-            if isinstance(r.data, TwitterData):
+            elif isinstance(r.data, TwitterData):
                 reply += await twitter_format(r)
-        await bot.send(event, reply)
-    else:
-        await bot.send(event, '没有找到呢~')
+            elif isinstance(r.data, DanbooruData):
+                reply += await danbooru_format(r)
+        await search_pic.finish(reply)
+    # 自动转为搜索番剧模式
+    results = await get_tracemoe_results(url, 0.9)
+    if results:
+        reply = '以下结果来自tracemoe\n\n'
+        results = results[0:3] if len(results) >= 3 else results
+        for r in results:
+            reply += await tracemoe_format(r) + '\n\n'
+        await search_pic.finish(reply)
+    # 都没有结果
+    await bot.send(event, '没找到结果哦')
 
 search_anime = sv.on_command('search anime', aliases={'搜番', '找番'}, only_group= False)
 
@@ -49,7 +59,7 @@ async def _(bot: "Bot", event: "Event", state: T_State):
     if urls:
         state['url'] = urls[0]
 
-@search_anime.got('url', prompt='请发送图片')
+@search_anime.got('url', prompt='请发送截图, 注意裁剪截图黑边以获得更高准确率')
 async def _(bot: "Bot", event: "Event", state: T_State):
     if state['url'] == '取消':
         await search_anime.finish('本次搜番已经取消')
@@ -59,7 +69,7 @@ async def _(bot: "Bot", event: "Event", state: T_State):
 
     url = urls[0]
     await bot.send(event, '正在搜索，请稍后~')
-    results = get_tracemoe_results(url)
+    results = await get_tracemoe_results(url, 0.8)
     if results:
         reply = '以下结果来自tracemoe\n\n'
         results = results[0:3] if len(results) >= 3 else results
