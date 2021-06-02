@@ -58,7 +58,7 @@ async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
         await add_live.finish(str(e))
 
 
-del_live = sv.on_command('del_live', aliases={'删除直播', '删除订阅'}, only_group=False)
+del_live = sv.on_command('del_live', aliases={'删除直播', '删除直播订阅'}, only_group=False)
 
 @del_live.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):

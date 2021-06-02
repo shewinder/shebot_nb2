@@ -41,18 +41,15 @@ class BaseInfoChecker:
         # 获取数据,插件应实现此抽象基类
         raise NotImplementedError
 
-    @staticmethod
-    def get_group_subs(group_id: int) -> List[SubscribeRec]:
-        sql = pw.SQL('groups like ?', params=[f'%{group_id}%'])
-        return SubscribeRec.select().where(sql)
+    def get_group_subs(self, group_id: int) -> List[SubscribeRec]:
+        return SubscribeRec.select().where((SubscribeRec.groups.contains(str(group_id))) 
+            & (SubscribeRec.checker == self.__class__.__name__))
 
-    @staticmethod
-    def get_user_subs(user_id: int) -> List[SubscribeRec]:
-        sql = pw.SQL('users like ?', params=[f'%{user_id}%'])
-        return SubscribeRec.select().where(sql)
+    def get_user_subs(self, user_id: int) -> List[SubscribeRec]:
+        return SubscribeRec.select().where((SubscribeRec.users.contains(str(user_id))) 
+            & (SubscribeRec.checker == self.__class__.__name__))
 
-    @staticmethod
-    def delete_group_sub(group_id: int, sub: SubscribeRec):
+    def delete_group_sub(self, group_id: int, sub: SubscribeRec):
         groups: List[str] = sub.groups.split(',')
         if str(group_id) in groups:
             groups.remove(str(group_id))
@@ -61,8 +58,7 @@ class BaseInfoChecker:
         if not groups and not sub.users:
             sub.delete_instance()
 
-    @staticmethod
-    def delete_user_sub(user_id: int, sub: SubscribeRec):
+    def delete_user_sub(self, user_id: int, sub: SubscribeRec):
         users: List[str] = sub.users.split(',')
         if str(user_id) in users:
             users.remove(str(user_id))

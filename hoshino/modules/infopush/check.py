@@ -24,15 +24,15 @@ for module_name in os.listdir(checker_dir):
     except ImportError:
         logger.error(f'error occured when importing {module_name}')
         raise
-
-@scheduled_job('interval', minutes=3, id='信息推送', max_instances=3)
+@scheduled_job('interval', seconds=10, id='信息推送', max_instances=3)
+#@scheduled_job('interval', minutes=3, id='信息推送', max_instances=3)
 async def _():
     logger.info('start checking')
     subs: List[SubscribeRec] = SubscribeRec.select()
     for sub in subs:
         logger.info(f'checking {sub.remark}')
         for m in modules:
-            if getattr(m, sub.checker):
+            if hasattr(m, sub.checker):
                 checker = getattr(m, sub.checker)()
                 await checker.check_and_notice(sub)
     logger.info('checking complete') 

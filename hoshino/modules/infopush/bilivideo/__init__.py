@@ -89,7 +89,7 @@ async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
         choice = int(state['choice'])
         sub: SubscribeRec = state['subs'][choice]
     except:
-        del_video.reject('输入有误')
+        await del_video.finish('输入有误')
     bv_checker.delete_user_sub(event.user_id, sub)
     await bot.send(event, f'已经删除{sub.remark}的投稿订阅')
 
