@@ -157,7 +157,8 @@ class BiliBiliLive(BaseLive):
         params = {
             'room_id': room_id
         }
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             try:
                 async with session.get(cls.api_url, headers=headers, params=params, proxy=proxy) as resp:
                     if resp.status == 200:
@@ -266,7 +267,8 @@ class DouyuLive(BaseLive):
             'Referer': f'https://www.douyu.com/{room_id}',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36'
         }
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             try:
                 async with session.get(f'{cls.api_url}/{room_id}', headers=headers) as resp:
                     if resp.status == 200:
@@ -286,7 +288,8 @@ class DouyuLive(BaseLive):
             'Referer': f'https://www.douyu.com/{room_id}',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36'
         }
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             try:
                 async with session.get(f'{cls.api_url}/{room_id}', headers=headers, proxy=proxy) as resp:
                     if resp.status == 200:

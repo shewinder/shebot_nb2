@@ -15,13 +15,14 @@ class Dynamic(InfoData):
 class BiliDynamicChecker(BaseInfoChecker):
     def notice_format(self, sub: SubscribeRec, data: Dynamic):
         imgs = [MessageSegment.image(img) for img in data.imgs]
-        return Message(f'{sub.remark}更新啦！\n{data.content}').extend(imgs)
-
+        return Message(f'{sub.remark}更新啦！\n{data.content}') \
+              .extend(imgs) \
+              .append(MessageSegment.text(data.portal))
     async def get_data(self, url: str) -> Dynamic:
         def _get_cont_and_imgs(card: str):
             try:
                 c = VideoCard.parse_raw(card)
-                return f'{c.title}\n{c.desc}', [c.pic]
+                return f'标题：\n{c.title}\n视频简介{c.desc}', [c.pic]
             except ValidationError:
                 pass
             try:
@@ -31,7 +32,7 @@ class BiliDynamicChecker(BaseInfoChecker):
                 pass
             try:
                 c = ForwardCard.parse_raw(card)
-                content = '转发动态\n' + c.item.content + '\n以下为被转发内容'
+                content = f'转发{c.user["uname"]}的动态\n' + c.item.content + '\n以下为被转发内容\n'
                 _, imgs= _get_cont_and_imgs(c.origin)
                 content += _
                 return content, imgs                 
@@ -39,13 +40,12 @@ class BiliDynamicChecker(BaseInfoChecker):
                 c = TextCard.parse_raw(card) 
                 return c.item.content, []
 
-                          
-
         headers = {
             'Referer': f'https://space.bilibili.com/${url.split("=")[1]}/',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36'
         }
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             try:
                 async with session.get(url=url, 
                                        headers=headers) as resp:
