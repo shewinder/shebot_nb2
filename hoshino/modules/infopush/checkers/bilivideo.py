@@ -3,7 +3,7 @@ from nonebot.adapters.cqhttp.message import MessageSegment
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._data import BaseInfoChecker, InfoData, SubscribeRec
+from .._model import BaseInfoChecker, InfoData, SubscribeRec
 
 class Video(InfoData):
     title: str
@@ -19,6 +19,7 @@ class BiliVideoChecker(BaseInfoChecker):
                 + MessageSegment.image(data.cover)\
                 + data.portal
 
+    @classmethod
     async def get_data(self, url) -> Video:
         headers = {
             'Referer': 'https://link.bilibili.com/p/center/index',
@@ -46,3 +47,4 @@ class BiliVideoChecker(BaseInfoChecker):
             except Exception as e:
                 logger.exception(e)
                 return None
+BiliVideoChecker(120)

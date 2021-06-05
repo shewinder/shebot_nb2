@@ -6,7 +6,7 @@ from nonebot.adapters.cqhttp.message import MessageSegment, Message
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._data import BaseInfoChecker, InfoData, SubscribeRec
+from .._model import BaseInfoChecker, InfoData, SubscribeRec
 
 class Dynamic(InfoData):
     content: str
@@ -18,7 +18,9 @@ class BiliDynamicChecker(BaseInfoChecker):
         return Message(f'{sub.remark}更新啦！\n{data.content}') \
               .extend(imgs) \
               .append(MessageSegment.text(data.portal))
-    async def get_data(self, url: str) -> Dynamic:
+    
+    @classmethod
+    async def get_data(cls, url: str) -> Dynamic:
         def _get_cont_and_imgs(card: str):
             try:
                 c = VideoCard.parse_raw(card)
@@ -52,7 +54,11 @@ class BiliDynamicChecker(BaseInfoChecker):
                     if resp.status == 200:
                         json_dic = await resp.json()
                         data = json_dic['data']['cards'][0]
-                        c = RootCard(**data)
+                        try:
+                            c = RootCard(**data)
+                        except:
+                            logger.error(str(data))
+                            print(data)
                         dyc = Dynamic()
                         dyc.pub_time = str(c.desc.timestamp)
                         dyc.portal = f'https://space.bilibili.com/{c.desc.uid}/dynamic'
@@ -64,6 +70,8 @@ class BiliDynamicChecker(BaseInfoChecker):
             except Exception as e:
                 logger.exception(e)
                 return None
+
+BiliDynamicChecker(60)
 
 class Desc(BaseModel):
     uid: int 
