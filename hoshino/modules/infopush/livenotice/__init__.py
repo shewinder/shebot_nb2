@@ -8,9 +8,9 @@ from hoshino.typing import T_State
 
 from hoshino.modules.infopush.checkers.bililive import BiliLiveChecker
 from hoshino.modules.infopush.checkers.douyulive import DouyuLiveChecker
-from .._model import BaseInfoChecker, SubscribeRec
+from .._model import BaseInfoChecker, SubscribeRecord
 
-sv = Service('B站直播')
+sv = Service('直播推送')
 
 add_live = sv.on_command('live', aliases={'添加直播', '直播订阅'}, only_group=False)
 
@@ -66,6 +66,7 @@ async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
                                remark=f'{name}开播')
         await add_live.finish(f'成功订阅{name}的直播间')
     except ValueError as e:
+        logger.exception(e)
         await add_live.finish(str(e))
 
 
@@ -73,7 +74,7 @@ del_live = sv.on_command('del_live', aliases={'删除直播', '删除直播订�
 
 @del_live.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
-    subs: List[SubscribeRec] = BiliLiveChecker.get_group_subs(event.group_id) \
+    subs: List[SubscribeRecord] = BiliLiveChecker.get_group_subs(event.group_id) \
                              + DouyuLiveChecker.get_group_subs(event.group_id)
     lives = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
     state['subs'] = subs
@@ -81,7 +82,7 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
 
 @del_live.handle()
 async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
-    subs: List[SubscribeRec] = BiliLiveChecker.get_user_subs(event.user_id) \
+    subs: List[SubscribeRecord] = BiliLiveChecker.get_user_subs(event.user_id) \
                              + DouyuLiveChecker.get_user_subs(event.user_id)
     lives = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
     state['subs'] = subs
@@ -91,7 +92,7 @@ async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     try:
         choice = int(state['choice'])
-        sub: SubscribeRec = state['subs'][choice]
+        sub: SubscribeRecord  = state['subs'][choice]
     except:
         await del_live.reject('输入有误')
     eval(sub.checker).delete_group_sub(event.group_id, sub)
@@ -101,7 +102,7 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
 async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
     try:
         choice = int(state['choice'])
-        sub: SubscribeRec = state['subs'][choice]
+        sub: SubscribeRecord  = state['subs'][choice]
     except:
         await del_live.reject('输入有误')
     eval(sub.checker).delete_user_sub(event.user_id, sub)
@@ -110,14 +111,14 @@ async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
 show_live = sv.on_command('show_live', aliases={'查看直播订阅', '查看直播', '看看订阅'}, only_group=False)
 @show_live.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
-    subs: List[SubscribeRec] = BiliLiveChecker.get_group_subs(event.user_id) \
+    subs: List[SubscribeRecord] = BiliLiveChecker.get_group_subs(event.user_id) \
                              + DouyuLiveChecker.get_group_subs(event.user_id)
     lives = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
     await bot.send(event, '本群订阅如下\n' + '\n'.join(lives))   
 
 @show_live.handle()
 async def _(bot: Bot, event: PrivateMessageEvent):
-    subs: List[SubscribeRec] = BiliLiveChecker.get_user_subs(event.user_id) \
+    subs: List[SubscribeRecord] = BiliLiveChecker.get_user_subs(event.user_id) \
                              + DouyuLiveChecker.get_user_subs(event.user_id)
     lives = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
     await bot.send(event, '您的订阅如下\n' + '\n'.join(lives))   

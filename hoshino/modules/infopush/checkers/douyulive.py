@@ -4,7 +4,7 @@ import requests
 from nonebot.adapters.cqhttp.message import MessageSegment
 
 from hoshino.log import logger
-from .._model import BaseInfoChecker, SubscribeRec, InfoData
+from .._model import BaseInfoChecker, SubscribeRecord, InfoData
 
 PROXY_POOL_URL = 'http://140.143.122.138:5555/random'
 
@@ -22,7 +22,7 @@ class DouyuLive(InfoData):
     name: str
 
 class DouyuLiveChecker(BaseInfoChecker):
-    def notice_format(self, sub: SubscribeRec, data: DouyuLive):
+    def notice_format(self, sub: SubscribeRecord , data: DouyuLive):
         return f'{sub.remark}啦！\n{data.title}'\
                 + MessageSegment.image(data.cover)\
                 + data.portal
@@ -54,6 +54,7 @@ class DouyuLiveChecker(BaseInfoChecker):
                         lv.title = data['room_name']
                         lv.cover = data['room_thumb']
                         lv.name = data['owner_name']
+                        lv.is_new = True if data['room_status'] == '1' else False # 用于判断是否正在开播, 防止订阅时推送历史开播信息
                         return lv
                     else:
                         logger.warning(f'访问{url}失败，status： {resp.status}')

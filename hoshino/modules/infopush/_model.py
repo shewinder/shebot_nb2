@@ -1,33 +1,53 @@
 import asyncio
 import os
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List
+import pickle
 
-import peewee as pw
+from pathlib import Path
+from pydantic import BaseModel
 
-from hoshino import db_dir, get_bot_list, Bot
+from hoshino import glob
+from hoshino import  get_bot_list, Bot
 from hoshino.log import logger
 from hoshino.glob import CHECKERS, SUBS
+from hoshino.util.sutil import load_config, save_config
 
-db_path = os.path.join(db_dir, 'info.db')
-db = pw.SqliteDatabase(db_path)
+json_filepath = Path(__file__).parent.joinpath('subscribe')
+pickle_filepath = Path(__file__).parent.joinpath('subscribe')
 
-class SubscribeRec(pw.Model):
-    checker = pw.TextField()
-    remark = pw.TextField()
-    url = pw.TextField()
-    date = pw.TextField()
-    groups = pw.TextField()
-    users = pw.TextField()
+@dataclass
+class SubscribeRecord:
+    checker: str
+    remark: str
+    url: str
+    date: str
+    groups: List[int]
+    users: List[int]
 
-    class Meta:
-        database = db
-        primary_key = pw.CompositeKey('checker', 'url')
+    def save(self):
+        SUBS[self.checker][self.url] = self
+        #save_config(SUBS, json_filepath)
+        with open(pickle_filepath, 'wb') as f:
+            pickle.dump(SUBS, f)
 
-if not os.path.exists(db_path):
-    db.connect()
-    db.create_tables([SubscribeRec])
-    db.close()
+    def delete(self):
+        sub = SUBS.get(self.checker, {}).get(self.url)
+        if sub:
+            del SUBS[self.checker][self.url]
+            with open(pickle_filepath, 'wb') as f:
+                pickle.dump(SUBS, f)
+        else:
+            raise ValueError('不存在该记录')
+
+def load_subscribe(SUBS):
+    try:
+        with open(pickle_filepath, 'rb') as f:
+            _subs = pickle.load(f)
+            for k, v in _subs.items():
+                SUBS[k] = v
+    except FileNotFoundError:
+        return None
 
 @dataclass
 class InfoData:
@@ -36,6 +56,7 @@ class InfoData:
     """
     pub_time: str = None
     portal: str = None
+    is_new: bool = True # 用于手动指定消息是否为新消息
 
 class BaseInfoChecker:
     def __init__(self, seconds: int=120) -> None:
@@ -49,98 +70,100 @@ class BaseInfoChecker:
     def get_all_checkers() -> List["BaseInfoChecker"]:
         return CHECKERS
 
+    @staticmethod
+    def get_subscribe(checker_name: str, url: str) -> SubscribeRecord:
+        return SUBS.get(checker_name, dict()).get(url, dict())
+
     @classmethod
-    async def get_data(cls, url):
+    async def get_data(cls, url) -> InfoData:
         # 获取数据,插件应实现此抽象基类
         raise NotImplementedError
 
     @classmethod
-    def get_group_subs(cls, group_id: int) -> List[SubscribeRec]:
-        return SubscribeRec.select().where((SubscribeRec.groups.contains(str(group_id))) 
-            & (SubscribeRec.checker == cls.__name__))
+    def get_group_subs(cls, group_id: int) -> List[SubscribeRecord]:
+        _subs = []
+        v = SUBS.get(cls.__name__, {})
+        for vv in v.values():
+            if group_id in vv.groups:
+                _subs.append(vv)
+        return _subs
 
     @classmethod
-    def get_user_subs(cls, user_id: int) -> List[SubscribeRec]:
-        return SubscribeRec.select().where((SubscribeRec.users.contains(str(user_id))) 
-            & (SubscribeRec.checker == cls.__name__))
+    def get_user_subs(cls, user_id: int) -> List[SubscribeRecord]:
+        _subs = []
+        v = SUBS.get(cls.__name__, {})
+        for vv in v.values():
+            if user_id in vv.users:
+                _subs.append(vv)
+        return _subs
 
     @classmethod
-    def delete_group_sub(cls, group_id: int, sub: SubscribeRec):
-        groups: List[str] = sub.groups.split(',')
-        if str(group_id) in groups:
-            groups.remove(str(group_id))
-            sub.groups = ','.join(groups)
-            sub.save()
-        if not groups and not sub.users:
-            sub.delete_instance()
+    def delete_group_sub(cls, group_id: int, sub: SubscribeRecord):
+        if group_id in sub.groups:
+            sub.groups.remove(group_id)
+        if not sub.groups and not sub.users:
+            sub.delete()
     
     @classmethod
-    def delete_user_sub(cls, user_id: int, sub: SubscribeRec):
-        users: List[str] = sub.users.split(',')
-        if str(user_id) in users:
-            users.remove(str(user_id))
-            sub.users = ','.join(users)
-            sub.save()
-        if not users and not sub.groups:
-            sub.delete_instance()
+    def delete_user_sub(cls, user_id: int, sub: SubscribeRecord):
+        if user_id in sub.users:
+            sub.users.remove(user_id)
+        if not sub.users and not sub.groups:
+            sub.delete()
 
     @classmethod
     def add_group(cls, group_id: int, checker: str, url: str, remark: str=None):
-        sub = SubscribeRec.get_or_none(checker = checker, url = url)
+        sub = cls.get_subscribe(checker, url)
         if sub:
-            groups: List[str] = sub.groups.split(',')
-            if str(group_id) in groups:
+            if group_id in sub.groups:
                 raise ValueError('重复订阅')
-            groups.append(str(group_id))
-            sub.groups = ','.join(groups)
+            sub.groups.append(group_id)
             sub.save()
         else:
             try:
-                sub = SubscribeRec.create(checker = checker,
-                                          url = url,
-                                          remark = remark,
-                                          groups = str(group_id),
-                                          users = '',
-                                          date = '')
-                SUBS[checker].append(sub)
+                sub = SubscribeRecord(checker = checker,
+                                      url = url,
+                                      remark = remark,
+                                      groups = [group_id],
+                                      users = [],
+                                      date = '')
+                sub.save()
                 return sub
             except Exception as e:
+                logger.exception(e)
                 raise ValueError(e)
 
     @classmethod
     def add_user(cls, user_id: int, checker: str, url: str, remark: str=None):
-        sub = SubscribeRec.get_or_none(checker  = checker, url = url)
+        sub = cls.get_subscribe(checker, url)
         if sub:
-            users: List[str] = sub.users.split(',')
-            if str(user_id) in users:
+            if user_id in sub.users:
                 raise ValueError('重复订阅')
-            users.append(str(user_id))
-            sub.users = ','.join(users)
+            sub.users.append(user_id)
             sub.save()
         else:
             try:
-                sub = SubscribeRec.create(checker = checker,
-                                          url = url,
-                                          remark = remark,
-                                          users = str(user_id),
-                                          groups = '',
-                                          date = '')
-                SUBS[checker].append(sub)
+                sub = SubscribeRecord(checker = checker,
+                                      url = url,
+                                      remark = remark,
+                                      users = [user_id],
+                                      groups = [],
+                                      date = '')
+                sub.save()
                 return sub
             except Exception as e:
+                logger.exception(e)
                 raise ValueError(e)
 
-    def notice_format(self, sub, data):
+    def notice_format(self, sub: SubscribeRecord, data: InfoData):
         """
         默认的通知排版格式，子类可重写此函数
         """
         return f'{sub.remark}更新啦！\n传送门{data.portal}'
 
-    async def notice(self, sub: SubscribeRec, data: InfoData):
+    async def notice(self, sub: SubscribeRecord, data: InfoData):
         bot: Bot = get_bot_list()[0]
-        groups = sub.groups.split(',')
-        users = sub.users.split(',')
-        for gid in groups:
+        for gid in sub.groups:
             try:
                 gid = int(gid)
             except:
@@ -151,7 +174,7 @@ class BaseInfoChecker:
             except Exception as e:
                 logger.exception(e)
             await asyncio.sleep(0.5)
-        for uid in users:
+        for uid in sub.users:
             try:
                 uid = int(uid)
             except:
@@ -164,13 +187,13 @@ class BaseInfoChecker:
                 logger.exception(e)
             await asyncio.sleep(0.5)
 
-    async def check_and_notice(self, sub: SubscribeRec):
-        data: InfoData = await self.get_data(sub.url)
+    async def check_and_notice(self, sub: SubscribeRecord):
+        data = await self.get_data(sub.url)
         if not data:
             logger.warning(f'检查{sub.checker}出错')
             return
         curr_date = data.pub_time
-        if sub.date != curr_date:
+        if sub.date != curr_date and data.is_new:
             logger.info(f'检测到{sub.remark}更新')
             sub.date = curr_date
             sub.save()

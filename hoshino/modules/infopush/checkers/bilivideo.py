@@ -3,7 +3,7 @@ from nonebot.adapters.cqhttp.message import MessageSegment
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, SubscribeRec
+from .._model import BaseInfoChecker, InfoData, SubscribeRecord
 
 class Video(InfoData):
     title: str
@@ -14,7 +14,7 @@ class Video(InfoData):
     BV: str
 
 class BiliVideoChecker(BaseInfoChecker):
-    def notice_format(self, sub: SubscribeRec, data: Video):
+    def notice_format(self, sub: SubscribeRecord , data: Video):
         return f'{sub.remark}更新啦！\n{data.title}'\
                 + MessageSegment.image(data.cover)\
                 + data.portal

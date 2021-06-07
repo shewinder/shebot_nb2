@@ -5,7 +5,7 @@ import requests
 from nonebot.adapters.cqhttp.message import MessageSegment
 
 from hoshino.log import logger
-from .._model import BaseInfoChecker, SubscribeRec, InfoData
+from .._model import BaseInfoChecker, SubscribeRecord, InfoData
 
 PROXY_POOL_URL = 'http://140.143.122.138:5555/random'
 
@@ -22,7 +22,7 @@ class Live(InfoData):
     cover: str
 
 class BiliLiveChecker(BaseInfoChecker):
-    def notice_format(self, sub: SubscribeRec, data: Live):
+    def notice_format(self, sub: SubscribeRecord , data: Live):
         return f'{sub.remark}啦！\n{data.title}'\
                 + MessageSegment.image(data.cover)\
                 + data.portal
@@ -72,6 +72,7 @@ class BiliLiveChecker(BaseInfoChecker):
                         lv.portal = f'https://live.bilibili.com/{data["room_id"]}'
                         lv.title = data['title']
                         lv.cover = data['user_cover']
+                        lv.is_new = True if data['live_status'] == 1 else False
                         return lv
                     else:
                         logger.warning(f'访问{url}失败，status： {resp.status}')

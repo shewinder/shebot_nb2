@@ -6,41 +6,42 @@ from nonebot.adapters.cqhttp.message import MessageSegment, Message
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, SubscribeRec
+from .._model import BaseInfoChecker, InfoData, SubscribeRecord
 
 class Dynamic(InfoData):
     content: str
     imgs: List[str] = []
 
 class BiliDynamicChecker(BaseInfoChecker):
-    def notice_format(self, sub: SubscribeRec, data: Dynamic):
+    def notice_format(self, sub: SubscribeRecord , data: Dynamic):
         imgs = [MessageSegment.image(img) for img in data.imgs]
-        return Message(f'{sub.remark}更新啦！\n{data.content}') \
+        msg = Message(f'{sub.remark}更新啦！\n{data.content}') \
               .extend(imgs) \
-              .append(MessageSegment.text(data.portal))
+              .append(MessageSegment.text('\n' + data.portal))
+        return msg
     
     @classmethod
     async def get_data(cls, url: str) -> Dynamic:
-        def _get_cont_and_imgs(card: str):
+        def _get_uname_cont_and_imgs(card: str):
             try:
                 c = VideoCard.parse_raw(card)
-                return f'标题：\n{c.title}\n视频简介{c.desc}', [c.pic]
+                return c.owner["name"], f'标题：\n{c.title}\n视频简介{c.desc}', [c.pic]
             except ValidationError:
                 pass
             try:
                 c = PictureCard.parse_raw(card)
-                return c.item.description, [img["img_src"] for img in c.item.pictures]
+                return c.user["name"], c.item.description, [img["img_src"] for img in c.item.pictures]
             except ValidationError:
                 pass
             try:
                 c = ForwardCard.parse_raw(card)
-                content = f'转发{c.user["uname"]}的动态\n' + c.item.content + '\n以下为被转发内容\n'
-                _, imgs= _get_cont_and_imgs(c.origin)
+                ori_uname, _, imgs= _get_uname_cont_and_imgs(c.origin)
+                content = f'转发{ori_uname}的动态\n' + c.item.content + '\n以下为被转发内容\n'
                 content += _
                 return content, imgs                 
             except ValidationError:
                 c = TextCard.parse_raw(card) 
-                return c.item.content, []
+                return c.user["uname"], c.item.content, []
 
         headers = {
             'Referer': f'https://space.bilibili.com/${url.split("=")[1]}/',
@@ -62,7 +63,7 @@ class BiliDynamicChecker(BaseInfoChecker):
                         dyc = Dynamic()
                         dyc.pub_time = str(c.desc.timestamp)
                         dyc.portal = f'https://space.bilibili.com/{c.desc.uid}/dynamic'
-                        dyc.content, dyc.imgs = _get_cont_and_imgs(c.card)
+                        _, dyc.content, dyc.imgs = _get_uname_cont_and_imgs(c.card)
                         return dyc
                     else:
                         logger.warning(f'访问{url}失败，status： {resp.status}')
@@ -77,12 +78,8 @@ class Desc(BaseModel):
     uid: int 
     type: int
     rid: int
-    acl: int
     dynamic_id: int
     timestamp: int
-    pre_dy_id: int
-    orig_dy_id: int
-    orig_type: int
     uid_type: int
     status: int
 

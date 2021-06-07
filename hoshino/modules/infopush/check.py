@@ -1,17 +1,17 @@
 import importlib
 import os
-from typing import Iterable, List
+from typing import Dict, Iterable, List
 from itertools import groupby
 
 import pathlib
 
 from loguru import logger
 
-from hoshino import scheduled_job, add_job
+from hoshino import  add_job
 from hoshino.log import logger
 from hoshino.glob import SUBS
 
-from ._model import SubscribeRec, BaseInfoChecker
+from ._model import SubscribeRecord, BaseInfoChecker, json_filepath, load_config, load_subscribe
 
 checker_dir = pathlib.Path(__file__).parent.joinpath('checkers')
 
@@ -27,20 +27,23 @@ checkers = BaseInfoChecker.get_all_checkers()
 checker_groups = groupby(sorted(checkers, key=lambda x: getattr(x, 'seconds')), 
                         key=lambda x: getattr(x, 'seconds'))
 
-for checker in checkers:
-    subs: List[SubscribeRec] = list(SubscribeRec.select().where(SubscribeRec.checker == checker.__class__.__name__))
-    SUBS[checker.__class__.__name__] = subs
 
+load_subscribe(SUBS)
 
 async def check(checkers: List[BaseInfoChecker]):
+    if not SUBS:
+        logger.info('当前没有任何订阅')
+        return
     for checker in checkers:
         logger.info(f'{checker.__class__.__name__} start checking')
-        #subs: List[SubscribeRec] = SubscribeRec.select().where(SubscribeRec.checker == checker.__class__.__name__)
-        subs: List[SubscribeRec] = SUBS[checker.__class__.__name__]
-        for i, sub in enumerate(subs[::-1]):
+        subs: Dict[str, "SubscribeRecord"] = SUBS.get(checker.__class__.__name__)
+        if not subs:
+            logger.info(f'{checker.__class__.__name__} 当前无订阅')
+            continue
+        for url, sub in subs.items():
             logger.info(f'checking {sub.remark}')
             if await checker.check_and_notice(sub):
-                subs[i] = sub
+                sub.save()
             logger.info('checking complete')
 
 
@@ -51,10 +54,3 @@ for seconds, checker_group in checker_groups:
             id = f'信息推送{seconds}秒档',
             max_instances = 10,
             seconds=seconds)
-
-@scheduled_job('interval', minutes=10)
-async def refresh():
-    logger.info('start refreshing subscribes')
-    subs: List[SubscribeRec] = list(SubscribeRec.select().where(SubscribeRec.checker == checker.__class__.__name__))
-    SUBS[checker.__class__.__name__] = subs
-    logger.info('refreshing subscribes completed')

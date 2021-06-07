@@ -4,7 +4,7 @@ from hoshino.modules.infopush.checkers.bilidynamic import BiliDynamicChecker, Dy
 from nonebot.adapters.cqhttp import GroupMessageEvent, PrivateMessageEvent
 from hoshino import Service, Bot, Event
 from hoshino.typing import T_State
-from .._model import SubscribeRec
+from .._model import SubscribeRecord
 
 sv = Service('B站动态')
 
@@ -73,7 +73,7 @@ async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     try:
         choice = int(state['choice'])
-        sub: SubscribeRec = state['subs'][choice]
+        sub: SubscribeRecord = state['subs'][choice]
     except:
         await del_dynamic.finish('输入有误')
     BiliDynamicChecker.delete_group_sub(event.group_id, sub)
@@ -83,7 +83,7 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
 async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
     try:
         choice = int(state['choice'])
-        sub: SubscribeRec = state['subs'][choice]
+        sub: SubscribeRecord = state['subs'][choice]
     except:
         await del_dynamic.finish('输入有误')
     BiliDynamicChecker.delete_user_sub(event.user_id, sub)
