@@ -18,7 +18,7 @@ class BiliVideoChecker(BaseInfoChecker):
         return f'{sub.remark}更新啦！\n{data.title}'\
                 + MessageSegment.image(data.cover)\
                 + data.portal
-
+                
     @classmethod
     async def get_data(self, url) -> Video:
         headers = {

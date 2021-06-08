@@ -58,48 +58,48 @@ del_dynamic = sv.on_command('del_dynamic', aliases={'删除B站动态'}, only_gr
 @del_dynamic.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     subs = BiliDynamicChecker.get_group_subs(event.group_id)
-    reply = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
+    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     state['subs'] = subs
     await bot.send(event, '请发送对应序号选择取消的订阅\n' + '\n'.join(reply))
 
 @del_dynamic.handle()
 async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
     subs = BiliDynamicChecker.get_user_subs(event.user_id)
-    reply = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
+    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     state['subs'] = subs
     await bot.send(event, '请发送对应序号选择取消的订阅\n' + '\n'.join(reply))
 
 @del_dynamic.got('choice')
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     try:
-        choice = int(state['choice'])
+        choice = int(state['choice']) -1
         sub: SubscribeRecord = state['subs'][choice]
     except:
         await del_dynamic.finish('输入有误')
     BiliDynamicChecker.delete_group_sub(event.group_id, sub)
-    await bot.send(event, f'已经删除{sub.name}的动态订阅')
+    await bot.send(event, f'已经删除{sub.remark}订阅')
 
 @del_dynamic.got('choice')
 async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
     try:
-        choice = int(state['choice'])
+        choice = int(state['choice']) - 1
         sub: SubscribeRecord = state['subs'][choice]
     except:
         await del_dynamic.finish('输入有误')
     BiliDynamicChecker.delete_user_sub(event.user_id, sub)
-    await bot.send(event, f'已经删除{sub.remark}的动态订阅')
+    await bot.send(event, f'已经删除{sub.remark}订阅')
 
 show_live = sv.on_command('show_dynamic', aliases={'查看动态订阅'}, only_group=False)
 @show_live.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
     subs = BiliDynamicChecker.get_group_subs(event.group_id)
-    reply = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
+    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     await bot.send(event, '本群订阅如下\n' + '\n'.join(reply))   
 
 @show_live.handle()
 async def _(bot: Bot, event: PrivateMessageEvent):
     subs = BiliDynamicChecker.get_user_subs(event.user_id)
-    reply = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
+    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     await bot.send(event, '您的订阅如下\n' + '\n'.join(reply))   
 
 

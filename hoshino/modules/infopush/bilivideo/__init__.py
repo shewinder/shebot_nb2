@@ -59,21 +59,21 @@ del_video = sv.on_command('del_video', aliases={'删除B站投稿'}, only_group=
 @del_video.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     subs = BiliVideoChecker.get_group_subs(event.group_id)
-    reply = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
+    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     state['subs'] = subs
     await bot.send(event, '请发送对应序号选择取消的订阅\n' + '\n'.join(reply))
 
 @del_video.handle()
 async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
     subs = BiliVideoChecker.get_user_subs(event.user_id)
-    reply = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
+    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     state['subs'] = subs
     await bot.send(event, '请发送对应序号选择取消的订阅\n' + '\n'.join(reply))
 
 @del_video.got('choice')
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     try:
-        choice = int(state['choice'])
+        choice = int(state['choice']) - 1
         sub: SubscribeRecord  = state['subs'][choice]
     except:
         del_video.reject('输入有误')
@@ -83,7 +83,7 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
 @del_video.got('choice')
 async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
     try:
-        choice = int(state['choice'])
+        choice = int(state['choice']) - 1
         sub: SubscribeRecord  = state['subs'][choice]
     except:
         await del_video.finish('输入有误')
@@ -94,13 +94,13 @@ show_live = sv.on_command('show_video', aliases={'查看投稿订阅'}, only_gro
 @show_live.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
     subs = BiliVideoChecker.get_group_subs(event.group_id)
-    reply = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
+    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     await bot.send(event, '本群订阅如下\n' + '\n'.join(reply))   
 
 @show_live.handle()
 async def _(bot: Bot, event: PrivateMessageEvent):
     subs = BiliVideoChecker.get_user_subs(event.user_id)
-    reply = [f'{i}. {sub.remark}' for i,sub in enumerate(subs)]
+    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     await bot.send(event, '您的订阅如下\n' + '\n'.join(reply))   
 
 
