@@ -11,7 +11,7 @@ from hoshino import  add_job
 from hoshino.log import logger
 from hoshino.glob import SUBS
 
-from ._model import SubscribeRecord, BaseInfoChecker, json_filepath, load_config, load_subscribe
+from ._model import SubscribeRecord, BaseInfoChecker
 
 checker_dir = pathlib.Path(__file__).parent.joinpath('checkers')
 
@@ -28,7 +28,7 @@ checker_groups = groupby(sorted(checkers, key=lambda x: getattr(x, 'seconds')),
                         key=lambda x: getattr(x, 'seconds'))
 
 
-load_subscribe(SUBS)
+SubscribeRecord.init()
 
 async def check(checkers: List[BaseInfoChecker]):
     if not SUBS:

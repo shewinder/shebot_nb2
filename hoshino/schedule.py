@@ -38,4 +38,3 @@ def add_job(func: Callable[[], Any], trigger: str, args=None, kwargs: Optional[D
     id = trigger_kwargs.get('id', func.__name__)
     trigger_kwargs['id'] = id
     return scheduler.add_job(wrapper(func, id, args, kwargs), trigger, **trigger_kwargs)
-    #return scheduler.add_job(func, trigger, **kwargs)

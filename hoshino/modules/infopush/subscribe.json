@@ -1,0 +1,90 @@
+{
+  "BiliLiveChecker": {
+    "https://api.live.bilibili.com/room/v1/Room/get_info?room_id=4316215": {
+      "checker": "BiliLiveChecker",
+      "remark": "铃音_Official开播",
+      "url": "https://api.live.bilibili.com/room/v1/Room/get_info?room_id=4316215",
+      "date": "2021-06-11 21:05:02",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    }
+  },
+  "BiliDynamicChecker": {
+    "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=282994": {
+      "checker": "BiliDynamicChecker",
+      "remark": "泠鸢yousa动态",
+      "url": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=282994",
+      "date": "1623477191",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    },
+    "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=11323975": {
+      "checker": "BiliDynamicChecker",
+      "remark": "花見棟楠动态",
+      "url": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=11323975",
+      "date": "1623389165",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    },
+    "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=11073": {
+      "checker": "BiliDynamicChecker",
+      "remark": "hanser动态",
+      "url": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=11073",
+      "date": "1623223819",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    },
+    "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=39267739": {
+      "checker": "BiliDynamicChecker",
+      "remark": "铃音_Official动态",
+      "url": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=39267739",
+      "date": "1623427889",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    }
+  },
+  "DouyuLiveChecker": {
+    "http://open.douyucdn.cn/api/RoomApi/room/2550505": {
+      "checker": "DouyuLiveChecker",
+      "remark": "hanserLIVE开播",
+      "url": "http://open.douyucdn.cn/api/RoomApi/room/2550505",
+      "date": "",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    }
+  },
+  "BiliVideoChecker": {
+    "https://api.bilibili.com/x/space/arc/search?mid=80304&ps=1&tid=0&pn=1&order=pubdate&jsonp=jsonp": {
+      "checker": "BiliVideoChecker",
+      "remark": "亚食人投稿",
+      "url": "https://api.bilibili.com/x/space/arc/search?mid=80304&ps=1&tid=0&pn=1&order=pubdate&jsonp=jsonp",
+      "date": "1623380409",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    },
+    "https://api.bilibili.com/x/space/arc/search?mid=107278647&ps=1&tid=0&pn=1&order=pubdate&jsonp=jsonp": {
+      "checker": "BiliVideoChecker",
+      "remark": "熊乐乐大魔王投稿",
+      "url": "https://api.bilibili.com/x/space/arc/search?mid=107278647&ps=1&tid=0&pn=1&order=pubdate&jsonp=jsonp",
+      "date": "1623246537",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    }
+  }
+}

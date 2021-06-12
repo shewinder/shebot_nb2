@@ -50,7 +50,7 @@ class DouyuLiveChecker(BaseInfoChecker):
                         data = json_dic['data']
                         lv = DouyuLive()
                         lv.pub_time = str(data['start_time'])
-                        lv.portal = f'https://DouyuLive.bilibili.com/{data["room_id"]}'
+                        lv.portal = f'https://douyu.com/{data["room_id"]}'
                         lv.title = data['room_name']
                         lv.cover = data['room_thumb']
                         lv.name = data['owner_name']

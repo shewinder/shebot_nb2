@@ -7,17 +7,14 @@ import pickle
 from pathlib import Path
 from pydantic import BaseModel
 
-from hoshino import glob
 from hoshino import  get_bot_list, Bot
 from hoshino.log import logger
 from hoshino.glob import CHECKERS, SUBS
 from hoshino.util.sutil import load_config, save_config
 
-json_filepath = Path(__file__).parent.joinpath('subscribe')
-pickle_filepath = Path(__file__).parent.joinpath('subscribe')
+json_filepath = Path(__file__).parent.joinpath('subscribe.json')
 
-@dataclass
-class SubscribeRecord:
+class SubscribeRecord(BaseModel):
     checker: str
     remark: str
     url: str
@@ -25,29 +22,36 @@ class SubscribeRecord:
     groups: List[int]
     users: List[int]
 
+    @classmethod
+    def to_json(cls):
+        return {
+            k: {
+                i: j.dict()
+                for i,j in v.items()
+            }
+            for k,v in SUBS.items()
+        }
+
+    @classmethod
+    def init(cls):
+        dic = load_config(json_filepath)
+        for k, v in dic.items():
+            SUBS[k] = {
+                i: SubscribeRecord(**j)
+                for i, j in v.items()
+            }
+
     def save(self):
         SUBS[self.checker][self.url] = self
-        #save_config(SUBS, json_filepath)
-        with open(pickle_filepath, 'wb') as f:
-            pickle.dump(SUBS, f)
+        save_config(self.to_json(), json_filepath)
 
     def delete(self):
         sub = SUBS.get(self.checker, {}).get(self.url)
         if sub:
             del SUBS[self.checker][self.url]
-            with open(pickle_filepath, 'wb') as f:
-                pickle.dump(SUBS, f)
+            save_config(self.to_json(), json_filepath)
         else:
             raise ValueError('不存在该记录')
-
-def load_subscribe(SUBS):
-    try:
-        with open(pickle_filepath, 'rb') as f:
-            _subs = pickle.load(f)
-            for k, v in _subs.items():
-                SUBS[k] = v
-    except FileNotFoundError:
-        return None
 
 @dataclass
 class InfoData:
