@@ -4,7 +4,17 @@
       "checker": "BiliLiveChecker",
       "remark": "铃音_Official开播",
       "url": "https://api.live.bilibili.com/room/v1/Room/get_info?room_id=4316215",
-      "date": "2021-06-11 21:05:02",
+      "date": "2021-06-19 21:05:43",
+      "groups": [
+        1128825366
+      ],
+      "users": []
+    },
+    "https://api.live.bilibili.com/room/v1/Room/get_info?room_id=47377": {
+      "checker": "BiliLiveChecker",
+      "remark": "泠鸢yousa开播",
+      "url": "https://api.live.bilibili.com/room/v1/Room/get_info?room_id=47377",
+      "date": "2021-06-19 20:31:49",
       "groups": [
         1128825366
       ],
@@ -16,7 +26,7 @@
       "checker": "BiliDynamicChecker",
       "remark": "泠鸢yousa动态",
       "url": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=282994",
-      "date": "1623477191",
+      "date": "1624019879",
       "groups": [
         1128825366
       ],
@@ -26,7 +36,7 @@
       "checker": "BiliDynamicChecker",
       "remark": "花見棟楠动态",
       "url": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=11323975",
-      "date": "1623389165",
+      "date": "1624111852",
       "groups": [
         1128825366
       ],
@@ -36,7 +46,7 @@
       "checker": "BiliDynamicChecker",
       "remark": "hanser动态",
       "url": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=11073",
-      "date": "1623223819",
+      "date": "1624075208",
       "groups": [
         1128825366
       ],
@@ -46,7 +56,7 @@
       "checker": "BiliDynamicChecker",
       "remark": "铃音_Official动态",
       "url": "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid=39267739",
-      "date": "1623427889",
+      "date": "1624169141",
       "groups": [
         1128825366
       ],
@@ -58,7 +68,7 @@
       "checker": "DouyuLiveChecker",
       "remark": "hanserLIVE开播",
       "url": "http://open.douyucdn.cn/api/RoomApi/room/2550505",
-      "date": "",
+      "date": "2021-06-18 19:59:58",
       "groups": [
         1128825366
       ],
@@ -70,7 +80,7 @@
       "checker": "BiliVideoChecker",
       "remark": "亚食人投稿",
       "url": "https://api.bilibili.com/x/space/arc/search?mid=80304&ps=1&tid=0&pn=1&order=pubdate&jsonp=jsonp",
-      "date": "1623380409",
+      "date": "1624075513",
       "groups": [
         1128825366
       ],
