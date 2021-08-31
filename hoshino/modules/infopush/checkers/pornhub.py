@@ -1,3 +1,4 @@
+import json
 import aiohttp
 from nonebot.adapters.cqhttp.message import MessageSegment
 
@@ -24,8 +25,13 @@ class PornhubChecker(BaseInfoChecker):
         }
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.get(url=url, 
-                                       headers=headers) as resp:
+                async with session.post(url='http://23.224.81.98:9053/forwarder/',
+                                        headers = {'content_type': 'application/json'},
+                                        json = {
+                                           'url': url,
+                                           "method": 'get'
+                                       }
+                                       ) as resp:
                     if resp.status == 200:
                         t = await resp.text()
                         html = etree.HTML(t)

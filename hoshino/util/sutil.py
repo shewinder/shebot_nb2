@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+from hoshino.service import Service
 import json
 import os
 import random
@@ -13,7 +14,7 @@ import filetype
 import nonebot
 from PIL import Image, ImageDraw, ImageFont
 
-from hoshino import Event
+from hoshino import Event, Service
 
 async def download_async(url: str, save_path: str, save_name: str, auto_extension=False) -> None:
     timeout = aiohttp.ClientTimeout(total=30)
@@ -81,5 +82,18 @@ def add_text_to_img(img: Image.Image, text:str, textsize:int, font='msyh.ttf', t
     img_font = ImageFont.truetype(font=font,size=textsize)
     draw = ImageDraw.Draw(img)
     draw.text(xy=position,text=text,font=img_font,fill=textfill)
+
+async def get_send_groups(groups=None, sv_name='broadcast'):
+    #bot = nonebot.get_bot()
+    #当groups指定时，在groups中广播；当groups未指定，但sv_name指定，将在开启该服务的群广播
+    svs = Service.get_loaded_services()
+    if not groups and sv_name not in svs:
+        raise ValueError(f'不存在服务 {sv_name}')
+    if sv_name:
+        enable_groups = await svs[sv_name].get_enable_groups()
+        send_groups = enable_groups.keys() if not groups else groups
+    else:
+        send_groups = groups
+    return send_groups
 
 

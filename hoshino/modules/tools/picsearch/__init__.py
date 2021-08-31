@@ -6,6 +6,7 @@ from hoshino.sres import Res as R
 from hoshino.util.sutil import extract_url_from_event
 from .soucenao import *
 from .tracemoe import *
+from .ascii2d import *
 
 sv = Service('搜图找番')
 
@@ -40,14 +41,24 @@ async def _(bot: "Bot", event: "Event", state: T_State):
             elif isinstance(r.data, DanbooruData):
                 reply += await danbooru_format(r)
         await search_pic.finish(reply)
+
     # 自动转为搜索番剧模式
     results = await get_tracemoe_results(url, 0.9)
     if results:
-        reply = '以下结果来自tracemoe\n\n'
+        reply = '以下结果来自whatanime\n\n'
         results = results[0:3] if len(results) >= 3 else results
         for r in results:
             reply += await tracemoe_format(r) + '\n\n'
         await search_pic.finish(reply)
+
+    # 自动转为ascii2d
+    results = await get_ascii2d_results(url)
+    if results:
+        reply = '以下结果来自ascii2d\n\n'
+        r = results[0]
+        reply += await ascii2d_format(r)
+    await search_pic.finish(reply)
+
     # 都没有结果
     await bot.send(event, '没找到结果哦')
 

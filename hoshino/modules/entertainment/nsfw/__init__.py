@@ -31,7 +31,7 @@ async def _(bot:Bot, event: Event, state: T_State):
 sv1 = Service('nsfw-for-fun')
 fun = sv1.on_message()
 replys = ['还有吗？多来点', '就这？', '多发点，我朋友爱看', '摩多摩多']
-@fun.handle()
+#@fun.handle()
 async def _(bot:Bot, event: Event):
     urls = extract_url_from_event(event)
     if not urls:
