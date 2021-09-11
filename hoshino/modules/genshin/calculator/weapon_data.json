@@ -1,0 +1,32 @@
+{
+    "决斗之枪": {
+        "type": "spear",
+        "basic_family": "atk41",
+        "second_tag": "crit_rate",
+        "second_family": "cr80"
+    },
+    "天空之翼": {
+        "type": "bow",
+        "basic_family": "atk48",
+        "second_tag": "crit_rate",
+        "second_family": "cr48"
+    },
+    "西风长枪": {
+        "type": "spear",
+        "basic_family": "atk44",
+        "second_tag": "energy_recharge",
+        "second_family": "recharge67"
+    },
+    "薙草之稻光": {
+        "type": "spear",
+        "basic_family": "atk46",
+        "second_tag": "energy_recharge",
+        "second_family": "recharge120"
+    },
+    "匣里灭辰": {
+        "type": "spear",
+        "basic_family": "atk41",
+        "second_tag": "elem_mastery",
+        "second_family": "em48"
+    }
+}
