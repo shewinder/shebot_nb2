@@ -5,12 +5,13 @@ from nonebot.adapters.cqhttp.message import MessageSegment
 
 from hoshino.log import logger
 from .._model import BaseInfoChecker, SubscribeRecord, InfoData
+from .._config import plugin_config, Config
 
-PROXY_POOL_URL = 'http://140.143.122.138:5555/random'
+conf: Config = plugin_config.config
 
 def get_proxy():
     try:
-        response = requests.get(PROXY_POOL_URL)
+        response = requests.get(conf.PROXY_POOL_URL)
         if response.status_code == 200:
             return response.text
     except ConnectionError:

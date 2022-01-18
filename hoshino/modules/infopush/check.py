@@ -9,7 +9,7 @@ from loguru import logger
 
 from hoshino import  add_job
 from hoshino.log import logger
-from hoshino.glob import SUBS
+from ._glob import SUBS
 
 from ._model import SubscribeRecord, BaseInfoChecker
 
@@ -17,7 +17,7 @@ checker_dir = pathlib.Path(__file__).parent.joinpath('checkers')
 
 for module_name in os.listdir(checker_dir):
     try:
-        if module_name.startswith('__'):
+        if module_name.startswith('__'): # 排除__pycache__
             continue
         m = importlib.import_module(f'hoshino.modules.infopush.checkers.{module_name.rstrip(".py")}')
     except ImportError:

@@ -1,21 +1,22 @@
 from io import BytesIO
-from os import path
-import os
-from typing import Union
+from typing import Optional, Union
+from pathlib import Path
 
-from filetype.filetype import guess_mime
 from PIL import Image
 
 from hoshino import MessageSegment
 
 
-from hoshino.util.sutil import get_random_file, get_md5, download_async
+from hoshino import res_dir
+from hoshino.util.sutil import get_random_file
 
-# Res资源封装类
-# img 和 image 代表的分别为ResImg和 MessageSegment 对象
 
 class ResImg:
-    def __init__(self, abs_path):
+    def __init__(self, abs_path: Union[str, Path]):
+        if isinstance(abs_path, str):
+            abs_path = Path(abs_path)
+        #if not abs_path.is_relative_to(res_dir):
+            #raise ValueError('Cannot access outside RESOUCE_DIR')
         self._path = abs_path
 
     @property
@@ -24,15 +25,15 @@ class ResImg:
         return self._path
 
     @property
-    def exist(self):
-        return os.path.exists(self.path)
+    def cqcode(self) -> MessageSegment:
+        with open(self.path, 'rb') as f:
+            b = f.read()
+        return MessageSegment.image(file=b)
+        #return MessageSegment.image(f'file:///{os.path.abspath(self.path)}')
 
     @property
-    def cqcode(self) -> MessageSegment:
-        if self.exist:
-            return MessageSegment.image(f'file:///{os.path.abspath(self.path)}')
-        else:
-            return MessageSegment.text('【图片丢了】')
+    def url(self) -> str:
+        return self.path.as_uri()
 
     def open(self) -> Image.Image:
         try:
@@ -41,92 +42,96 @@ class ResImg:
             print(f'缺少图片资源：{self.path}')
             raise
 
+class ResRec:
+    def __init__(self, abs_path: Union[str, Path]):
+        if isinstance(abs_path, str):
+            abs_path = Path(abs_path)
+        #if not abs_path.is_relative_to(res_dir):
+            #raise ValueError('Cannot access outside RESOUCE_DIR')
+        self._path = abs_path
+
+    @property
+    def path(self):
+        """资源文件的路径，供bot内部使用"""
+        return self._path
+
+    @property
+    def cqcode(self) -> MessageSegment:
+        with open(self.path, 'rb') as f:
+            b = f.read()
+        return MessageSegment.record(file=b)
+
+    @property
+    def url(self) -> str:
+        return self.path.as_uri()
+
 class Res:
-    base_dir = path.abspath(path.join('data', 'static'))
-    image_dir = path.join(base_dir, 'image')
-    record_dir = path.join(base_dir, 'record')
-    img_cache_dir = path.join(image_dir, 'cache')
+    """
+    Res资源封装类
+    img 和 image 代表的分别为ResImg和 MessageSegment 对象
+    img用于图像操作， image用于发送
+    """
+    base_dir = Path(res_dir)
+    image_dir = base_dir.joinpath('image')
+    record_dir = base_dir.joinpath('record')
 
-    if not path.exists(image_dir):
-        os.makedirs(image_dir)
+    if not image_dir.exists():
+        image_dir.mkdir()
 
-    if not path.exists(record_dir):
-        os.makedirs(record_dir)
-
-    if not path.exists(img_cache_dir):
-        os.makedirs(img_cache_dir)
-    
-    
-    def check_exist(res_path: str) -> bool:
-        return path.exists(res_path)
+    if not record_dir.exists():
+        record_dir.mkdir()
 
     @classmethod
-    def img(cls, pic_path: str) -> ResImg:
-        if cls.check_exist(pic_path):
-            return ResImg(pic_path)
-        elif cls.check_exist(path.join(cls.image_dir, pic_path)):
-            return ResImg(path.join(cls.image_dir, pic_path))
+    def img(cls, p: Union[str, Path]) -> ResImg:
+        if isinstance(p, str):
+            p = Path(p)
+        if p.exists():
+            return ResImg(p)
+        elif cls.image_dir.joinpath(p).exists():
+            return ResImg(cls.image_dir.joinpath(p))
         else:
-            return ResImg()
+            raise ValueError('file not found')
 
     @classmethod
-    def image(cls, pic_path: str) -> MessageSegment:
-        if cls.check_exist(pic_path):
-            return ResImg(pic_path).cqcode
-        elif cls.check_exist(path.join(cls.image_dir, pic_path)):
-            return ResImg(path.join(cls.image_dir, pic_path)).cqcode
-        else:
-            return ResImg().cqcode
+    def image(cls, p: str) -> MessageSegment:
+        return cls.img(p).cqcode
+
 
     @classmethod
-    def record(cls, rec_path) -> MessageSegment:
-        if cls.check_exist(rec_path):
-            return MessageSegment.record(f'file:///{rec_path}')
-        elif cls.check_exist(path.join(cls.record_dir, rec_path)):
-            return MessageSegment.record(f'file:///{path.join(cls.record_dir, rec_path)}')
+    def record(cls, p: Union[str, Path]) -> MessageSegment:
+        if isinstance(p, str):
+            p = Path(p)
+        if p.exists():
+            return ResRec(p).cqcode
+        elif cls.record_dir.joinpath(p).exists():
+            return ResRec(cls.record_dir.joinpath(p)).cqcode
         else:
-            return '【图片丢了】'
+            raise ValueError('file not found')
 
     @classmethod
-    def get_random_img(cls, folder=None) -> ResImg:
-        if not folder:
-            image_path = cls.image_dir
-        else:
-            image_path = path.join(cls.image_dir, folder)
+    def get_random_img(cls, folder: Union[str, Path]) -> ResImg:
+        """
+        随机获取一个给定路径下的img， 以res_dir为基准目录
+        """
+        image_path = cls.base_dir.joinpath(folder)
         image_name = get_random_file(image_path)
-        return cls.img(path.join(image_path, image_name))
+        return cls.img(image_path.joinpath(image_name))
 
     @classmethod
     def get_random_record(cls, folder=None) -> MessageSegment:
-        if not folder:
-            record_path = cls.record_dir
-        else:
-            record_path = path.join(cls.record_dir, folder)
+        """
+        随机获取一个给定路径下的record， 以res_dir为基准目录
+        """
+        record_path = cls.base_dir.joinpath(folder)
         rec_name = get_random_file(record_path)
-        return cls.record(path.join(record_path, rec_name))
-
-    @classmethod
-    async def img_from_url(cls, url: str, cache=True) -> ResImg:
-        fname = get_md5(url)
-        image = path.join(cls.img_cache_dir, f'{fname}.jpg')
-        if not path.exists(image) or not cache:
-            image = await download_async(url, cls.img_cache_dir, f'{fname}.jpg')
-        return cls.img(image) 
+        return cls.record(record_path.joinpath(rec_name))
 
     @classmethod
     def image_from_memory(cls, data: Union[bytes, Image.Image]) -> MessageSegment:
         if isinstance(data, Image.Image):
-            out = BytesIO()
+            out = BytesIO()  
             data.save(out, format='png')
             data = out.getvalue()
         if not isinstance(data, bytes):
             raise ValueError('不支持的参数类型')
-        ftype = guess_mime(data)
-        if not ftype or not ftype.startswith('image'):
-            raise ValueError('不是有效的图片类型')
-        fn = get_md5(data)
-        save_path = path.join(cls.img_cache_dir, fn)
-        with open(save_path, 'wb') as f:
-            f.write(data)
-        return cls.image(path.join(cls.img_cache_dir, fn))
-
+        return MessageSegment.image(file=data)

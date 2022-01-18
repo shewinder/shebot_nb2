@@ -63,7 +63,7 @@ class Filter:
         return record["level"].no >= levelno and nologflag
 
 
-log_root = 'logs/'
+log_root = hsn_config.data + '/logs/'
 os.makedirs(log_root, exist_ok=True)
 logger.remove()
 hoshino_filter = Filter()

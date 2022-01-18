@@ -1,50 +1,42 @@
-from os import path
-
-from nonebot.adapters.cqhttp import GroupMessageEvent
-
+from hoshino.event import MessageEvent
 from hoshino import Service, Bot
-from hoshino.sres import Res as R
 from hoshino.typing import T_State
+from .data_source import choose_image
 from . import main
-from . import get
 
-sv = Service('image-generate')
+_help = '''
+[选图 猫猫] 选择生成表情包所用的底图
+[选图列表] 查看能选择的底图列表,<>内的数字为必选数字
+[HelloWorld.jpg] 将.jpg前的文字作为内容来生成表情包
+'''.strip()
+sv = Service('image-generate',  help_=_help)
 
-choose = sv.on_command('choose pic', aliases = {'选图','imgsw','IMGSW'})
+choose = sv.on_command('choose pic', aliases = {'选图','imgsw','IMGSW'}, only_group=False)
 @choose.handle()
-async def switch_img(bot: Bot, event: GroupMessageEvent):
-    uid = event.user_id
-    msg = event.get_message()
-    mark = await get.setQqName(uid, msg)
-    if mark != None:
-        p = path.join(path.dirname(__file__), f'image-generate/image_data/{mark}/{mark}.jpg')
-        img = R.image(p)
-        await bot.send(event, f'表情已更换为{msg}' + img, at_sender=True)
+async def switch_img(bot: Bot, event: MessageEvent):
+    uid_str = str(event.user_id)
+    name = str(event.get_message()).strip()
+    pic = choose_image(uid_str, name)
+    if pic:
+        await bot.send(event, f'表情已更换为{name}' + pic, at_sender=True)
+    else:
+        await bot.send(event, '不存在的表情')
 
-gen = sv.on_regex('(.{1,15})\.jpg')
+gen = sv.on_regex('(.{1,15})\.jpg', only_group=False)
 @gen.handle()
-async def generate_img(bot: Bot, event: GroupMessageEvent, state: T_State):
+async def generate_img(bot: Bot, event: MessageEvent, state: T_State):
     m = str(event.get_message())
     if len(m) > 20:
         return
     match = state['match']
     msg = match.group(1)
     uid = event.user_id
-    await main.img(bot, event, msg, uid)
+    pic = main.img(msg, uid)
+    await gen.send(pic)
 
-help = sv.on_command('img_help', aliases={'表情包帮助','imghelp'})   
-@help.handle()
-async def imgen_help(bot: Bot, event: GroupMessageEvent):
-    msg = '''
-[选图 猫猫] 选择生成表情包所用的底图
-[选图列表] 查看能选择的底图列表,<>内的数字为必选数字
-[HelloWorld.jpg] 将.jpg前的文字作为内容来生成表情包
-'''
-    await bot.send(event, msg, at_sender=True)
-
-imgl = sv.on_command('image list', aliases={'选图列表','imgswl','IMGSWL'})
+imgl = sv.on_command('image list', aliases={'选图列表','imgswl','IMGSWL'}, only_group=False)
 @imgl.handle()
-async def switch_list(bot: Bot, event: GroupMessageEvent):
+async def switch_list(bot: Bot, event: MessageEvent):
     msg = '''
 狗妈<1~3>
 熊猫<1~3>

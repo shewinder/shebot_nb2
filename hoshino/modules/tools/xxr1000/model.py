@@ -1,12 +1,9 @@
-import os
-
 import peewee as pw
 
-from hoshino import db_dir
+from hoshino import res_dir
 
-db_path = os.path.join(db_dir, '1000（单表）.db3')
-db = pw.SqliteDatabase(db_path)
-
+db_path = res_dir.joinpath('db/1000（单表）.db3')
+db = pw.SqliteDatabase(str(db_path))
 
 class Quest(pw.Model):
     ID = pw.IntegerField()
@@ -21,5 +18,5 @@ class Quest(pw.Model):
         database = db
         table_name = '题目'
 
-if not os.path.exists(db_path):
+if not db_path.exists():
     raise FileNotFoundError('no database')

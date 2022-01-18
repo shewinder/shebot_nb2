@@ -22,16 +22,15 @@ import pytz
 import base64
 import zhconv
 import nonebot
-from hoshino import R
+from hoshino import R, font_dir
 from nonebot.utils import run_sync
 from nonebot.adapters.cqhttp import Bot
 from nonebot.matcher import Matcher
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import CommandGroup, on_command
 from nonebot.rule import Rule, to_me
-DEFAULTFONT = ImageFont.truetype(
-    'msyh.ttf', size=48)
 
+DEFAULTFONT = ImageFont.truetype(os.path.join(font_dir, 'msyh.ttf'), size=48)
 
 class FreqLimiter:
     def __init__(self, default_cd_seconds):

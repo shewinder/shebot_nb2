@@ -6,7 +6,13 @@ from hoshino import Service, Bot, Event
 from hoshino.typing import T_State
 from .._model import SubscribeRecord
 
-sv = Service('B站动态')
+help_ = """
+[B站动态] B站up动态推送
+[删除B站动态] B站up动态推送
+[查看B站动态] B站up动态推送
+""".strip()
+
+sv = Service('B站动态', help_=help_)
 
 add_dynamic = sv.on_command('bilidynamic', aliases={'添加B站动态推送', 'B站动态'}, only_group=False)
 

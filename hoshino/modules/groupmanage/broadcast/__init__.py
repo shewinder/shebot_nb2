@@ -5,20 +5,7 @@ from hoshino import Service, sucmd, Bot, Event
 from hoshino import permission
 from hoshino.permission import SUPERUSER
 from hoshino.rule import to_me
-
-async def get_send_groups(groups=None, sv_name='broadcast'):
-    #bot = nonebot.get_bot()
-    #当groups指定时，在groups中广播；当groups未指定，但sv_name指定，将在开启该服务的群广播
-    svs = Service.get_loaded_services()
-    if not groups and sv_name not in svs:
-        raise ValueError(f'不存在服务 {sv_name}')
-    if sv_name:
-        enable_groups = await svs[sv_name].get_enable_groups()
-        send_groups = enable_groups.keys() if not groups else groups
-    else:
-        send_groups = groups
-    return send_groups
-    
+from hoshino.util.sutil import get_service_groups
 
 sv = Service('broadcast', manage_perm=SUPERUSER)
 bc = sv.on_command('bc', aliases={'广播', 'broadcast'}, permission = SUPERUSER,  only_group=False)
@@ -26,7 +13,7 @@ bc = sv.on_command('bc', aliases={'广播', 'broadcast'}, permission = SUPERUSER
 @bc.handle()
 async def bc(bot: Bot, event: Event):
     msg = event.get_message()
-    gids = await get_send_groups()
+    gids = await get_service_groups('broadcast')
     count = 0
     for gid in gids:
         await asyncio.sleep(0.5)

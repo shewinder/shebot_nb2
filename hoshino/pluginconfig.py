@@ -18,9 +18,15 @@ class PluginConfig:
             config: BaseConfig) -> None:
         self._plugin_name = plugin_name
         self._json_file = json_file
-        self._config = self.load_json(config) if self.load_json(config) else config # 优先读取配置文件
-        if not Path(json_file).exists():
+
+        if isinstance(json_file, str):
+            json_file = Path(json_file)
+        if json_file.exists():
+            self._config = self.load_json(config) # 优先读取配置文件
+        else:
+            self._config = config
             self.save_json()
+
         _all_plugin_config[plugin_name] = self
 
     @property

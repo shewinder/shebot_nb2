@@ -4,6 +4,7 @@ import aiohttp
 from pydantic import BaseModel, ValidationError
 
 from hoshino.sres import Res as R
+from hoshino.util.sutil import get_img_from_url
 from .config import plugin_config, Config
 
 conf: Config = plugin_config.config
@@ -72,8 +73,8 @@ class SoucenaoResult(BaseModel):
     data: Union[PixivData, TwitterData, DanbooruData]
 
 async def pixiv_format(r: SoucenaoResult):
-    img = await R.img_from_url(r.header.thumbnail)
-    img = img.cqcode
+    img = await get_img_from_url(r.header.thumbnail)
+    img = R.image_from_memory(img)
     return  img \
         +f'相似度 {r.header.similarity}\n' \
         + f'标题: {r.data.title}\n' \
@@ -82,8 +83,8 @@ async def pixiv_format(r: SoucenaoResult):
         + f'链接： {r.data.ext_urls[0]}'
 
 async def twitter_format(r: SoucenaoResult):
-    img = await R.img_from_url(r.header.thumbnail)
-    img = img.cqcode
+    img = await get_img_from_url(r.header.thumbnail)
+    img = R.image_from_memory(img)
     return  img \
         + f'相似度 {r.header.similarity}\n' \
         + f'tweet_id: {r.data.tweet_id}\n' \
@@ -91,8 +92,8 @@ async def twitter_format(r: SoucenaoResult):
         + f'链接： {r.data.ext_urls[0]}'
 
 async def danbooru_format(r: SoucenaoResult):
-    img = await R.img_from_url(r.header.thumbnail)
-    img = img.cqcode
+    img = await get_img_from_url(r.header.thumbnail)
+    img = R.image_from_memory(img)
     return  img \
         + f'相似度 {r.header.similarity}\n' \
         + f'链接: {r.data.ext_urls[0]}\n' \

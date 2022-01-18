@@ -11,10 +11,11 @@ __pycache__/
 !.env.prod.example
 cache/
 logs
-static
+data
+res
 hoshino/service_config
 *.db
-output.gif
+
 
 
 # C extensions

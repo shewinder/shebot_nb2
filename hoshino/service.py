@@ -47,7 +47,7 @@ def _load_service_data(service_name: str) -> dict:
 
 
 class Service:
-    def __init__(self, name: str, manage_perm: Permission = ADMIN, enable_on_default: bool = True, visible: bool = True):
+    def __init__(self, name: str, manage_perm: Permission = ADMIN, enable_on_default: bool = True, visible: bool = True, help_: str = None):
         '''
         Descrption:  定义一个服务
 
@@ -76,6 +76,7 @@ class Service:
         self.disable_group = set(data.get('disable_group', []))
         self.logger = wrap_logger(self.name)
         self.matchers = []
+        self.help = help_  # modified by shewinder
 
     @staticmethod
     def get_loaded_services() -> Dict[str, "Service"]:

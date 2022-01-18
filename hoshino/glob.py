@@ -1,6 +1,4 @@
-from collections import defaultdict
-from typing import Dict, List
+from queue import Queue
 
-
-CHECKERS = []
-SUBS: Dict[str, Dict] = defaultdict(dict)
+NR18 = Queue(10) # 非r18色图
+R18 = Queue(10) # r18色图.

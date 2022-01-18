@@ -3,7 +3,7 @@ from nonebot.adapters.cqhttp import GroupMessageEvent, PrivateMessageEvent
 from hoshino import Service, Bot, sucmd
 from hoshino.typing import T_State
 from ._model import SubscribeRecord, BaseInfoChecker
-from hoshino.glob import CHECKERS
+from ._glob import CHECKERS
 
 sv = Service('推送管理')
 

@@ -10,7 +10,13 @@ from hoshino.modules.infopush.checkers.bililive import BiliLiveChecker
 from hoshino.modules.infopush.checkers.douyulive import DouyuLiveChecker
 from .._model import BaseInfoChecker, SubscribeRecord
 
-sv = Service('直播推送')
+help_ = """
+[直播订阅]
+[删除直播订阅]
+[查看直播订阅]
+""".strip()
+
+sv = Service('直播推送', help_=help_)
 
 add_live = sv.on_command('live', aliases={'添加直播', '直播订阅'}, only_group=False)
 

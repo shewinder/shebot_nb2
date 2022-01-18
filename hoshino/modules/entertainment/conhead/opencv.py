@@ -31,6 +31,5 @@ def add(filename, outfile, cascade_file=os.path.dirname(os.path.abspath(__file__
         faceimg = faceimg.resize((face_w, face_w))
         r, g, b, a = faceimg.split()
         img.paste(faceimg, (x - x_shift, y - y_shift), mask=a)
-    img.save(outfile)
-    return 1
+    return img
 

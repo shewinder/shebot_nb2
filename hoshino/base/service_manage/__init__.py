@@ -22,7 +22,7 @@ parser.add_argument('-p', '--picture', action='store_true')
 parser1 = ArgumentParser()
 parser1.add_argument('-a', '--all', action='store_true')
 lssv = on_shell_command('lssv', to_me(), aliases={
-                        '服务列表', '功能列表'}, permission=ADMIN, parser=parser)
+                        '服务列表', '功能列表'}, parser=parser)
 enable = on_shell_command('enable', to_me(), aliases={
                           '开启', '打开', '启用'}, parser=parser1, state={'action': '开启'})
 disable = on_shell_command('disable', to_me(), aliases={
@@ -53,6 +53,7 @@ async def _(bot: Bot, event: Event, state: T_State):
             if sv.visible or verbose_all:
                 ox = 'O' if on else 'X'
                 reply.append(f"|{ox}| {sv.name}")
+        reply.append('发送帮助+服务名查看详情，例如：帮助 色图') # edit by shewinder
         await lssv.finish("\n".join(reply)) if not as_pic else await lssv.finish(text2Seg("\n".join(reply)))
 
 

@@ -85,8 +85,9 @@ async def concat_head(bot: Bot, event: Event, state: T_State):
     else: # 使用opencv
         picname = time.strftime("%F-%H%M%S") + ".png"
         outpath = path.join(path.dirname(__file__), 'output', picname)
+        pic = add(picfile, outpath)
         if add(picfile, outpath):
-            await bot.send(event, R.image(outpath))
+            await bot.send(event, R.image_from_memory(pic))
         else:
             fail_pic = path.join(path.dirname(__file__), 'data', '接头失败.png')
             await bot.send(event, R.image(fail_pic))

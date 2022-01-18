@@ -1,0 +1,21 @@
+version: "3.7"
+
+services:
+  shebot:
+    image: shebotnb2
+    restart: always
+    ports:
+      - 9000:9000
+    working_dir: /app
+    volumes:
+      - ./data:/app/data
+    environment:
+      command_start: '["/", ""]'  # 配置命令起始字符
+      command_sep: '["."]'  # 配置命令分割字符
+      host: 0.0.0.0  # 配置 NoneBot 监听的 IP/主机名
+      port: 9000  # 配置 NoneBot 监听的端口
+      debug: 'false' # 开启 debug 模式 **请勿在生产环境开启**
+      superusers: '[2813349544]' # 配置 NoneBot 超级用户
+      nickname: '["nickname"]'  # 配置机器人的昵称
+      modules: '["setu", "entertainment"]'
+      data: data

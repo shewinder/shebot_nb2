@@ -1,5 +1,7 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+*/__pycache__*
+*/*/__pycache__*
 *.py[cod]
 *$py.class
 
@@ -10,5 +12,5 @@ __pycache__/
 .env.prod.example
 cache/
 logs
-*.db
-/data
+data
+.env.prod

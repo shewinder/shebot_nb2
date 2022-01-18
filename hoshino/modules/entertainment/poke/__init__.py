@@ -3,16 +3,13 @@ from typing import Callable
 
 from nonebot.adapters.cqhttp import PokeNotifyEvent
 
-from hoshino import Bot, Event, Service, MessageSegment
+from hoshino import Bot, Service, MessageSegment
+from hoshino.glob import NR18
 from hoshino.sres import Res as R
-from hoshino.util import DailyNumberLimiter, FreqLimiter
-from .config import plugin_config, Config
 
 sv = Service('poke')
-conf: Config = plugin_config.config
 
 pkst = sv.on_notice('notify.poke')
-_nlt = DailyNumberLimiter(conf.daily_max_num)
 
 _handlers = [] # 处理函数列表
 
@@ -22,8 +19,6 @@ async def _(bot: Bot, event: PokeNotifyEvent):
         return
 
     uid = event.user_id
-    if not _nlt.check(uid):
-        await pkst.finish(conf.exceed_notice)
 
     try:
         handler = choice(_handlers)
@@ -39,8 +34,8 @@ def add_handler():
 
 @add_handler()
 async def send_setu(bot: Bot, event: PokeNotifyEvent):
-    pic = R.get_random_img('nr18_setu').cqcode
-    await bot.send(event, pic)
+    st = NR18.get_nowait()
+    await bot.send(event, R.image_from_memory(st.picbytes))
 
 @add_handler()
 async def poke_back(bot: Bot, event: PokeNotifyEvent):
@@ -51,7 +46,7 @@ async def poke_back(bot: Bot, event: PokeNotifyEvent):
 
 @add_handler()
 async def send_record(bot: Bot, event: PokeNotifyEvent):
-    pic = R.get_random_record('xcw骂')
+    pic = R.get_random_record('record/xcw骂')
     await bot.send(event, pic)
     
     

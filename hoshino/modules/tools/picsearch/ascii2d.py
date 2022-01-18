@@ -1,12 +1,11 @@
 from typing import Dict, List, Union
-from urllib.parse import urlencode
-import traceback
 
 import aiohttp
 from lxml import etree
 from pydantic import BaseModel
 
 from hoshino.sres import Res as R
+from hoshino.util.sutil import get_img_from_url
 from .config import plugin_config, Config
 
 conf: Config = plugin_config.config
@@ -17,14 +16,7 @@ async def get_ascii2d_results(pic_url):
     res_list: List[Ascii2dResult] = []
     async with aiohttp.ClientSession() as session:
         url = base_url + f'/search/url/{pic_url}'
-        async with session.post(
-            url='http://23.224.81.98:9053/forwarder/',
-            headers = {'content_type': 'application/json'},
-            json = {
-                'url': url,
-                "method": 'get'
-            }
-        ) as resp:
+        async with session.get(url) as resp:
             t = await resp.text()
             html = etree.HTML(t)
             rows = html.xpath('//div[@class="row item-box"]')
@@ -44,6 +36,6 @@ class Ascii2dResult(BaseModel):
     ext_url: str
 
 async def ascii2d_format(data: Ascii2dResult):
-    img = await R.img_from_url(data.thumb)
-    img = img.cqcode
+    img = await get_img_from_url(data.thumb)
+    img = R.image_from_memory(img)
     return  img + data.ext_url

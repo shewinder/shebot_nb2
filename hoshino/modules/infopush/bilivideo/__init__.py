@@ -7,7 +7,11 @@ from hoshino.typing import T_State
 from .._model import SubscribeRecord
 from hoshino.modules.infopush.checkers.bilivideo import BiliVideoChecker, Video
 
-sv = Service('B站投稿')
+help_ = """
+[B站投稿] B站投稿推送
+""".strip()
+
+sv = Service('B站投稿', help_=help_)
 
 add_video = sv.on_command('bilivideo', aliases={'添加B站投稿推送', 'B站投稿'}, only_group=False)
 

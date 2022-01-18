@@ -6,6 +6,8 @@ LastEditTime: 2021-02-01 14:41:36
 Description: 
 Github: http://github.com/AkiraXie/
 '''
+
+from pathlib import Path
 import nonebot
 import os
 
@@ -15,6 +17,18 @@ db_dir=os.path.join(hsn_config.data,'db/')
 service_dir=os.path.join(hsn_config.data,'service/')
 os.makedirs(db_dir,exist_ok=True)
 os.makedirs(service_dir,exist_ok=True)
+
+res_dir = Path('res')
+font_dir = res_dir.joinpath('fonts')
+userdata_dir = Path(hsn_config.data)
+conf_dir = userdata_dir.joinpath('config')
+
+if not font_dir.exists():
+    font_dir.mkdir()
+if not userdata_dir.exists():
+    userdata_dir.mkdir()
+if not conf_dir.exists():
+    conf_dir.mkdir()
 
 
 from .typing import Final

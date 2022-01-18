@@ -1,10 +1,10 @@
 from nonebot.typing import T_State
 from peewee import fn
 
-from hoshino import Service, Bot, Event
+from hoshino import Service, Bot, Event, res_dir
 from .model import Quest
 
-service = Service('肖秀荣')
+service = Service('考研政治', visible=False)
 qu = service.on_command('肖秀荣', aliases={'来道肖秀荣', '来道政治题', '来道考研政治'})
 qu_mayuan = service.on_command('马原', aliases={'来道马原'})
 qu_mzt = service.on_command('毛中特', aliases={'来道毛中特'})

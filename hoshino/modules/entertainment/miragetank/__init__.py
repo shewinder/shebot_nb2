@@ -4,11 +4,15 @@ from hoshino import Service, Bot, Event
 from hoshino.rule import ArgumentParser
 from hoshino.typing import T_State
 from hoshino.util import DailyNumberLimiter, FreqLimiter
-from hoshino.util.sutil  import extract_url_from_event
+from hoshino.util.sutil  import extract_url_from_event, get_img_from_url
 from .MTCore import gray_car, color_car
 from .config import plugin_config, Config
 
 conf: Config = plugin_config.config
+
+help_ = """
+[幻影坦克]
+""".strip()
 
 sv = Service('幻影坦克')
 _nlt = DailyNumberLimiter(5)
@@ -36,21 +40,19 @@ async def handle_tank(bot: Bot, event: Event, state: T_State):
         state['white'] = urls[0]
         state['black'] = urls[1]
 
-@tank.got('white', prompt='请发送白底图')
+@tank.got('white', prompt='请发送表图')
 async def handle_white(bot: Bot, event: Event, state: T_State):
     url = extract_url_from_event(event)[0]
     if url:
         state['white'] = url
 
-@tank.got('black', prompt='请发送黑底图')
+@tank.got('black', prompt='请发送里图')
 async def handle_black(bot: Bot, event: Event, state: T_State):
     url = extract_url_from_event(event)[0]
     if url:
         state['black'] = url
-    wimg = await R.img_from_url(state['white'])
-    wimg = wimg.open()
-    bimg = await R.img_from_url(state['black'])
-    bimg = bimg.open()
+    wimg = await get_img_from_url(state['white'])
+    bimg = await get_img_from_url(state['black'])
 
     args = state['args']
     if isinstance(args, ParserExit):
@@ -60,6 +62,7 @@ async def handle_black(bot: Bot, event: Event, state: T_State):
         img = color_car(wimg, bimg, chess=args.chess)
     else:
         img = gray_car(wimg, bimg, chess=args.chess)
+    await bot.send(event, '请稍后~')
     pic = R.image_from_memory(img)
     await bot.send(event, pic)
 

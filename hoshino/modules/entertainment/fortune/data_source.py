@@ -38,7 +38,7 @@ def drawing(img: Image.Image, title: str, text: str, title_font: str, text_font:
     font_size = 45
     color = '#F5F5F5'
     center = (140, 99)
-    font = ImageFont.truetype(title_font, font_size)
+    font = ImageFont.truetype(str(title_font), font_size)
     font_length = font.getsize(title)
     pos = (center[0]-font_length[0]/2, center[1]-font_length[1]/2)
     add_text_to_img(img, title, font_size, font=title_font, textfill=color, position=pos)

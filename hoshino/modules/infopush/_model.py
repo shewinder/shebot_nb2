@@ -1,18 +1,23 @@
 import asyncio
-import os
 from dataclasses import dataclass
 from typing import Dict, List
-import pickle
 
 from pathlib import Path
 from pydantic import BaseModel
 
-from hoshino import  get_bot_list, Bot
+from hoshino import  get_bot_list, Bot, userdata_dir
 from hoshino.log import logger
-from hoshino.glob import CHECKERS, SUBS
+from ._glob import CHECKERS, SUBS
 from hoshino.util.sutil import load_config, save_config
 
-json_filepath = Path(__file__).parent.joinpath('subscribe.json')
+
+plug_dir = userdata_dir.joinpath('infopush')
+if not plug_dir.exists():
+    plug_dir.mkdir()
+
+json_filepath = plug_dir.joinpath('subscribe.json')
+if not json_filepath.exists():
+    json_filepath.touch()
 
 class SubscribeRecord(BaseModel):
     checker: str
@@ -34,6 +39,9 @@ class SubscribeRecord(BaseModel):
 
     @classmethod
     def init(cls):
+        """
+        导入保存的订阅到SUBS全局变量
+        """
         dic = load_config(json_filepath)
         for k, v in dic.items():
             SUBS[k] = {

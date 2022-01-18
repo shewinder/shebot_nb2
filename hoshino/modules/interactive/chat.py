@@ -2,6 +2,7 @@ from typing import Dict
 from loguru import logger
 from hoshino import Service, Bot, Event, Message
 import random
+from hoshino.sres import Res as R
 sv = Service('chat', visible=False)
 
 
@@ -14,6 +15,9 @@ async def ddhaole(bot: Bot, event: Event):
     await bot.send(event, '那个朋友是不是你弟弟？')
 sv.on_command('我有个朋友说他好了', aliases=('我朋友说他好了', )).handle()(ddhaole)
 
+async def laopo(bot: Bot, event: Event):
+    await bot.send(event, '这位先生，你没有老婆')
+sv.on_keyword(keywords=['老婆'], only_to_me=True).handle()(laopo)
 
 sv1 = Service('repeat', visible=False)
 
