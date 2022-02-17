@@ -1,17 +1,15 @@
 import importlib
 import os
-from typing import Dict, Iterable, List
-from itertools import groupby
-
 import pathlib
+from itertools import groupby
+from typing import Dict, Iterable, List
 
+from hoshino import add_job
+from hoshino.log import logger
 from loguru import logger
 
-from hoshino import  add_job
-from hoshino.log import logger
 from ._glob import SUBS
-
-from ._model import SubscribeRecord, BaseInfoChecker
+from ._model import BaseInfoChecker, SubscribeRecord
 
 checker_dir = pathlib.Path(__file__).parent.joinpath('checkers')
 
@@ -40,7 +38,8 @@ async def check(checkers: List[BaseInfoChecker]):
         if not subs:
             logger.info(f'{checker.__class__.__name__} 当前无订阅')
             continue
-        for url, sub in subs.items():
+        for url in list(subs):
+            sub = subs[url]
             logger.info(f'checking {sub.remark}')
             if await checker.check_and_notice(sub):
                 sub.save()

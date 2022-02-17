@@ -1,19 +1,19 @@
 import aiohttp
 
 from hoshino.modules.infopush.checkers.bilivideo import Video
-from nonebot.adapters.cqhttp import GroupMessageEvent, PrivateMessageEvent
+from nonebot.adapters.cqhttp import GroupMessageEvent
 from hoshino import Service, Bot, Event
 from hoshino.typing import T_State
 from .._model import SubscribeRecord
 from hoshino.modules.infopush.checkers.bilivideo import BiliVideoChecker, Video
 
 help_ = """
-[B站投稿] B站投稿推送
+[B站投稿订阅] B站投稿推送
 """.strip()
 
 sv = Service('B站投稿', help_=help_)
 
-add_video = sv.on_command('bilivideo', aliases={'添加B站投稿推送', 'B站投稿'}, only_group=False)
+add_video = sv.on_command('bilivideo', aliases={'B站投稿订阅', 'B站投稿'}, only_group=False)
 
 async def get_name_from_uid(uid: int):
     async with aiohttp.ClientSession() as session:
@@ -42,34 +42,16 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     v: Video = state['video']
     gid = event.group_id
     try:
-        BiliVideoChecker.add_group(gid, 'BiliVideoChecker', state['url'], remark=f'{state["upname"]}投稿')
+        BiliVideoChecker.add_sub(gid, state['url'], remark=f'{state["upname"]}投稿', creator_id=event.user_id)
         await add_video.finish(f'成功订阅{state["upname"]}的投稿')
     except ValueError as e:
         await add_video.finish(str(e))
-
-@add_video.handle()
-async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
-    v: Video = await BiliVideoChecker.get_data(state['url'])
-    uid = event.user_id
-    try:
-        BiliVideoChecker.add_user(uid, 'BiliVideoChecker', state['url'], remark=f'{state["upname"]}投稿')
-        await add_video.finish(f'成功订阅{state["upname"]}的投稿')
-    except ValueError as e:
-        await add_video.finish(str(e))
-
 
 del_video = sv.on_command('del_video', aliases={'删除B站投稿'}, only_group=False)
 
 @del_video.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
-    subs = BiliVideoChecker.get_group_subs(event.group_id)
-    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
-    state['subs'] = subs
-    await bot.send(event, '请发送对应序号选择取消的订阅\n' + '\n'.join(reply))
-
-@del_video.handle()
-async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
-    subs = BiliVideoChecker.get_user_subs(event.user_id)
+    subs = BiliVideoChecker.get_creator_subs(event.group_id, event.user_id)
     reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     state['subs'] = subs
     await bot.send(event, '请发送对应序号选择取消的订阅\n' + '\n'.join(reply))
@@ -81,30 +63,16 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
         sub: SubscribeRecord  = state['subs'][choice]
     except:
         del_video.reject('输入有误')
-    BiliVideoChecker.delete_group_sub(event.group_id, sub)
-    await bot.send(event, f'已经删除{sub.name}的投稿订阅')
-
-@del_video.got('choice')
-async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
-    try:
-        choice = int(state['choice']) - 1
-        sub: SubscribeRecord  = state['subs'][choice]
-    except:
-        await del_video.finish('输入有误')
-    BiliVideoChecker.delete_user_sub(event.user_id, sub)
+    BiliVideoChecker.delete_creator_sub(event.group_id, event.user_id, sub)
     await bot.send(event, f'已经删除{sub.remark}的投稿订阅')
 
 show_live = sv.on_command('show_video', aliases={'查看投稿订阅'}, only_group=False)
 @show_live.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
-    subs = BiliVideoChecker.get_group_subs(event.group_id)
+    subs = BiliVideoChecker.get_creator_subs(event.group_id, event.user_id)
     reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     await bot.send(event, '本群订阅如下\n' + '\n'.join(reply))   
 
-@show_live.handle()
-async def _(bot: Bot, event: PrivateMessageEvent):
-    subs = BiliVideoChecker.get_user_subs(event.user_id)
-    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
-    await bot.send(event, '您的订阅如下\n' + '\n'.join(reply))   
+
 
 

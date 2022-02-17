@@ -13,7 +13,7 @@ class Dynamic(InfoData):
     imgs: List[str] = []
 
 class BiliDynamicChecker(BaseInfoChecker):
-    def notice_format(self, sub: SubscribeRecord , data: Dynamic):
+    async def notice_format(self, sub: SubscribeRecord , data: Dynamic):
         imgs = [MessageSegment.image(img) for img in data.imgs]
         msg = Message(f'{sub.remark}更新啦！\n{data.content}') \
               .extend(imgs) \

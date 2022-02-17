@@ -2,7 +2,7 @@ from asyncio.exceptions import TimeoutError
 
 import aiohttp
 import requests
-from nonebot.adapters.cqhttp.message import MessageSegment
+from nonebot.adapters.cqhttp.message import Message, MessageSegment
 
 from hoshino.log import logger
 from .._model import BaseInfoChecker, SubscribeRecord, InfoData
@@ -23,7 +23,7 @@ class Live(InfoData):
     cover: str
 
 class BiliLiveChecker(BaseInfoChecker):
-    def notice_format(self, sub: SubscribeRecord , data: Live):
+    async def notice_format(self, sub: SubscribeRecord , data: Live):
         return f'{sub.remark}啦！\n{data.title}'\
                 + MessageSegment.image(data.cover)\
                 + data.portal

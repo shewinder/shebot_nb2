@@ -7,14 +7,14 @@ from hoshino.typing import T_State
 from .._model import SubscribeRecord
 
 help_ = """
-[B站动态] B站up动态推送
-[删除B站动态] B站up动态推送
-[查看B站动态] B站up动态推送
+[B站动态订阅] B站up动态推送
+[删除B站动态订阅] B站up动态推送
+[查看B站动态订阅] B站up动态推送
 """.strip()
 
 sv = Service('B站动态', help_=help_)
 
-add_dynamic = sv.on_command('bilidynamic', aliases={'添加B站动态推送', 'B站动态'}, only_group=False)
+add_dynamic = sv.on_command('bilidynamic', aliases={'B站动态订阅', 'B站动态'}, only_group=False)
 
 async def get_name_from_uid(uid: int):
     async with aiohttp.ClientSession() as session:
@@ -43,34 +43,16 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     v: Dynamic = state['dynamic']
     gid = event.group_id
     try:
-        BiliDynamicChecker.add_group(gid, 'BiliDynamicChecker', state['url'], remark=f'{state["upname"]}动态')
+        BiliDynamicChecker.add_sub(gid, state['url'], remark=f'{state["upname"]}动态', creator_id=event.user_id)
         await add_dynamic.finish(f'成功订阅{state["upname"]}的动态')
     except ValueError as e:
         await add_dynamic.finish(str(e))
 
-@add_dynamic.handle()
-async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
-    v: Dynamic = await BiliDynamicChecker.get_data(state['url'])
-    uid = event.user_id
-    try:
-        BiliDynamicChecker.add_user(uid, 'BiliDynamicChecker', state['url'], remark=f'{state["upname"]}动态')
-        await add_dynamic.finish(f'成功订阅{state["upname"]}的动态')
-    except ValueError as e:
-        await add_dynamic.finish(str(e))
-
-
-del_dynamic = sv.on_command('del_dynamic', aliases={'删除B站动态'}, only_group=False)
+del_dynamic = sv.on_command('del_dynamic', aliases={'删除B站动态订阅'}, only_group=False)
 
 @del_dynamic.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
-    subs = BiliDynamicChecker.get_group_subs(event.group_id)
-    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
-    state['subs'] = subs
-    await bot.send(event, '请发送对应序号选择取消的订阅\n' + '\n'.join(reply))
-
-@del_dynamic.handle()
-async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
-    subs = BiliDynamicChecker.get_user_subs(event.user_id)
+    subs = BiliDynamicChecker.get_creator_subs(event.group_id, event.user_id)
     reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     state['subs'] = subs
     await bot.send(event, '请发送对应序号选择取消的订阅\n' + '\n'.join(reply))
@@ -82,30 +64,14 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
         sub: SubscribeRecord = state['subs'][choice]
     except:
         await del_dynamic.finish('输入有误')
-    BiliDynamicChecker.delete_group_sub(event.group_id, sub)
+    BiliDynamicChecker.delete_creator_sub(event.group_id, event.user_id, sub)
     await bot.send(event, f'已经删除{sub.remark}订阅')
 
-@del_dynamic.got('choice')
-async def _(bot: Bot, event: PrivateMessageEvent, state: T_State):
-    try:
-        choice = int(state['choice']) - 1
-        sub: SubscribeRecord = state['subs'][choice]
-    except:
-        await del_dynamic.finish('输入有误')
-    BiliDynamicChecker.delete_user_sub(event.user_id, sub)
-    await bot.send(event, f'已经删除{sub.remark}订阅')
-
-show_live = sv.on_command('show_dynamic', aliases={'查看动态订阅'}, only_group=False)
+show_live = sv.on_command('show_dynamic', aliases={'查看B站动态订阅'}, only_group=False)
 @show_live.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
-    subs = BiliDynamicChecker.get_group_subs(event.group_id)
+    subs = BiliDynamicChecker.get_creator_subs(event.group_id, event.user_id)
     reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
     await bot.send(event, '本群订阅如下\n' + '\n'.join(reply))   
-
-@show_live.handle()
-async def _(bot: Bot, event: PrivateMessageEvent):
-    subs = BiliDynamicChecker.get_user_subs(event.user_id)
-    reply = [f'{i+1}. {sub.remark}' for i,sub in enumerate(subs)]
-    await bot.send(event, '您的订阅如下\n' + '\n'.join(reply))   
 
 

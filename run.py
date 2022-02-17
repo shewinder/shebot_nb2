@@ -12,6 +12,8 @@ from nonebot.adapters.cqhttp import Bot
 from pydantic import parse_raw_as
 from typing import Dict, Set
 
+import sys
+
 
 nonebot.init()
 moduledir = 'hoshino/modules/'
@@ -37,6 +39,7 @@ if modules := config.modules:
     for module in modules:
         module = os.path.join(moduledir, module)
         nonebot.load_plugins(module)
+print(sys.modules)
 
 
 

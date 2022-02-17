@@ -14,7 +14,7 @@ class Video(InfoData):
     BV: str
 
 class BiliVideoChecker(BaseInfoChecker):
-    def notice_format(self, sub: SubscribeRecord , data: Video):
+    async def notice_format(self, sub: SubscribeRecord , data: Video):
         return f'{sub.remark}更新啦！\n{data.title}'\
                 + MessageSegment.image(data.cover)\
                 + data.portal

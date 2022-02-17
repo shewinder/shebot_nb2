@@ -50,7 +50,8 @@ def save_config(config:dict,path:str, indent=2):
         return True
     except Exception as ex:
         print(f'exception occured when saving config to {path}')
-        return False
+        raise
+        #return False
 
 def load_config(path):
     try:

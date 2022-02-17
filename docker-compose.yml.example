@@ -2,7 +2,7 @@ version: "3.7"
 
 services:
   shebot:
-    image: shebotnb2
+    image: shewinder/shebot:test
     restart: always
     ports:
       - 9000:9000
@@ -10,12 +10,15 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      command_start: '["/", ""]'  # 配置命令起始字符
-      command_sep: '["."]'  # 配置命令分割字符
-      host: 0.0.0.0  # 配置 NoneBot 监听的 IP/主机名
-      port: 9000  # 配置 NoneBot 监听的端口
+      command_start: '["/", ""]' # 配置命令起始字符
+      command_sep: '["."]' # 配置命令分割字符
+      host: 0.0.0.0 # 配置 NoneBot 监听的 IP/主机名
+      port: 9000 # 配置 NoneBot 监听的端口
       debug: 'false' # 开启 debug 模式 **请勿在生产环境开启**
-      superusers: '[2813349544]' # 配置 NoneBot 超级用户
-      nickname: '["nickname"]'  # 配置机器人的昵称
-      modules: '["setu", "entertainment"]'
+      superusers: '[xxxxxxx]' # 配置 NoneBot 超级用户
+      nickname: '["镜华"]' # 配置机器人的昵称
+      modules: '["setu", "groupmanage", "entertainment", "tools", "infopush", "interactive", "pixiv", "web"]'
       data: data
+      apscheduler_autostart: 'true'
+      apscheduler_config: '{"apscheduler.timezone": "Asia/Shanghai","apscheduler.job_defaults.misfire_grace_time":"60","apscheduler.job_defaults.coalesce": "true"}'
+      TZ: Asia/Shanghai

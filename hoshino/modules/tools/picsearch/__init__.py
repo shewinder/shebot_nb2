@@ -57,7 +57,7 @@ async def _(bot: "Bot", event: "Event", state: T_State):
         reply = '以下结果来自ascii2d\n\n'
         r = results[0]
         reply += await ascii2d_format(r)
-    await search_pic.finish(reply)
+        await search_pic.finish(reply)
 
     # 都没有结果
     await bot.send(event, '没找到结果哦')

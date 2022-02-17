@@ -7,3 +7,5 @@ Description:
 Github: http://github.com/AkiraXie/
 '''
 from nonebot.adapters.cqhttp.message import MessageSegment, Message
+
+

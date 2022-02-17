@@ -1,11 +1,14 @@
 import asyncio
 from dataclasses import dataclass
+from tokenize import group
 from typing import Dict, List
 
 from pathlib import Path
+from venv import create
+from hoshino import Message, MessageSegment
 from pydantic import BaseModel
 
-from hoshino import  get_bot_list, Bot, userdata_dir
+from hoshino import  get_bot_list, Bot, userdata_dir, MessageSegment
 from hoshino.log import logger
 from ._glob import CHECKERS, SUBS
 from hoshino.util.sutil import load_config, save_config
@@ -24,8 +27,7 @@ class SubscribeRecord(BaseModel):
     remark: str
     url: str
     date: str
-    groups: List[int]
-    users: List[int]
+    creator: Dict[int, List[int]]
 
     @classmethod
     def to_json(cls):
@@ -50,6 +52,9 @@ class SubscribeRecord(BaseModel):
             }
 
     def save(self):
+        if len(self.creator) == 0:
+            logger.warning('订阅者为空')
+            return
         SUBS[self.checker][self.url] = self
         save_config(self.to_json(), json_filepath)
 
@@ -71,7 +76,7 @@ class InfoData:
     is_new: bool = True # 用于手动指定消息是否为新消息
 
 class BaseInfoChecker:
-    def __init__(self, seconds: int=120) -> None:
+    def __init__(self, seconds: int=600) -> None:
         """
         seconds 代表checker运行间隔秒数, 默认120s
         """
@@ -92,109 +97,69 @@ class BaseInfoChecker:
         raise NotImplementedError
 
     @classmethod
-    def get_group_subs(cls, group_id: int) -> List[SubscribeRecord]:
+    def get_creator_subs(cls, group_id: int, creator_id: int) -> List[SubscribeRecord]:
         _subs = []
-        v = SUBS.get(cls.__name__, {})
+        v: Dict[str, SubscribeRecord] = SUBS.get(cls.__name__, {})
         for vv in v.values():
-            if group_id in vv.groups:
+            if group_id in vv.creator and creator_id in vv.creator[group_id]:
                 _subs.append(vv)
         return _subs
-
-    @classmethod
-    def get_user_subs(cls, user_id: int) -> List[SubscribeRecord]:
-        _subs = []
-        v = SUBS.get(cls.__name__, {})
-        for vv in v.values():
-            if user_id in vv.users:
-                _subs.append(vv)
-        return _subs
-
-    @classmethod
-    def delete_group_sub(cls, group_id: int, sub: SubscribeRecord):
-        if group_id in sub.groups:
-            sub.groups.remove(group_id)
-        if not sub.groups and not sub.users:
-            sub.delete()
     
     @classmethod
-    def delete_user_sub(cls, user_id: int, sub: SubscribeRecord):
-        if user_id in sub.users:
-            sub.users.remove(user_id)
-        if not sub.users and not sub.groups:
-            sub.delete()
+    def delete_creator_sub(cls, group_id: int, creator_id: int, sub: SubscribeRecord):
+        if group_id in sub.creator and creator_id in sub.creator[group_id]:
+            sub.creator[group_id].remove(creator_id)
+            if len(sub.creator[group_id]) == 0:
+                del sub.creator[group_id]
+            if len(sub.creator) == 0:
+                sub.delete()
+            sub.save()
+        else:
+            pass
 
     @classmethod
-    def add_group(cls, group_id: int, checker: str, url: str, remark: str=None):
-        sub = cls.get_subscribe(checker, url)
+    def add_sub(cls, group_id: int, url: str, remark: str=None, creator_id: int=None):
+        sub = cls.get_subscribe(cls.__name__, url)
         if sub:
-            if group_id in sub.groups:
-                raise ValueError('重复订阅')
-            sub.groups.append(group_id)
+            if group_id in sub.creator:
+                if creator_id in sub.creator[group_id]:
+                    raise ValueError('重复订阅')
+                else:
+                    sub.creator[group_id].append(creator_id)
+            sub.creator[group_id] = [creator_id]
             sub.save()
         else:
             try:
-                sub = SubscribeRecord(checker = checker,
+                sub = SubscribeRecord(checker = cls.__name__,
                                       url = url,
                                       remark = remark,
                                       groups = [group_id],
                                       users = [],
-                                      date = '')
+                                      date = '',
+                                      creator = {group_id: [creator_id]})
                 sub.save()
                 return sub
             except Exception as e:
                 logger.exception(e)
                 raise ValueError(e)
 
-    @classmethod
-    def add_user(cls, user_id: int, checker: str, url: str, remark: str=None):
-        sub = cls.get_subscribe(checker, url)
-        if sub:
-            if user_id in sub.users:
-                raise ValueError('重复订阅')
-            sub.users.append(user_id)
-            sub.save()
-        else:
-            try:
-                sub = SubscribeRecord(checker = checker,
-                                      url = url,
-                                      remark = remark,
-                                      users = [user_id],
-                                      groups = [],
-                                      date = '')
-                sub.save()
-                return sub
-            except Exception as e:
-                logger.exception(e)
-                raise ValueError(e)
-
-    def notice_format(self, sub: SubscribeRecord, data: InfoData):
+    async def notice_format(self, sub: SubscribeRecord, data: InfoData) -> Message:
         """
         默认的通知排版格式，子类可重写此函数
         """
-        return f'{sub.remark}更新啦！\n传送门{data.portal}'
+        return Message(f'{sub.remark}更新啦！\n传送门{data.portal}')
 
     async def notice(self, sub: SubscribeRecord, data: InfoData):
         bot: Bot = get_bot_list()[0]
-        for gid in sub.groups:
+        for gid in sub.creator:
             try:
-                gid = int(gid)
-            except:
-                continue
-            try:
+                creators = sub.creator[gid]
+                msg = [MessageSegment.at(uid) for uid in creators]
+                msg.append(MessageSegment.text('\n'))
+                fmt = await self.notice_format(sub, data)
+                msg.extend(fmt)
                 await bot.send_group_msg(group_id=gid, 
-                                         message=self.notice_format(sub, data))
-            except Exception as e:
-                logger.exception(e)
-            await asyncio.sleep(0.5)
-        for uid in sub.users:
-            try:
-                uid = int(uid)
-            except:
-                continue
-            try:
-                print(self.notice_format(sub, data))
-                await bot.send_private_msg(user_id=uid, 
-                                           message=self.notice_format(sub, data))
+                                         message=msg)
             except Exception as e:
                 logger.exception(e)
             await asyncio.sleep(0.5)
