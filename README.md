@@ -1,7 +1,6 @@
 # shebot_nb2
 
-**这是基于https://github.com/AkiraXie/hoshino.nb2魔改Bot**
-
+**这是基于https://github.com/AkiraXie/hoshino.nb2**魔改Bot
 
 ## 特别感谢
 - [AkiraXie / hoshino.nb2](https://github.com/AkiraXie/hoshino.nb2)
