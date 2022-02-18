@@ -20,7 +20,7 @@ class BiliVideoChecker(BaseInfoChecker):
                 + data.portal
                 
     @classmethod
-    async def get_data(self, url) -> Video:
+    async def get_data(self, url: str) -> Video:
         headers = {
             'Referer': 'https://link.bilibili.com/p/center/index',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36'
@@ -47,4 +47,11 @@ class BiliVideoChecker(BaseInfoChecker):
             except Exception as e:
                 logger.exception(e)
                 return None
-BiliVideoChecker(120)
+
+    def form_url(self, dinstinguisher: str) -> str:
+        return f'https://api.bilibili.com/x/space/acc/info?mid={dinstinguisher}&jsonp=jsonp'
+    
+    def form_remark(self, data: Video, distinguisher: str) -> str:
+        return f'{data.author}的投稿'
+
+BiliVideoChecker(120, 'Bilibili投稿', 'up ID')

@@ -39,7 +39,6 @@ if modules := config.modules:
     for module in modules:
         module = os.path.join(moduledir, module)
         nonebot.load_plugins(module)
-print(sys.modules)
 
 
 

@@ -1,6 +1,3 @@
-from urllib.parse import urlencode, quote
-import aiohttp
-import urllib3
 from hoshino import Bot, Event, Service
 from hoshino.modules.infopush.checkers.pixivuser import (PixivData,
                                                          PixivUserChecker)
@@ -16,7 +13,7 @@ help_ = """
 
 sv = Service('Pixiv投稿', help_=help_)
 
-add_pixuser = sv.on_command('bilipixuser', aliases={'Pixiv投稿订阅', 'Pixiv投稿'}, only_group=True)
+add_pixuser = sv.on_command('pixivuser', aliases={'Pixiv投稿订阅', 'Pixiv投稿'}, only_group=True)
 
 
 @add_pixuser.got('mid', prompt='请发送用户 ID')

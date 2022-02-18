@@ -1,4 +1,5 @@
-from typing import Dict, List, Union
+from typing import Dict, List
+import requests
 
 import aiohttp
 from pydantic import BaseModel, ValidationError
@@ -7,6 +8,14 @@ from nonebot.adapters.cqhttp.message import MessageSegment, Message
 from hoshino.log import logger
 from hoshino.sres import Res as R
 from .._model import BaseInfoChecker, InfoData, SubscribeRecord
+
+def get_name_from_uid(uid: str) -> str:
+    with requests.get(f'https://api.bilibili.com/x/space/acc/info?mid={uid}&jsonp=jsonp') as resp:
+        if resp.status_code == 200:
+            json_dic = resp.json()
+            return json_dic['data']['name']
+        else:
+            raise ValueError(f'获取用户名失败，status： {resp.status_code}')
 
 class Dynamic(InfoData):
     content: str
@@ -85,7 +94,14 @@ class BiliDynamicChecker(BaseInfoChecker):
                 logger.exception(e)
                 return None
 
-BiliDynamicChecker(60)
+    def form_url(self, dinstinguisher: str) -> str:
+        return f'https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid={dinstinguisher}'
+
+    def form_remark(self, data: Dynamic, distinguisher: str) -> str:
+        name = get_name_from_uid(distinguisher)
+        return f'{name}B站动态'
+
+BiliDynamicChecker(60, "Bilibili动态", 'up id')
 
 class Desc(BaseModel):
     uid: int 

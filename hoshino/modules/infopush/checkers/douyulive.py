@@ -34,7 +34,7 @@ class DouyuLiveChecker(BaseInfoChecker):
         return data.name
 
     @classmethod
-    async def get_data(self, url, use_proxy: bool=True) -> DouyuLive:
+    async def get_data(self, url, use_proxy: bool=False) -> DouyuLive:
         proxy = 'http://' + get_proxy() if use_proxy else None
         headers = {
             'Referer': f'https://www.douyu.com/{url.split("/")[-1]}',
@@ -65,4 +65,10 @@ class DouyuLiveChecker(BaseInfoChecker):
             except Exception as e:
                 #logger.exception(e)
                 return None
-DouyuLiveChecker(5)
+
+    def form_url(self, dinstinguisher: str) -> str:
+        return f'http://open.douyucdn.cn/api/RoomApi/room/' + dinstinguisher
+
+    def form_remark(self, data: DouyuLive, distinguisher: str) -> str:
+        return f'{data.name}直播'
+DouyuLiveChecker(5, '斗鱼直播', '房间号')

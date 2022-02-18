@@ -46,5 +46,12 @@ class PixivUserChecker(BaseInfoChecker):
             except Exception as e:
                 logger.exception(e)
                 return None
-PixivUserChecker(3600)
+
+    def form_url(self, dinstinguisher: str) -> str:
+        return f'https://api.shewinder.win/pixiv/user?user_id={dinstinguisher}'
+    
+    def form_remark(self, data: PixivData, distinguisher: str) -> str:
+        return f'{data.user_name}的插画'
+
+PixivUserChecker(3600, 'Pixiv投稿', '用户ID')
 #PixivUserChecker(30)

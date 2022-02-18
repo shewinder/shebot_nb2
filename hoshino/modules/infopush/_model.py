@@ -1,10 +1,7 @@
 import asyncio
 from dataclasses import dataclass
-from tokenize import group
 from typing import Dict, List
 
-from pathlib import Path
-from venv import create
 from hoshino import Message, MessageSegment
 from pydantic import BaseModel
 
@@ -76,11 +73,14 @@ class InfoData:
     is_new: bool = True # 用于手动指定消息是否为新消息
 
 class BaseInfoChecker:
-    def __init__(self, seconds: int=600) -> None:
+    def __init__(self, seconds: int=600, name: str="unnamed checker", distinguisher_name: str="id") -> None:
         """
         seconds 代表checker运行间隔秒数, 默认120s
         """
         self.seconds = seconds
+        self.name = name
+        self.distinguisher_name = distinguisher_name
+        assert self not in CHECKERS, f'{self.name}已存在'
         CHECKERS.append(self)
 
     @staticmethod
@@ -92,7 +92,7 @@ class BaseInfoChecker:
         return SUBS.get(checker_name, dict()).get(url, dict())
 
     @classmethod
-    async def get_data(cls, url) -> InfoData:
+    async def get_data(cls, url: str=None) -> InfoData:
         # 获取数据,插件应实现此抽象基类
         raise NotImplementedError
 
@@ -143,7 +143,8 @@ class BaseInfoChecker:
                 logger.exception(e)
                 raise ValueError(e)
 
-    async def notice_format(self, sub: SubscribeRecord, data: InfoData) -> Message:
+    @classmethod
+    async def notice_format(cls, sub: SubscribeRecord, data: InfoData) -> Message:
         """
         默认的通知排版格式，子类可重写此函数
         """
@@ -178,3 +179,16 @@ class BaseInfoChecker:
             return True
         else:
             return False
+
+    def form_url(self, dinstinguisher: str) -> str:
+        """
+        根据唯一标识生成url, checker应实现此方法
+        """
+        raise NotImplementedError
+
+    def form_remark(self, data: InfoData, distinguisher: str) -> str:
+        """
+        根据data生成remark, checker应实现此方法
+        当实现中data不可或缺, 但data为None时, 应抛出ValueError
+        """
+        raise NotImplementedError

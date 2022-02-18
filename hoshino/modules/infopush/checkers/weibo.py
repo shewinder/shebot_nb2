@@ -38,4 +38,10 @@ class WeiboChecker(BaseInfoChecker):
         wb.channel_title = data['channel_title']
         return wb
 
-WeiboChecker(10)
+    def form_url(self, distinguisher: str) -> str:
+        return RSS(f'weibo/user/{distinguisher}').url
+    
+    def form_remark(self, data: Weibo, distinguisher: str) -> str:
+        return data.channel_title
+
+WeiboChecker(120, '微博', '博主Id')

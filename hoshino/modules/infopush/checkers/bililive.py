@@ -18,6 +18,23 @@ def get_proxy():
     except ConnectionError:
         return None
 
+def get_name_from_room(room_id: str) -> str:
+        headers = {
+            'Referer': 'https://link.bilibili.com/p/center/index',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36'
+        }
+        params = {
+            'roomid': room_id
+        } 
+        with requests.get('https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room', 
+                                headers=headers, 
+                                params=params) as resp:
+            if resp.status_code == 200:
+                json_dic = resp.json()
+                return json_dic['data']['info']['uname']
+            else:
+                pass
+
 class Live(InfoData):
     title: str
     cover: str
@@ -83,4 +100,12 @@ class BiliLiveChecker(BaseInfoChecker):
             except Exception as e:
                 #logger.exception(e)
                 return None
-BiliLiveChecker(5)
+
+    def form_url(self, dinstinguisher: str) -> str:
+        return 'https://api.live.bilibili.com/room/v1/Room/get_info?room_id=' + dinstinguisher
+    
+    def form_remark(self, data: InfoData, distinguisher: str) -> str:
+        name = get_name_from_room(distinguisher)
+        return f'{name}B站直播间'
+
+BiliLiveChecker(5, 'Bilibili直播', '房间号')
