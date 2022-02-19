@@ -2,11 +2,13 @@ from typing import List
 
 from hoshino import Bot, Service
 from hoshino.typing import T_State, GroupMessageEvent
+from hoshino.permission import GROUP_ADMIN, GROUP_OWNER
 
 from .._model import SubscribeRecord, BaseInfoChecker
 
 help_ = """
 [订阅] 添加一个订阅
+[订阅 -a] 为全群订阅（管理）
 [删除订阅]
 [查看订阅]
 """.strip()
@@ -16,6 +18,16 @@ _checkers = BaseInfoChecker.get_all_checkers()
 sv = Service('订阅', help_=help_)
 
 add_subscribe = sv.on_command('subscribe', aliases={'订阅'}, only_group=True)
+
+@add_subscribe.handle()
+async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
+    msg = str(event.message).strip()
+    if msg == '-a' or msg == '--all':
+        admin = await GROUP_ADMIN(bot, event)
+        owner = await GROUP_OWNER(bot, event)
+        if not admin and not owner:
+            await add_subscribe.finish('您不是管理员')
+        state['all'] = True
 
 async def choose(bot: Bot, event: GroupMessageEvent, state: T_State):
     if state['choice'] == 'cancel' or state['choice'] == '取消':
@@ -54,7 +66,7 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     except:
         data = None # 对于采用了ip池的checker，失败概率很高，暂不处理
     gid = event.group_id
-    uid = event.user_id
+    uid = 'all' if state.get('all') else event.user_id
     try:
         remark = checker.form_remark(data, state['dis'])
     except ValueError as e:

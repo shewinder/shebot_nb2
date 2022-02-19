@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from hoshino import Message, MessageSegment
 from pydantic import BaseModel
@@ -24,7 +24,7 @@ class SubscribeRecord(BaseModel):
     remark: str
     url: str
     date: str
-    creator: Dict[int, List[int]]
+    creator: Dict[int, List[str]]
 
     @classmethod
     def to_json(cls):
@@ -97,7 +97,9 @@ class BaseInfoChecker:
         raise NotImplementedError
 
     @classmethod
-    def get_creator_subs(cls, group_id: int, creator_id: int) -> List[SubscribeRecord]:
+    def get_creator_subs(cls, group_id: int, creator_id: Union[int, str]) -> List[SubscribeRecord]:
+        if isinstance(creator_id, int):
+            creator_id = str(creator_id)
         _subs = []
         v: Dict[str, SubscribeRecord] = SUBS.get(cls.__name__, {})
         for vv in v.values():
@@ -106,7 +108,9 @@ class BaseInfoChecker:
         return _subs
     
     @classmethod
-    def delete_creator_sub(cls, group_id: int, creator_id: int, sub: SubscribeRecord):
+    def delete_creator_sub(cls, group_id: int, creator_id: Union[int, str], sub: SubscribeRecord):
+        if isinstance(creator_id, int):
+            creator_id = str(creator_id)
         if group_id in sub.creator and creator_id in sub.creator[group_id]:
             sub.creator[group_id].remove(creator_id)
             if len(sub.creator[group_id]) == 0:
@@ -118,7 +122,9 @@ class BaseInfoChecker:
             pass
 
     @classmethod
-    def add_sub(cls, group_id: int, url: str, remark: str=None, creator_id: int=None):
+    def add_sub(cls, group_id: int, url: str, remark: str=None, creator_id: Union[int, str]=None):
+        if isinstance(creator_id, int):
+            creator_id = str(creator_id)
         sub = cls.get_subscribe(cls.__name__, url)
         if sub:
             if group_id in sub.creator:
