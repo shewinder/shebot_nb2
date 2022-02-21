@@ -10,7 +10,9 @@ help_ = """
 [订阅] 添加一个订阅
 [订阅 -a] 为全群订阅（管理）
 [删除订阅]
+[删除订阅 -a]
 [查看订阅]
+[查看订阅 -a]
 """.strip()
 
 _checkers = BaseInfoChecker.get_all_checkers()
@@ -19,8 +21,8 @@ sv = Service('订阅', help_=help_)
 
 add_subscribe = sv.on_command('subscribe', aliases={'订阅'}, only_group=True)
 
-@add_subscribe.handle()
-async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
+
+async def check_perm(bot: Bot, event: GroupMessageEvent, state: T_State):
     msg = str(event.message).strip()
     if msg == '-a' or msg == '--all':
         admin = await GROUP_ADMIN(bot, event)
@@ -47,6 +49,7 @@ async def show_all(bot: Bot, event: GroupMessageEvent, state: T_State):
     msg.append('输入“取消”或者“cancel”退出')
     await bot.send(event, '\n'.join(msg))
 
+add_subscribe.handle()(check_perm)
 add_subscribe.handle()(show_all)
 add_subscribe.got('choice')(choose)
     
@@ -79,10 +82,13 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
 
 del_subscribe = sv.on_command('del_subscribe', aliases={'删除订阅'}, only_group=True)
 
+
+del_subscribe.handle()(check_perm)
+
 @del_subscribe.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     gid = event.group_id
-    uid = event.user_id
+    uid = 'all' if state.get('all') else event.user_id
     subs: List[SubscribeRecord] = []
     for checker in _checkers:
         subs.extend(checker.get_creator_subs(gid, uid))
@@ -110,11 +116,14 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
 
 show_subscribe = sv.on_command('show_subscribe', aliases={'查看订阅'}, only_group=True)
 
+show_subscribe.handle()(check_perm)
+
 @show_subscribe.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     subs: List[SubscribeRecord] = []
+    uid = 'all' if state.get('all') else event.user_id
     for checker in _checkers:
-        subs.extend(checker.get_creator_subs(event.group_id, event.user_id))
+        subs.extend(checker.get_creator_subs(event.group_id, uid))
     if not subs:
         await show_subscribe.finish('没有订阅')
     msg = ['你在本群的订阅如下\n']

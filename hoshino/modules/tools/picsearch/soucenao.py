@@ -1,11 +1,12 @@
-from typing import Dict, List, Union
+from traceback import print_exc
+from typing import Dict, List, Optional, Union
 
 import aiohttp
-from pydantic import BaseModel, ValidationError
-
 from hoshino.sres import Res as R
 from hoshino.util.sutil import get_img_from_url
-from .config import plugin_config, Config
+from pydantic import BaseModel, ValidationError
+
+from .config import Config, plugin_config
 
 conf: Config = plugin_config.config
 
@@ -26,51 +27,67 @@ async def get_saucenao_results(pic_url):
                 results = await resp.json()
                 results = results['results']
             except:
+                print_exc()
                 return []
             for i in results:
                 try:
                     r = SoucenaoResult(**i)
-                    if r.header.similarity < 70:
+                    if r.header.similarity < 65:
                         continue
                     res_list.append(r)
                 except ValidationError:
+                    print_exc()
                     pass
             return res_list
 
-class ResultHeader(BaseModel):
+
+class Data(BaseModel):
+    creator: Union[List[str], None, str]
+    da_id: Optional[int] = None
+    ext_urls: Optional[List[str]] = None
+    title: Optional[str] = None
+    pixiv_id: Optional[int] = None
+    member_name: Optional[str] = None
+    member_id: Optional[int] = None
+    danbooru_id: Optional[int] = None
+    yandere_id: Optional[int] = None
+    gelbooru_id: Optional[int] = None
+    anime_pictures_id: Optional[int] = None
+    material: Optional[str] = None
+    characters: Optional[str] = None
+    source: Optional[str] = None
+    eng_name: Optional[str] = None
+    jp_name: Optional[str] = None
+    md_id: Optional[int] = None
+    mu_id: Optional[int] = None
+    mal_id: Optional[int] = None
+    part: Optional[str] = None
+    artist: Optional[str] = None
+    author: Optional[str] = None
+    type: Optional[str] = None
+    bcy_id: Optional[int] = None
+    member_link_id: Optional[int] = None
+    bcy_type: Optional[str] = None
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    seiga_id: Optional[int] = None
+    fa_id: Optional[int] = None
+    e621_id: Optional[int] = None
+    tweet_id: Optional[int] = None
+
+class Header(BaseModel):
     similarity: float
     thumbnail: str
     index_id: int
     index_name: str
     dupes: int
-
-class PixivData(BaseModel):
-    ext_urls: List[str]
-    title: str
-    pixiv_id: int
-    member_name: str
-    member_id: int
-
-class TwitterData(BaseModel):
-    ext_urls: List[str]
-    created_at: str
-    tweet_id: str
-    twitter_user_id: str
-    twitter_user_handle: str
-
-class DanbooruData(BaseModel):
-    ext_urls: List[str]
-    danbooru_id: int
-    yandere_id: int
-    gelbooru_id: int
-    creator: str
-    material: str
-    characters: str
-    source: str
+    hidden: int
 
 class SoucenaoResult(BaseModel):
-    header: ResultHeader
-    data: Union[PixivData, TwitterData, DanbooruData]
+    header: Header
+    data: Data
+
+
 
 async def pixiv_format(r: SoucenaoResult):
     img = await get_img_from_url(r.header.thumbnail)
@@ -98,3 +115,13 @@ async def danbooru_format(r: SoucenaoResult):
         + f'相似度 {r.header.similarity}\n' \
         + f'链接: {r.data.ext_urls[0]}\n' \
         + f'source: {r.data.source}'
+
+async def soucenao_format(r: SoucenaoResult):
+    if r.data.pixiv_id is not None:
+        return await pixiv_format(r)
+    elif r.data.tweet_id is not None:
+        return await twitter_format(r)
+    elif r.data.danbooru_id is not None:
+        return await danbooru_format(r)
+    else:
+        pass

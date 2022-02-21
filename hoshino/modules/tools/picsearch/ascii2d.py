@@ -12,7 +12,6 @@ conf: Config = plugin_config.config
 
 async def get_ascii2d_results(pic_url):
     base_url = 'https://ascii2d.net'
-    url = 'https://saucenao.com/search.php'
     res_list: List[Ascii2dResult] = []
     async with aiohttp.ClientSession() as session:
         url = base_url + f'/search/url/{pic_url}'

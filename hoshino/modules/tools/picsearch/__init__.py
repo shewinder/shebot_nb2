@@ -4,7 +4,7 @@ from hoshino.typing import T_State
 from hoshino import Service, Bot, Event
 from hoshino.sres import Res as R
 from hoshino.util.sutil import extract_url_from_event
-from .soucenao import *
+from .soucenao import soucenao_format, get_saucenao_results, SoucenaoResult
 from .tracemoe import *
 from .ascii2d import *
 
@@ -33,13 +33,15 @@ async def _(bot: "Bot", event: "Event", state: T_State):
     if results:
         reply = '以下结果来自souceNao\n'
         for r in results:
-            if isinstance(r.data, PixivData):
-                # pixiv结果
-                reply += await pixiv_format(r)
-            elif isinstance(r.data, TwitterData):
-                reply += await twitter_format(r)
-            elif isinstance(r.data, DanbooruData):
-                reply += await danbooru_format(r)
+            reply += await soucenao_format(r)
+        await search_pic.finish(reply)
+
+    # 自动转为ascii2d
+    results = await get_ascii2d_results(url)
+    if results:
+        reply = '以下结果来自ascii2d\n\n'
+        r = results[0]
+        reply += await ascii2d_format(r)
         await search_pic.finish(reply)
 
     # 自动转为搜索番剧模式
@@ -49,14 +51,6 @@ async def _(bot: "Bot", event: "Event", state: T_State):
         results = results[0:3] if len(results) >= 3 else results
         for r in results:
             reply += await tracemoe_format(r) + '\n\n'
-        await search_pic.finish(reply)
-
-    # 自动转为ascii2d
-    results = await get_ascii2d_results(url)
-    if results:
-        reply = '以下结果来自ascii2d\n\n'
-        r = results[0]
-        reply += await ascii2d_format(r)
         await search_pic.finish(reply)
 
     # 都没有结果
