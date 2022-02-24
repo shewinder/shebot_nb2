@@ -1,3 +1,4 @@
+import imp
 from typing import Dict, List
 import requests
 
@@ -8,6 +9,7 @@ from nonebot.adapters.cqhttp.message import MessageSegment, Message
 from hoshino.log import logger
 from hoshino.sres import Res as R
 from .._model import BaseInfoChecker, InfoData, SubscribeRecord
+from hoshino.glob import get_browser, Browser
 
 def get_name_from_uid(uid: str) -> str:
     with requests.get(f'https://api.bilibili.com/x/space/acc/info?mid={uid}&jsonp=jsonp') as resp:
@@ -22,12 +24,25 @@ class Dynamic(InfoData):
     imgs: List[str] = []
 
 class BiliDynamicChecker(BaseInfoChecker):
+    #async def notice_format(self, sub: SubscribeRecord , data: Dynamic):
+    #    imgs = [MessageSegment.image(img) for img in data.imgs]
+    #    msg = Message(f'{sub.remark}更新啦！\n{data.content}') \
+    #          .extend(imgs) \
+    #          .append(MessageSegment.text('\n' + data.portal))
+    #    return msg
     async def notice_format(self, sub: SubscribeRecord , data: Dynamic):
-        imgs = [MessageSegment.image(img) for img in data.imgs]
-        msg = Message(f'{sub.remark}更新啦！\n{data.content}') \
-              .extend(imgs) \
-              .append(MessageSegment.text('\n' + data.portal))
-        return msg
+        browser: Browser = await get_browser()
+        page = await browser.new_page()
+        await page.goto(data.portal)
+        tops = page.locator("//div[@class='first-card-with-title']")
+        await tops.wait_for()
+        cards = page.locator('//div[@class="card"]')
+        cnt = await tops.count()
+        index = 1 if cnt == 1 else 0
+        card = cards.nth(index)
+        screen_bytes = await card.screenshot()  #截图
+        await page.close()
+        return f'{sub.remark}更新了！' + R.image_from_memory(screen_bytes) + f'{data.portal}'
     
     @classmethod
     async def get_data(cls, url: str) -> Dynamic:

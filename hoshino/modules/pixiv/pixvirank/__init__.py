@@ -24,7 +24,7 @@ if not p.exists():
     p.touch()
 _tag_scores = load_config(p)
 
-@scheduled_job('cron', hour=18, minute=30, id='pixiv日榜')
+@scheduled_job('cron', hour=21, minute=30, id='pixiv日榜')
 async def pixiv_rank():
     today = datetime.date.today()
     yesterday = today - datetime.timedelta(days=1)
@@ -38,7 +38,9 @@ async def pixiv_rank():
     count = 0
     msg = MessageSegment.text('今日Pixiv日榜:\n')
     for pic in pics:
-        msg += MessageSegment.text(f'{pic.pid}: {pic.page_count}') + MessageSegment.image(pic.url)
+        #msg += MessageSegment.text(f'{pic.pid}: {pic.page_count}') + MessageSegment.image(pic.url)
+        msg += MessageSegment.image(pic.url)
+        msg += MessageSegment.forward()
 
     for gid in gids:
         await asyncio.sleep(0.5)
