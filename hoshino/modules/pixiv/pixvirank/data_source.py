@@ -43,7 +43,7 @@ def filter_rank(pics: List[RankPic], tag_scores: Dict[str, int]) -> List[RankPic
                     sum += tag_scores[tag['name']]
             pic.score = sum
     pics.sort(key=lambda x: x.score, reverse=True)
-    return pics[0:5]
+    return pics[0:10]
 
 async def get_tags(pid: str) -> List[str]:
     url = 'https://api.shewinder.win/pixiv/illust_detail'

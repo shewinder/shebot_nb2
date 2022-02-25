@@ -6,6 +6,7 @@ from hoshino import Bot, Event, Service, get_bot_list, scheduled_job, userdata_d
 from hoshino.sres import Res as R
 from hoshino.util.sutil import get_service_groups, load_config, save_config
 from nonebot.adapters.cqhttp.message import Message, MessageSegment
+from hoshino.util.message_util import send_group_forward_msg
 
 from .data_source import filter_rank, get_rank, get_tags
 
@@ -24,7 +25,7 @@ if not p.exists():
     p.touch()
 _tag_scores = load_config(p)
 
-@scheduled_job('cron', hour=21, minute=30, id='pixiv日榜')
+@scheduled_job('cron', hour=18, minute=30, id='pixiv日榜')
 async def pixiv_rank():
     today = datetime.date.today()
     yesterday = today - datetime.timedelta(days=1)
@@ -35,18 +36,17 @@ async def pixiv_rank():
     pics = filter_rank(pics, _tag_scores)
     bot: Bot = get_bot_list()[0]
     gids = await get_service_groups(sv_name=sv.name)
-    count = 0
-    msg = MessageSegment.text('今日Pixiv日榜:\n')
+    notice = MessageSegment.text('今日Pixiv日榜')
+    msgs = []
     for pic in pics:
-        #msg += MessageSegment.text(f'{pic.pid}: {pic.page_count}') + MessageSegment.image(pic.url)
-        msg += MessageSegment.image(pic.url)
-        msg += MessageSegment.forward()
+        msgs.append(MessageSegment.text(f'{pic.pid}: {pic.page_count}')) #+ MessageSegment.image(pic.url))
+        msgs.append(MessageSegment.image(pic.url))
 
     for gid in gids:
         await asyncio.sleep(0.5)
         try:
-            await bot.send_group_msg(message=msg, group_id=gid)
-            count += 1
+            await bot.send_group_msg(message=notice, group_id=gid)
+            await send_group_forward_msg(bot, gid, msgs)
             sv.logger.info(f"群{gid} 投递成功！")
         except Exception as e:
             sv.logger.exception(e)
