@@ -36,12 +36,11 @@ async def get_rank(date: str, mode: str='day') -> List[RankPic]:
 
 def filter_rank(pics: List[RankPic], tag_scores: Dict[str, int]) -> List[RankPic]:
     for pic in pics:
-        for pic in pics:
-            sum = 0
-            for tag in pic.tags:
-                if tag['name'] in tag_scores:
-                    sum += tag_scores[tag['name']]
-            pic.score = sum
+        sum = 0
+        for tag in pic.tags:
+            if tag['name'] in tag_scores:
+                sum += tag_scores[tag['name']]
+        pic.score = sum
     pics.sort(key=lambda x: x.score, reverse=True)
     return pics[0:10]
 

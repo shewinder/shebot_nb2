@@ -15,7 +15,8 @@ async def get_ascii2d_results(pic_url):
     res_list: List[Ascii2dResult] = []
     async with aiohttp.ClientSession() as session:
         url = base_url + f'/search/url/{pic_url}'
-        async with session.get(url) as resp:
+        headers = {"User-Agent": "PostmanRuntime/7.29.0"}
+        async with session.get(url, headers=headers) as resp:
             t = await resp.text()
             html = etree.HTML(t)
             rows = html.xpath('//div[@class="row item-box"]')
