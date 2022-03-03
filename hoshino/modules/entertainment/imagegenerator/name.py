@@ -21,8 +21,6 @@ names = {
     'jupai': ['我爱你'],
     'peko': ['peko'],
     'xingjie': ['星姐'],
-    'lxy1': ['粽子1'],
-    'lxy2': ['粽子2'],
     'alice': ['爱丽丝'],
     'serena': ['猫猫'],
     'kasumi': ['猪'],

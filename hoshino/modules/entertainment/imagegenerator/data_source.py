@@ -8,6 +8,9 @@ from hoshino import res_dir, userdata_dir
 from hoshino.sres import Res as R, ResImg
 from hoshino.util.sutil import load_config, save_config
 from .name import names
+from .config import plugin_config, Config
+
+pc: Config = plugin_config.config
 
 plug_res = res_dir.joinpath('imagegenerator')
 image_data = plug_res.joinpath('image_data')
@@ -36,7 +39,8 @@ def choose_image(uid_str: str, bieming: str) -> MessageSegment:
 
 def get_user_image(uid: str) -> Tuple:
     conf = load_config(user_image_data)
-    img_name = conf.get(uid, 'initial')
+    # 优先从用户自定义图片中获取，默认值为配置文件中的默认图片
+    img_name = conf.get(uid, pc.initial)
     p = image_data.joinpath(f'{img_name}/{img_name}.jpg')
     return img_name, R.img(p)
 
