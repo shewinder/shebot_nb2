@@ -33,7 +33,7 @@ async def _(bot: Bot, event: MessageEvent):
         data: Dict = await resp.json()
         if data.get('error'):
             await pid.finish(data['error']['user_message'])
-        data = data['illust']
+        #data = data['illust']
         urls: List[str] = []
         if data['page_count'] == 1:
             urls = [data['meta_single_page']['original_image_url']]
