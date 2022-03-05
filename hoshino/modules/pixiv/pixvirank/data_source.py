@@ -54,7 +54,7 @@ async def get_tags(pid: str) -> List[str]:
         async with session.get(url, params=params) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                data = data['illust']
+                #data = data['illust']
                 tags = data['tags']
                 for tag in tags:
                     res.append(tag['name'])
