@@ -218,7 +218,7 @@ def render_setus(setus: List[Setu]):
     reply = MessageSegment.text('')
     for setu in setus:
         pic = R.image_from_memory(setu.picbytes)
-        reply += MessageSegment.text(f'{setu.title}\n画师：{setu.author}\npid:{setu.pid}')
+        reply += MessageSegment.text(f'{setu.title}\n画师：{setu.author}\n画师id：{setu.uid}\npid:{setu.pid}')
         reply += pic
     return reply
 

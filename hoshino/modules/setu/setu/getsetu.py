@@ -27,7 +27,6 @@ def get_lolicon_setu(r18: int=0, keyword: str='', num: int=1):
         return None
     data = resp.json()
     data = data['data']
-    print(data)
     for i in data:
         setu = Setu(**i)
         setu_list.append(setu)
@@ -56,24 +55,6 @@ async def download_setu(session: aiohttp.ClientSession, setu: Setu):
 
 def setu_by_keyword(keyword: str, num: int=1, r18: int=0) -> List[Setu]:
     return get_lolicon_setu(r18=r18, keyword=keyword, num=num) # 暂时摸了
-
-
-    #if r18 == 2:
-    #    sql = SQL('tags like ? or title like ?', params=[f'%{keyword}%', f'%{keyword}%'])
-    #else:
-    #    sql = SQL('(tags like ? or title like ?) and r18=?', params=[f'%{keyword}%',f'%{keyword}%',r18])
-    #logger.info(f'searching {keyword} in database')
-    #try:
-    #    t1 = time.time()
-    #    setus = Setu.select().where(sql).order_by(fn.Random()).limit(num)
-    #    if not setus:
-    #        setus = Setu.select().where(SQL('author like ? and r18=?', params=[f'%{keyword}%',r18])).order_by(fn.Random()).limit(num)
-    #    t2 = time.time()
-    #    logger.info(f'查询到{len(setus)}条结果,用时{t2-t1}s')
-    #    return setus
-    #except Exception as e:
-    #    logger.exception(e)
-    #    return None
 
 def anti_harmony(img: Image.Image) -> Image.Image:
     #img = img.convert('RGB')
