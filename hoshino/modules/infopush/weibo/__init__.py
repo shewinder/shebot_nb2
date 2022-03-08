@@ -1,11 +1,11 @@
 import aiohttp
 
-from hoshino.modules.infopush.checkers.weibo import WeiboChecker, Weibo
+from hoshino.modules.infopush.checkers.weibo import WeiboChecker
 from nonebot.adapters.cqhttp import GroupMessageEvent
 from hoshino import Service, Bot, Event
 from hoshino.typing import T_State
 from .._model import SubscribeRecord
-from .._rss import RSS
+from .._rss import RSS, RSSData
 
 help_ = """
 [微博订阅] 
@@ -32,7 +32,7 @@ async def _(bot: Bot, event: Event, state: T_State):
 
 @add_weibo.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
-    w: Weibo = state['weibo']
+    w: RSSData = state['weibo']
     gid = event.group_id
     try:
         WeiboChecker.add_sub(gid, state['url'], remark=w.channel_title, creator_id=event.user_id)

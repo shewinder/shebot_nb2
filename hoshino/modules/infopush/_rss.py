@@ -1,15 +1,31 @@
+from dataclasses import dataclass
 from typing import Dict
 import aiohttp
 from lxml import etree
+
+
+from ._config import Config, plugin_config
 from ._model import InfoData
 
+conf: Config = plugin_config.config
+
+class RSSData(InfoData):
+    title: str = ''
+    desc: str = ''
+    channel_title: str = ''
+    author: str = ''
+
 class RSS:
-    def __init__(self, route: str=None, url: str=None):
-        self.base_url = 'http://43.134.194.249:1200/'
-        self.route = route
+    def __init__(self, url: str):
         self.xml : bytes = None
         self.limit = 1
-        self.url = url if url else self.base_url + self.route
+        self.url = url
+
+    @classmethod
+    def from_route(cls, route: str) -> 'RSS':
+        if not conf.rsshub_url.endswith('/'):
+            return RSS(conf.rsshub_url + '/' + route)
+        return RSS(conf.rsshub_url + route)
 
     async def get(self):
         url = self.url
@@ -19,19 +35,24 @@ class RSS:
             async with session.get(url,params=params) as resp:
                 self.xml = await resp.read()
 
-    def parse_xml(self) -> Dict:
+    def parse_xml(self) -> RSSData:
         rss = etree.XML(self.xml)
+        d = RSSData()
         channel = rss.xpath('/rss/channel')[0]
-        channel_title = channel.find('.title').text.strip()
+        d.channel_title = channel.find('.title').text.strip()
         item = rss.xpath('/rss/channel/item')[0]
-        title = item.find('.title').text.strip()
-        desc = item.find('.description').text.strip()
-        link = item.find('.link').text.strip()
-        pubDate = item.find('.pubDate').text.strip()
-        return {
-            "title" : title,
-            "desc" : desc,
-            "link" : link,
-            "pubDate" : pubDate,
-            "channel_title": channel_title
-        }
+        d.title = item.find('.title').text.strip()
+        d.desc = item.find('.description').text.strip()
+        d.portal = item.find('.link').text.strip()
+        d.pub_time = item.find('.pubDate').text.strip()
+        d.author = item.find('.author').text.strip()
+        return d
+
+if __name__ == '__main__':
+    rss = RSS.from_route('twitter/user/digimon215')
+    import asyncio
+    async def test():
+        await rss.get()
+        d = rss.parse_xml()
+        print(d)
+    asyncio.run(test())

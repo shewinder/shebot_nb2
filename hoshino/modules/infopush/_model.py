@@ -195,6 +195,5 @@ class BaseInfoChecker:
     def form_remark(self, data: InfoData, distinguisher: str) -> str:
         """
         根据data生成remark, checker应实现此方法
-        当实现中data不可或缺, 但data为None时, 应抛出ValueError
         """
         raise NotImplementedError
