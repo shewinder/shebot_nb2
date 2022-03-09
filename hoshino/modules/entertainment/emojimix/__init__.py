@@ -34,11 +34,11 @@ async def emojimatch(bot: Bot, event: MessageEvent, state: T_State):
     msg = event.get_message()
     res = []
     if len(msg)>2:
-        return False
+        mix.finish()
     if len(msg)==1:
         text = event.get_plaintext()
         if len(text)!=2:
-            return False
+            mix.finish()
         for i in text:
             u = ord(i)
             if d:=emojis.get(u):

@@ -33,7 +33,6 @@ async def _(bot: Bot, event: MessageEvent):
         data: Dict = await resp.json()
         if data.get('error'):
             await pid.finish(data['error']['user_message'])
-        #data = data['illust']
         urls: List[str] = []
         if data['page_count'] == 1:
             urls = [data['meta_single_page']['original_image_url']]
@@ -74,32 +73,5 @@ def anti_harmony(img: Image.Image) -> Image.Image:
     img.putpixel(pos1,(255,255,200))
     img.putpixel(pos2,(255,255,200))
     return img
-
-
-########################################################################################################################
-#@dataclass
-#class PixivIllust:
-#    create_at: str
-#    title: str
-#    page_count: int
-#    author: str
-#    tags: list[str]
-#    
-#detail = sv.on_command('pid detail', aliases=('pid详情', 'pid详细'))
-#async def _(bot: Bot, event: MessageEvent):
-#    p = str(event.get_message())
-#    if not p.isdigit():
-#        return
-#    url = 'http://43.134.194.249:9500/pixiv/illust_detail'
-#    params = {
-#        "illust_id" : pid
-#    }
-#    res = []
-#    async with aiohttp.ClientSession() as session:
-#        async with session.get(url, params=params) as resp:
-#            if resp.status == 200:
-#                data = await resp.json()
-#                data = data['illust']
-#                tags = data['tags']
 
     

@@ -120,19 +120,13 @@ async def send_common_setu(bot: Bot, event: Event, state: T_State):
         if not setus:#send_setus为空
             await bot.send(event,'色图库正在补充，下次再来吧',at_sender=False)
             return
-        else:
-            reply = MessageSegment.text('')
-            for setu in setus:
-                pic = R.image_from_memory(setu.picbytes)
-                reply += MessageSegment.text(f'{setu.title}\n画师：{setu.author}\npid:{setu.pid}')
-                reply += pic
-            ret = await bot.send(event, reply)
 
-            if gid in conf.delete_groups: # 撤回
-                msg_id = ret['message_id']
-                self_id = event.self_id
-                await asyncio.sleep(conf.delete_after)
-                await bot.delete_msg(self_id=self_id, message_id=msg_id)
+        ret = await bot.send(event, render_setus(setus))
+        if gid in conf.delete_groups: # 撤回
+            msg_id = ret['message_id']
+            self_id = event.self_id
+            await asyncio.sleep(conf.delete_after)
+            await bot.delete_msg(self_id=self_id, message_id=msg_id)
            
 r18_setu = sv.on_command('就这不够色', only_group=False)
 @r18_setu.handle()
@@ -214,7 +208,7 @@ async def set_r18(bot: Bot, event: MessageEvent):
     else:
         await bot.send(event, f'群{gid}r18已经关闭,无需再次关闭')
 
-def render_setus(setus: List[Setu]):
+def render_setus(setus: List[Setu]) -> Message:
     reply = MessageSegment.text('')
     for setu in setus:
         pic = R.image_from_memory(setu.picbytes)
