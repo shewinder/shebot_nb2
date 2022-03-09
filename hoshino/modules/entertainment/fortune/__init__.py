@@ -1,5 +1,6 @@
 from os import path, listdir
 from random import choice
+from typing import Dict
 
 from PIL import Image
 from nonebot.adapters.cqhttp import GroupMessageEvent
@@ -24,14 +25,18 @@ ftn = sv.on_keyword({'抽签', '运势', '占卜', '人品'})
 @ftn.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
     plug_dir = res_dir.joinpath('fortune')
-    base_dir = plug_dir.joinpath(conf.theme)
+    if conf.theme == 'random':
+        dirs = [d for d in listdir(plug_dir) if path.isdir(d)]
+        base_dir = plug_dir.joinpath(choice(dirs))
+    else:
+        base_dir = plug_dir.joinpath(conf.theme)
     img_dir = base_dir.joinpath('img')
     uid = event.user_id
     if not _lmt.check(uid):
         await ftn.finish(f'您今天抽过签了，再给您看一次哦' + _rst.get(uid))
     
     copywriting = load_config(base_dir.joinpath('copywriting.json'))
-    copywriting = choice(copywriting['copywriting'])
+    copywriting: Dict = choice(copywriting['copywriting'])
 
     if copywriting.get('type'): # 有对应的角色文案
         luck_type = choice(copywriting['type'])
@@ -41,9 +46,8 @@ async def _(bot: Bot, event: GroupMessageEvent):
         chara_id = choice(copywriting['charaid'])
         img_name = f'frame_{chara_id}.jpg'
     else:
-        good_luck = copywriting.get('good-luck')
+        title = copywriting.get('title')
         content = copywriting.get('content')
-        title = GOOD_LUCK[good_luck]
         img_name = choice(listdir(img_dir))
         
 

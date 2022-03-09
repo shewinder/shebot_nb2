@@ -1,14 +1,3 @@
-'''
-Author: AkiraXie
-Date: 2022-03-08 01:26:38
-LastEditors: AkiraXie
-LastEditTime: 2022-03-08 03:09:36
-Description: 
-Github: http://github.com/AkiraXie/
-'''
-
-## Thanks to github.com/FloatTech/ZeroBot-Plugin/plugin/emojimix
-
 from hoshino import Service, T_State,aiohttpx, MessageSegment, sucmd, Bot
 from hoshino.event import MessageEvent
 from .data import emojis, qqface
@@ -34,11 +23,11 @@ async def emojimatch(bot: Bot, event: MessageEvent, state: T_State):
     msg = event.get_message()
     res = []
     if len(msg)>2:
-        mix.finish()
+        await mix.finish()
     if len(msg)==1:
         text = event.get_plaintext()
         if len(text)!=2:
-            mix.finish()
+            await mix.finish()
         for i in text:
             u = ord(i)
             if d:=emojis.get(u):
@@ -57,7 +46,7 @@ async def emojimatch(bot: Bot, event: MessageEvent, state: T_State):
     if len(res) == 2:
         state['emojimix'] = res
     else:
-        mix.finish()
+        await mix.finish()
 
 @mix.handle()
 async def _ (bot: Bot, event: MessageEvent, state: T_State):
