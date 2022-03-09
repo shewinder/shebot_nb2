@@ -26,7 +26,7 @@ ftn = sv.on_keyword({'抽签', '运势', '占卜', '人品'})
 async def _(bot: Bot, event: GroupMessageEvent):
     plug_dir = res_dir.joinpath('fortune')
     if conf.theme == 'random':
-        dirs = [d for d in listdir(plug_dir) if path.isdir(d)]
+        dirs = [d for d in listdir(plug_dir) if plug_dir.joinpath(d).is_dir()]
         base_dir = plug_dir.joinpath(choice(dirs))
     else:
         base_dir = plug_dir.joinpath(conf.theme)
