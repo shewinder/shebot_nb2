@@ -97,6 +97,7 @@ async def pixiv_format(r: SoucenaoResult):
         + f'标题: {r.data.title}\n' \
         + f'pid: {r.data.pixiv_id}\n' \
         + f'作者: {r.data.member_name}\n' \
+        + f'作者id: {r.data.member_id}\n' \
         + f'链接： {r.data.ext_urls[0]}'
 
 async def twitter_format(r: SoucenaoResult):
