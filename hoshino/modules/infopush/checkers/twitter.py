@@ -11,7 +11,7 @@ class TwitterChecker(BaseInfoChecker):
         async with aiohttp.ClientSession() as session:
             async with session.get('https://api.shewinder.win/screenshot/twitter/article', params=params) as resp:
                 img = await resp.read()
-        return f'{sub.remark}推特更新' + R.image_from_memory(img)
+        return f'{sub.remark}推特更新' + R.image_from_memory(img) + data.portal
 
     @classmethod
     async def get_data(self, url: str) -> RSSData:
@@ -25,4 +25,4 @@ class TwitterChecker(BaseInfoChecker):
     def form_remark(self, data: RSSData, distinguisher: str) -> str:
         return f'{data.author}推特'
 
-TwitterChecker(120, '推特', '推特名称')
+TwitterChecker(600, '推特', '推特名称')
