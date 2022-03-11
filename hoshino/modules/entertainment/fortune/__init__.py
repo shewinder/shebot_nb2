@@ -1,5 +1,6 @@
 from os import path, listdir
 from random import choice
+from sre_parse import State
 from typing import Dict
 
 from PIL import Image
@@ -13,6 +14,7 @@ from hoshino.util.sutil import load_config
 from .data_source import drawing
 from .good_luck import GOOD_LUCK
 from .config import plugin_config, Config
+from hoshino.typing import T_State
 
 conf: Config = plugin_config.config
 
@@ -25,11 +27,13 @@ ftn = sv.on_keyword({'抽签', '运势', '占卜', '人品'})
 @ftn.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
     plug_dir = res_dir.joinpath('fortune')
-    if conf.theme == 'random':
+    uid = str(event.user_id)
+    theme = conf.user_theme.get(uid, conf.theme)
+    if theme == 'random':
         dirs = [d for d in listdir(plug_dir) if plug_dir.joinpath(d).is_dir()]
         base_dir = plug_dir.joinpath(choice(dirs))
     else:
-        base_dir = plug_dir.joinpath(conf.theme)
+        base_dir = plug_dir.joinpath(theme)
     img_dir = base_dir.joinpath('img')
     uid = event.user_id
     if not _lmt.check(uid):
@@ -65,11 +69,26 @@ async def _(bot: Bot, event: GroupMessageEvent):
 choose = sv.on_command('choose', aliases={'选签'})
 
 @choose.handle()
-async def _(bot: Bot, event: Event):
+async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     args = str(event.get_message()).strip()
-    if args:
-        plugin_config.set('theme', args)
+    themes = [d for d in listdir(res_dir.joinpath('fortune')) if res_dir.joinpath('fortune').joinpath(d).is_dir()]
+    state['themes'] = themes
+    if not args:
+        await bot.send(event, f'请发送主题，当前支持的运势主题有：{str(themes)}, random(随机)')
+    else:
+        state['theme'] = args
+        
+@choose.got('theme')
+async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
+    args = state['theme']
+    themes = state['themes']
+    if args in themes or args == 'random':
+        conf.user_theme[str(event.user_id)] = args
+        plugin_config.save_json()
         await choose.send(f'已经将抽签切换为{args}')
+    else:
+        await choose.send(f'{args}不存在')
+        
 
 
 
