@@ -1,8 +1,11 @@
+import os
 from hoshino.event import MessageEvent
 from hoshino import Service, Bot
 from hoshino.typing import T_State
 from .data_source import choose_image
 from . import main
+from .data_source import gen_imgs_preview
+from hoshino.sres import Res as R
 
 _help = '''
 [选图 猫猫] 选择生成表情包所用的底图
@@ -13,7 +16,14 @@ sv = Service('image-generate',  help_=_help)
 
 choose = sv.on_command('choose pic', aliases = {'选图','imgsw','IMGSW'}, only_group=False)
 @choose.handle()
-async def switch_img(bot: Bot, event: MessageEvent):
+async def _(bot: Bot, event: MessageEvent, state: T_State):
+    arg = str(event.get_message()).strip()
+    if arg:
+        state['arg'] = arg
+    
+@choose.got('arg', prompt='请选择表情模板' + R.image_from_memory(gen_imgs_preview()))
+async def switch_img(bot: Bot, event: MessageEvent, state: T_State):
+    name = state['arg']
     uid_str = str(event.user_id)
     name = str(event.get_message()).strip()
     pic = choose_image(uid_str, name)
@@ -37,31 +47,4 @@ async def generate_img(bot: Bot, event: MessageEvent, state: T_State):
 imgl = sv.on_command('image list', aliases={'选图列表','imgswl','IMGSWL'}, only_group=False)
 @imgl.handle()
 async def switch_list(bot: Bot, event: MessageEvent):
-    msg = '''
-狗妈<1~3>
-熊猫<1~3>
-粽子<1~2>
-阿夸
-臭鼬
-好学
-黑手
-逗乐了
-奥利给
-kora
-珂学家
-财布
-守夜冠军
-恶臭
-我爱你
-peko
-星姐
-爱丽丝
-猫猫
-猪
-猫猫猫
-gvc
-猫
-ksm
-栞栞
-'''
-    await bot.send(event, msg, at_sender=True)
+    await bot.send(event, R.image_from_memory(gen_imgs_preview()))

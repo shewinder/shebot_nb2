@@ -1,11 +1,12 @@
 import json
+import math
 import os
-from typing import Tuple
+from typing import Optional, Tuple
 
 from nonebot.adapters.cqhttp.message import MessageSegment
 
-from hoshino import res_dir, userdata_dir
-from hoshino.sres import Res as R, ResImg
+from hoshino import res_dir, userdata_dir, font_dir
+from hoshino.sres import Res as R
 from hoshino.util.sutil import load_config, save_config
 from .name import names
 from .config import plugin_config, Config
@@ -50,3 +51,47 @@ def get_image_config(img_name: str, item: str):
         ini = f.read()
     dic =  json.loads(ini)
     return dic[item]
+
+
+from typing import List
+from PIL import Image, ImageDraw, ImageFont
+import os
+
+def gen_imgs_preview() -> Image.Image:
+    """
+    Generates a preview image of the given images.
+    :param imgs: List of images to be used in the preview.
+    :return: Image object of the preview.
+    """
+    img_dir = res_dir.joinpath('imagegenerator/image_data')
+    imgs: List[Image.Image] = []
+    files = []
+    for dir in os.listdir(img_dir):
+        for file in os.listdir(img_dir.joinpath(dir)):
+            if file.endswith('.jpg'):
+                imgs.append(Image.open(img_dir.joinpath(dir, file)))
+                files.append(file.split('.')[0])
+
+    files = [names[file] for file in files]
+
+    if len(imgs) == 0:
+        return None
+
+    # Create a new image with the size of the first image.
+    row_cnt = 5
+    col_sep = 20
+    row_sep = 40
+    isize = 200
+    height = math.ceil(len(imgs) / 5) * (isize + row_sep)
+    preview = Image.new('RGB', (1080, height), color=(250, 250, 250))
+    font = ImageFont.truetype(font_dir.joinpath('sakura.ttf').as_posix(), 35)
+    for i, img in enumerate(imgs):
+        r, c = divmod(i, row_cnt)
+        img = imgs[r * row_cnt + c]
+        img = img.resize((isize, isize))
+        draw = ImageDraw.Draw(preview)
+        preview.paste(img, (c * isize + c * col_sep, r * isize + r * row_sep))
+        w, h = font.getsize(files[i][0])
+        draw.text((c * (isize + col_sep) + (isize-w)/2, isize + r * (isize + row_sep)), files[i][0], fill='black', font=font)
+    return preview
+
