@@ -1,4 +1,3 @@
-import os
 from hoshino.event import MessageEvent
 from hoshino import Service, Bot
 from hoshino.typing import T_State
@@ -20,7 +19,7 @@ async def _(bot: Bot, event: MessageEvent, state: T_State):
     arg = str(event.get_message()).strip()
     if arg:
         state['arg'] = arg
-    
+
 @choose.got('arg', prompt='请选择表情模板' + R.image_from_memory(gen_imgs_preview()))
 async def switch_img(bot: Bot, event: MessageEvent, state: T_State):
     name = state['arg']
