@@ -1,11 +1,13 @@
 import re
 from collections import defaultdict
 from random import choice
-from typing import Dict, List
+from typing import Any, Dict, List
 
-from hoshino import Service, Message
+from hoshino import MessageSegment, Service, userdata_dir
 from hoshino.permission import SUPERUSER
+from hoshino.sres import Res as R
 from hoshino.typing import Bot, GroupMessageEvent
+from hoshino.util.sutil import download_async
 
 from .data import (CustomReply, ExistsException, KeywordConflictException,
                    NotFoundException)
@@ -26,7 +28,7 @@ class BaseHandler:
     def delete(self, x: str) -> None:
         if x in self._dict:
             del self._dict[x]
-            CustomReply.delete().where(CustomReply.word == x & CustomReply.matcher == self.matcher).execute()
+            CustomReply.delete().where(CustomReply.word == x, CustomReply.matcher == self.matcher).execute()
         else:
             if not x:
                 x = '<empty>'
@@ -55,7 +57,15 @@ class FullmatchHandler(BaseHandler):
             CustomReply.create(word=word, reply=reply, matcher='fullmatch')
 
     def find_reply(self, event: GroupMessageEvent) -> str:
-        msg = str(event.get_message()).strip()
+        if len(event.message) == 0:
+            return None
+        msg = event.message[0]
+        if msg.type == 'image':
+            msg = msg.data['file']
+        elif msg.type == 'text':
+            msg = msg.data['text']
+        else:
+            msg = str(msg)
         replys = self._dict.get(msg)
         if replys:
             return choice(replys)
@@ -79,7 +89,16 @@ class KeywordHandler(BaseHandler):
         CustomReply.create(word=keyword, reply=reply, matcher='keyword')
 
     def find_reply(self, event: GroupMessageEvent) -> str:
-        msg = str(event.get_message()).strip()
+        if len(event.message) == 0:
+            return None
+        msg = event.message[0]
+        if msg.type == 'image':
+            msg = msg.data['file']
+        elif msg.type == 'text':
+            msg = msg.data['text']
+        else:
+            msg = str(msg)
+
         for k in self._dict:
             if k in msg:
                 return choice(self._dict[k]) 
@@ -98,7 +117,15 @@ class RexHandler(BaseHandler):
         CustomReply.create(word=pattern, reply=reply, matcher='rex')
 
     def find_reply(self, event: GroupMessageEvent) -> str:
-        msg = str(event.get_message()).strip()
+        if len(event.message) == 0:
+            return None
+        msg = event.message[0]
+        if msg.type == 'image':
+            msg = msg.data['file']
+        elif msg.type == 'text':
+            msg = msg.data['text']
+        else:
+            msg = str(msg)
         for pattern in self._dict:
             match = re.search(pattern, msg)
             if match:
@@ -120,7 +147,7 @@ async def reply(bot: Bot, event: GroupMessageEvent):
         reply = h.find_reply(event)
         if reply:
             sv.logger.info(f'群{event.group_id} {event.user_id}({event.sender.nickname}) triggerd {h.matcher} reply {reply}')
-            await bot.send(event, Message(reply))
+            await bot.send(event, reply)
             return
     else:
         pass
@@ -129,13 +156,40 @@ add_full = sv.on_command('fullmatch', permission=SUPERUSER)
 add_key = sv.on_command('keyword', permission=SUPERUSER)
 add_rex = sv.on_command('rex', permission=SUPERUSER)
 
+data_dir = userdata_dir.joinpath('customreply').joinpath('data')
+if not data_dir.exists():
+    data_dir.mkdir(parents=True)
+
 async def add_reply(bot: Bot, event: GroupMessageEvent):
-    matcher = event.raw_message.strip().split(' ')[0]
-    word, reply = tuple(str(event.get_message()).strip().split(' '))
+    matcher = event.raw_message.strip().split()[0]
+    start = event.message.pop(0)
+    if start.type == 'text':
+        tmp: List[str] = start.data['text'].strip().split()
+        if len(tmp) == 2:
+            word, reply = tmp[0], tmp[1]
+        elif len(tmp) == 1:
+            word, reply = tmp[0], ''
+        
+    elif start.type == 'image':
+        word = start.data['file']
+        reply = ''
+    else:
+        return # Todo: 其他类型的消息
+    for m in event.message:
+        if m.type == 'image':
+            img = m.data['file'].replace('.image', '.jpg')
+            url = m.data['url']
+            # 下载图片存在本地
+            await download_async(url, data_dir.joinpath(img))
+            reply += f'【image: {img}】'
+
     try:
         handler: BaseHandler = eval(matcher)
         handler.add(word, reply)
-        await bot.send(event, f'添加成功 {handler._dict[word]}')
+        r = ['添加成功']
+        r.extend(handler._dict[word])
+        sv.logger.info(f'add {matcher} {word} {reply}')
+        await bot.send(event, f'添加成功 {word}')
     except (ExistsException, KeywordConflictException) as ex:
         await bot.send(event, f'添加失败，{ex}')
     except Exception as ex:
@@ -151,18 +205,41 @@ del_key = sv.on_command('del keyword', permission=SUPERUSER)
 del_rex = sv.on_command('del rex', permission=SUPERUSER)
 
 async def delete_reply(bot: Bot, event: GroupMessageEvent):
-    matcher = event.raw_message.split(' ')[1]
-    word: str = str(event.get_message()).strip()
+    matcher = event.raw_message.split()[1]
+    msg = event.message[0]
+    if msg.type == 'image':
+        msg = msg.data['file']
+    elif msg.type == 'text':
+        msg = msg.data['text']
+    else:
+        msg = str(msg)
     handler: BaseHandler = eval(matcher)
     try:
-        handler.delete(word)
+        handler.delete(msg)
         await bot.send(event, '删除成功')
-    except NotFoundException as vr:
-        await bot.send(event, f'删除失败 {vr}')
+    except NotFoundException as ex:
+        await bot.send(event, f'删除失败 {ex}')
 
 del_full.handle()(delete_reply)
 del_key.handle()(delete_reply)
 del_rex.handle()(delete_reply)
+
+
+@Bot.on_calling_api
+async def handle_api_call(bot: Bot, api: str, data: Dict[str, Any]):
+    msgs: List[MessageSegment] = data['message']
+    new_msg: List[MessageSegment] = []
+    for msg in msgs:
+        if msg.type != 'text':
+            new_msg.append(msg)
+        pics = re.findall(r'【image: (.*?)】', str(msg))
+        if len(pics) == 0:
+            new_msg.append(msg)
+        for pic in pics:
+            new_msg.append(R.image(f'data/customreply/data/{pic}'))
+            sv.logger.info(f'replace {pic} with ')
+    data['message'] = new_msg
+
 
 
 

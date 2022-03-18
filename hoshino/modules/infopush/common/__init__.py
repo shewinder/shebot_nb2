@@ -66,8 +66,8 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     url = checker.form_url(state['dis'])
     try:
         data = await checker.get_data(url)
-    except:
-        data = None # 对于采用了ip池的checker，失败概率很高，暂不处理
+    except Exception as e:
+        await add_subscribe.finish(f'获取数据失败: {e}')
     gid = event.group_id
     uid = 'all' if state.get('all') else event.user_id
     try:

@@ -11,21 +11,20 @@ import re
 from io import BytesIO
 from os import path
 from typing import List, Union
+from pathlib import Path
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
 from hoshino import Event, Service
 
-async def download_async(url: str, save_path: str, save_name: str) -> None:
+async def download_async(url: str, path: Union[str, Path]) -> None:
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url) as resp:
             content = await resp.read()
-            abs_path = path.join(save_path, save_name)
-            with open(abs_path, 'wb') as f:
+            with open(path, 'wb') as f:
                 f.write(content)
-                return abs_path
 
 def get_random_file(path) -> str:
     files = os.listdir(path)
