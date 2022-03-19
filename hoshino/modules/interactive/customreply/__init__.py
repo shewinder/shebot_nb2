@@ -232,6 +232,7 @@ async def handle_api_call(bot: Bot, api: str, data: Dict[str, Any]):
     for msg in msgs:
         if msg.type != 'text':
             new_msg.append(msg)
+            continue
         pics = re.findall(r'【image: (.*?)】', str(msg))
         if len(pics) == 0:
             new_msg.append(msg)
