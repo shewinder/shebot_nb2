@@ -11,6 +11,8 @@ class RankPic:
     tags: List[str]
     score: int
     page_count: int
+    author: str
+    author_id: int
 
 async def get_rank(date: str, mode: str='day') -> List[RankPic]:
     url = 'https://api.shewinder.win/pixiv/rank'
@@ -31,7 +33,13 @@ async def get_rank(date: str, mode: str='day') -> List[RankPic]:
                         url = d['meta_single_page']['original_image_url']
                     else:
                         url = d['meta_pages'][0]['image_urls']['original']
-                    res.append(RankPic(d['id'], url.replace('i.pximg.net','pixiv.shewinder.win'), d['tags'], 0, d['page_count']))
+                    res.append(RankPic(d['id'], 
+                               url.replace('i.pximg.net','pixiv.shewinder.win'), 
+                               d['tags'], 0, 
+                               d['page_count'],
+                               d['user']['name'],
+                               d['user']['id'],
+                               ))
                 return res
 
 def filter_rank(pics: List[RankPic], tag_scores: Dict[str, int]) -> List[RankPic]:
@@ -42,7 +50,7 @@ def filter_rank(pics: List[RankPic], tag_scores: Dict[str, int]) -> List[RankPic
                 sum += tag_scores[tag['name']]
         pic.score = sum
     pics.sort(key=lambda x: x.score, reverse=True)
-    return pics[0:10]
+    return pics[0:15]
 
 async def get_tags(pid: str) -> List[str]:
     url = 'https://api.shewinder.win/pixiv/illust_detail'
@@ -80,6 +88,7 @@ if __name__ == '__main__':
         yesterday = today - datetime.timedelta(days=2)
         date = f'{yesterday}'
         pics = await get_rank(date)
+        print(pics[0])
         pics = filter_rank(pics, tag_scores)
         print([pic.url + str(pic.pid) for pic in pics])
         for pic in pics:

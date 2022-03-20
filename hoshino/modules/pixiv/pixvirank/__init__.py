@@ -39,7 +39,7 @@ async def pixiv_rank():
     notice = MessageSegment.text('今日Pixiv日榜')
     msgs = []
     for pic in pics:
-        msgs.append(MessageSegment.text(f'{pic.pid}: {pic.page_count}')) #+ MessageSegment.image(pic.url))
+        msgs.append(MessageSegment.text(f'{pic.pid}: {pic.page_count}\n{pic.author}\n{pic.author_id}'))
         msgs.append(MessageSegment.image(pic.url))
 
     for gid in gids:
@@ -51,6 +51,35 @@ async def pixiv_rank():
         except Exception as e:
             sv.logger.exception(e)
             sv.logger.error(type(e))
+
+sv = Service('Pixiv日榜R18', enable_on_default=False, visible=False)
+@scheduled_job('cron', hour=18, minute=32, id='pixiv日榜r18')
+async def pixiv_rank():
+    today = datetime.date.today()
+    yesterday = today - datetime.timedelta(days=1)
+    date = f'{yesterday}'
+    sv.logger.info("正在下载日榜图片")
+    pics = await get_rank(date, 'day_r18')
+    sv.logger.info("日榜图片下载完成")
+    pics = filter_rank(pics, _tag_scores)
+    bot: Bot = get_bot_list()[0]
+    gids = await get_service_groups(sv_name=sv.name)
+    notice = MessageSegment.text('今日Pixiv日榜')
+    msgs = []
+    for pic in pics:
+        msgs.append(MessageSegment.text(f'{pic.pid}: {pic.page_count}\n{pic.author}\n{pic.author_id}'))
+        msgs.append(MessageSegment.image(pic.url))
+
+    for gid in gids:
+        await asyncio.sleep(0.5)
+        try:
+            await bot.send_group_msg(message=notice, group_id=gid)
+            await send_group_forward_msg(bot, gid, msgs)
+            sv.logger.info(f"群{gid} 投递成功！")
+        except Exception as e:
+            sv.logger.exception(e)
+            sv.logger.error(type(e))
+
 
 add_tag = sv.on_command('add pid', only_to_me=False)
 @add_tag.handle()

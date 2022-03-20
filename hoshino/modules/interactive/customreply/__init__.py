@@ -227,6 +227,8 @@ del_rex.handle()(delete_reply)
 
 @Bot.on_calling_api
 async def handle_api_call(bot: Bot, api: str, data: Dict[str, Any]):
+    if api != 'send_msg':
+        return
     msgs: List[MessageSegment] = data['message']
     new_msg: List[MessageSegment] = []
     for msg in msgs:
