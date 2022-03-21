@@ -18,14 +18,13 @@ async def get_rank(date: str, mode: str='day') -> List[RankPic]:
     url = 'https://api.shewinder.win/pixiv/rank'
     params = {
         "date" : date,
-        "mode" : mode
+        "mode" : mode,
     }
     res = []
     async with aiohttp.ClientSession() as session:
         async with session.get(url, params=params) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                data = data['illusts']
                 for d in data:
                     if d['type'] != 'illust':
                         continue

@@ -1,15 +1,16 @@
 from io import BytesIO
 from typing import Dict, List
 
-import requests
 import aiohttp
 from PIL import Image
 
-from hoshino import Service
+from hoshino import Service, MessageSegment
 from hoshino.log import logger
-from hoshino.typing import Bot, MessageEvent
+from hoshino.typing import Bot, GroupMessageEvent
 from hoshino.sres import Res as R
 from hoshino.util import FreqLimiter
+from hoshino.util.message_util import send_group_forward_msg
+from .._model import Illust
 
 help_ ="""
 [pid90173025] 发送pixiv对应pid的图片，超过10张只发前10张
@@ -20,7 +21,7 @@ _lmt = FreqLimiter(60)
 sv = Service('pid搜图', help_=help_)
 pid = sv.on_command('pid')
 @pid.handle()
-async def _(bot: Bot, event: MessageEvent):
+async def _(bot: Bot, event: GroupMessageEvent):
     if not _lmt.check(event.user_id):
         return
     p = str(event.message).strip()
@@ -33,6 +34,7 @@ async def _(bot: Bot, event: MessageEvent):
         data: Dict = await resp.json()
         if data.get('error'):
             await pid.finish(data['error']['user_message'])
+        illust = Illust(**data)
         urls: List[str] = []
         if data['page_count'] == 1:
             urls = [data['meta_single_page']['original_image_url']]
@@ -41,16 +43,27 @@ async def _(bot: Bot, event: MessageEvent):
         if len(urls) > 10:
             await bot.send(event, f'该pid包含{len(urls)}张，只发送前10张')
             urls = urls[:10]
+        pics = []
         async with aiohttp.ClientSession() as session:
             for url in urls:
                 url = url.replace('i.pximg.net','pixiv.shewinder.win')
                 try:
                     picbytes = await download_pic(session, url)
+                    pics.append(picbytes)
                 except Exception as e:
                     await bot.send(event, f'download {url} failed  {e}')
                     logger.exception(e)
-                    break
-                await bot.send(event, R.image_from_memory(picbytes))
+                    await bot.send(event, f'{url} 下载失败')
+                    continue
+            reply = [
+                f'标题：{illust.title}',
+                f'作者：{illust.user.name}',
+                f'作者id：{illust.user.id}',
+            ]
+            msgs = [MessageSegment.text('\n'.join(reply))]
+            for pic in pics:
+                msgs.append(R.image_from_memory(pic))
+            await send_group_forward_msg(bot, event.group_id, msgs)
         _lmt.start_cd(event.user_id)
 
 async def download_pic(session: aiohttp.ClientSession, url):

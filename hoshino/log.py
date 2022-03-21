@@ -58,6 +58,8 @@ class Filter:
         record["name"] = record["name"].split(".")[0]
         levelno = logger.level(self.level).no
         nologmatchers = map(str, _loaded_matchers.keys())
+        nologmatchers = set(nologmatchers)
+        nologmatchers.add('type=Message.message')
         nologflag = not any(
             nologmatcher in record['message'] for nologmatcher in nologmatchers)
         return record["level"].no >= levelno and nologflag

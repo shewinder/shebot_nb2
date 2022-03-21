@@ -15,9 +15,11 @@ class WeiboChecker(BaseInfoChecker):
         page = await browser.new_page()
         await page.goto(data.portal)
         articles = page.locator("//article")
-        screen_bytes = await articles.first.screenshot()  #截图
+        screen_bytes = await articles.first.screenshot()  # 截图
         await page.close()
-        return f'{sub.remark}更新了！' + R.image_from_memory(screen_bytes) + f'{data.portal}'
+        return (
+            f"{sub.remark}更新了！" + R.image_from_memory(screen_bytes) + f"{data.portal}"
+        )
 
     @classmethod
     async def get_data(self, url: str) -> RSSData:
@@ -26,9 +28,10 @@ class WeiboChecker(BaseInfoChecker):
         return rss.parse_xml()
 
     def form_url(self, distinguisher: str) -> str:
-        return RSS.from_route(f'weibo/user/{distinguisher}').url
-    
+        return RSS.from_route(f"weibo/user/{distinguisher}").url
+
     def form_remark(self, data: RSSData, distinguisher: str) -> str:
         return data.channel_title
 
-WeiboChecker(120, '微博', '博主Id')
+
+WeiboChecker(120, "微博", "博主Id")
