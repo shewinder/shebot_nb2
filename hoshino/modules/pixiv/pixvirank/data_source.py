@@ -19,6 +19,7 @@ async def get_rank(date: str, mode: str='day') -> List[RankPic]:
     params = {
         "date" : date,
         "mode" : mode,
+        "num" : 60
     }
     res = []
     async with aiohttp.ClientSession() as session:

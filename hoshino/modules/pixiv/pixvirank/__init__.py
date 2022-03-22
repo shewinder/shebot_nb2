@@ -64,7 +64,7 @@ async def pixiv_rank():
     pics = filter_rank(pics, _tag_scores)
     bot: Bot = get_bot_list()[0]
     gids = await get_service_groups(sv_name=sv.name)
-    notice = MessageSegment.text('今日Pixiv日榜')
+    notice = MessageSegment.text('Pixiv R18日榜')
     msgs = []
     for pic in pics:
         msgs.append(MessageSegment.text(f'{pic.pid}: {pic.page_count}\n{pic.author}\n{pic.author_id}'))
