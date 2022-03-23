@@ -1,4 +1,4 @@
-names = {
+biemings = {
     'aqua': ['阿夸'],
     'chouyou': ['臭鼬'],
     'haoxue': ['好学'],

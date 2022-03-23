@@ -5,24 +5,24 @@ from pydantic import BaseModel
 
 from hoshino.util.sutil import save_config, load_config
 
-_all_plugin_config: Dict[str, "PluginConfig"] = {} # 所有插件的配置数据
+_all_plugin_config: Dict[str, "PluginConfig"] = {}  # 所有插件的配置数据
+
 
 class BaseConfig(BaseModel):
     pass
 
-    
+
 class PluginConfig:
-    def __init__(self, 
-            plugin_name: str,
-            json_file: Union[Path, str],
-            config: BaseConfig) -> None:
+    def __init__(
+        self, plugin_name: str, json_file: Union[Path, str], config: BaseConfig
+    ) -> None:
         self._plugin_name = plugin_name
         self._json_file = json_file
 
         if isinstance(json_file, str):
             json_file = Path(json_file)
         if json_file.exists():
-            self._config = self.load_json(config) # 优先读取配置文件
+            self._config = self.load_json(config)  # 优先读取配置文件
         else:
             self._config = config
             self.save_json()
@@ -32,7 +32,7 @@ class PluginConfig:
     @property
     def config(self) -> BaseConfig:
         return self._config
-    
+
     @property
     def plugin_name(self) -> str:
         return self._plugin_name
@@ -45,7 +45,6 @@ class PluginConfig:
         # model 传入了一个BaseConfig的子类
         config = load_config(self.json_file)
         return model.__class__(**config) if config else None
-
 
     def save_json(self) -> None:
         save_config(self.config.dict(), self.json_file)
@@ -61,19 +60,13 @@ class PluginConfig:
 
     def __repr__(self) -> str:
         return self.config.dict().__str__()
-    
+
     def __str__(self) -> str:
         return self.__repr__()
 
     def __getattr__(self, name):
         return self.config.__dict__.get(name).value
 
+
 def get_plugin_config() -> Dict[str, PluginConfig]:
     return _all_plugin_config
-
-        
-
-
-
-
-
