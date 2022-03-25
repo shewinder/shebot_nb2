@@ -3,6 +3,7 @@ from typing import Optional, Union
 from pathlib import Path
 
 from PIL import Image
+import aiohttp
 
 from hoshino import MessageSegment
 
@@ -134,4 +135,16 @@ class Res:
             data = out.getvalue()
         if not isinstance(data, bytes):
             raise ValueError('不支持的参数类型')
-        return MessageSegment.image(file=data)
+        return MessageSegment.image(file=data, cache=False)
+
+    @classmethod
+    async def image_from_url(cls, url: str) -> MessageSegment:
+        """
+        download the image from url and return a MessageSegment in base64
+        should be used in async function
+        """
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.read()
+        return cls.image_from_memory(data)
+

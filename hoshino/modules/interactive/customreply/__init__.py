@@ -3,11 +3,10 @@ from collections import defaultdict
 from random import choice
 from typing import Any, Dict, List
 
-from hoshino import MessageSegment, Service, userdata_dir
+from hoshino import MessageSegment, Service, userdata_dir, Message
 from hoshino.permission import SUPERUSER
 from hoshino.sres import Res as R
 from hoshino.typing import Bot, GroupMessageEvent
-from hoshino.util.sutil import download_async
 
 from .data import (
     CustomReply,
@@ -160,9 +159,9 @@ async def reply(bot: Bot, event: GroupMessageEvent):
         reply = h.find_reply(event)
         if reply:
             sv.logger.info(
-                f"群{event.group_id} {event.user_id}({event.sender.nickname}) triggerd {h.matcher} reply {reply}"
+                f"群{event.group_id} {event.user_id}({event.sender.nickname}) triggerd matcher: {h.matcher} reply: {reply[:10]}"
             )
-            await bot.send(event, reply)
+            await bot.send(event, Message(reply))
             return
     else:
         pass
@@ -194,18 +193,15 @@ async def add_reply(bot: Bot, event: GroupMessageEvent):
         return  # Todo: 其他类型的消息
     for m in event.message:
         if m.type == "image":
-            img = m.data["file"].replace(".image", ".jpg")
             url = m.data["url"]
-            # 下载图片存在本地
-            await download_async(url, data_dir.joinpath(img))
-            reply += f"【image: {img}】"
+            reply += await R.image_from_url(url)
 
     try:
         handler: BaseHandler = eval(matcher)
         handler.add(word, reply)
         r = ["添加成功"]
         r.extend(handler._dict[word])
-        sv.logger.info(f"add {matcher} {word} {reply}")
+        sv.logger.info(f"add {matcher} {word} ")
         await bot.send(event, f"添加成功 {word}")
     except (ExistsException, KeywordConflictException) as ex:
         await bot.send(event, f"添加失败，{ex}")
@@ -243,22 +239,3 @@ async def delete_reply(bot: Bot, event: GroupMessageEvent):
 del_full.handle()(delete_reply)
 del_key.handle()(delete_reply)
 del_rex.handle()(delete_reply)
-
-
-@Bot.on_calling_api
-async def handle_api_call(bot: Bot, api: str, data: Dict[str, Any]):
-    if api != "send_msg":
-        return
-    msgs: List[MessageSegment] = data["message"]
-    new_msg: List[MessageSegment] = []
-    for msg in msgs:
-        if msg.type != "text":
-            new_msg.append(msg)
-            continue
-        pics = re.findall(r"【image: (.*?)】", str(msg))
-        if len(pics) == 0:
-            new_msg.append(msg)
-        for pic in pics:
-            new_msg.append(R.image(f"data/customreply/data/{pic}"))
-            sv.logger.info(f"replace {pic} with ")
-    data["message"] = new_msg
