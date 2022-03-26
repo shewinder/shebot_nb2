@@ -1,16 +1,15 @@
-from asyncio.exceptions import TimeoutError
-
 import aiohttp
 import requests
 from hoshino.log import logger
-from nonebot.adapters.cqhttp.message import  MessageSegment
+from hoshino.util import proxypool
+from nonebot.adapters.cqhttp.message import MessageSegment
 
 from .._config import Config, plugin_config
+from .._exception import ProxyException, TimeoutException
 from .._model import BaseInfoChecker, InfoData, SubscribeRecord
-from .._exception import TimeoutException, ProxyException
-from hoshino.util import proxypool
 
 conf: Config = plugin_config.config
+
 
 def get_name_from_room(room_id: str) -> str:
     headers = {
@@ -76,10 +75,9 @@ class BiliLiveChecker(BaseInfoChecker):
         try:
             resp = await proxypool.aioget(url, headers=headers)
         except proxypool.TimeoutException:
-            raise TimeoutException('get bilibili live data timeout')
+            raise TimeoutException("get bilibili live data timeout")
         except proxypool.ProxyException:
-            logger.warning('proxy unavailable')
-            raise ProxyException('proxy unavailable')
+            raise ProxyException("proxy unavailable")
 
         if resp.status == 200:
             json_dic = await resp.json()
@@ -92,7 +90,7 @@ class BiliLiveChecker(BaseInfoChecker):
             lv.is_new = True if data["live_status"] == 1 else False
             return lv
         else:
-            raise ValueError(f'error: status{resp.status}')
+            raise ValueError(f"error: status{resp.status}")
 
     def form_url(self, dinstinguisher: str) -> str:
         return (
