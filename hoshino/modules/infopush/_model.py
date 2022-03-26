@@ -9,6 +9,7 @@ from hoshino import get_bot_list, Bot, userdata_dir, MessageSegment
 from hoshino.log import logger
 from ._glob import CHECKERS, SUBS
 from hoshino.util.sutil import load_config, save_config
+from ._exception import TimeoutException, ProxyException
 
 
 plug_dir = userdata_dir.joinpath("infopush")
@@ -183,7 +184,17 @@ class BaseInfoChecker:
             await asyncio.sleep(0.5)
 
     async def check_and_notice(self, sub: SubscribeRecord):
-        data = await self.get_data(sub.url)
+        try:
+            data = await self.get_data(sub.url)
+        except TimeoutException as e:
+            logger.warning(f'{e}')
+            return False
+        except ProxyException as e:
+            logger.warning(f'{e}')
+            return False
+        except Exception as e:
+            logger.exception(e)
+            return False
         if not data:
             logger.warning(f"检查{sub.checker}出错")
             return
@@ -208,3 +219,5 @@ class BaseInfoChecker:
         根据data生成remark, checker应实现此方法
         """
         raise NotImplementedError
+
+

@@ -3,24 +3,14 @@ from asyncio.exceptions import TimeoutError
 import aiohttp
 import requests
 from hoshino.log import logger
-from nonebot.adapters.cqhttp.message import Message, MessageSegment
+from nonebot.adapters.cqhttp.message import  MessageSegment
 
 from .._config import Config, plugin_config
 from .._model import BaseInfoChecker, InfoData, SubscribeRecord
+from .._exception import TimeoutException, ProxyException
+from hoshino.util import proxypool
 
 conf: Config = plugin_config.config
-
-
-def get_proxy():
-    try:
-        response = requests.get(conf.PROXY_POOL_URL)
-        if response.status_code == 200:
-            return response.text
-    except ConnectionError:
-        return None
-    except:
-        return None
-
 
 def get_name_from_room(room_id: str) -> str:
     headers = {
@@ -78,33 +68,31 @@ class BiliLiveChecker(BaseInfoChecker):
                 return "unknown"
 
     @classmethod
-    async def get_data(self, url, use_proxy=True) -> Live:
-        proxy = "http://" + get_proxy() if use_proxy and get_proxy() else None
+    async def get_data(self, url) -> Live:
         headers = {
             "Referer": "https://link.bilibili.com/p/center/index",
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36",
         }
-        timeout = aiohttp.ClientTimeout(total=1)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            try:
-                async with session.get(url=url, headers=headers, proxy=proxy) as resp:
-                    if resp.status == 200:
-                        json_dic = await resp.json()
-                        data = json_dic["data"]
-                        lv = Live()
-                        lv.pub_time = str(data["live_time"])
-                        lv.portal = f'https://live.bilibili.com/{data["room_id"]}'
-                        lv.title = data["title"]
-                        lv.cover = data["user_cover"]
-                        lv.is_new = True if data["live_status"] == 1 else False
-                        return lv
-                    else:
-                        raise ValueError(f'error: status{resp.status}')
-            except TimeoutError:
-                logger.warning("checking bililive timeout")
-                raise
-            except:
-                raise
+        try:
+            resp = await proxypool.aioget(url, headers=headers)
+        except proxypool.TimeoutException:
+            raise TimeoutException('get bilibili live data timeout')
+        except proxypool.ProxyException:
+            logger.warning('proxy unavailable')
+            raise ProxyException('proxy unavailable')
+
+        if resp.status == 200:
+            json_dic = await resp.json()
+            data = json_dic["data"]
+            lv = Live()
+            lv.pub_time = str(data["live_time"])
+            lv.portal = f'https://live.bilibili.com/{data["room_id"]}'
+            lv.title = data["title"]
+            lv.cover = data["user_cover"]
+            lv.is_new = True if data["live_status"] == 1 else False
+            return lv
+        else:
+            raise ValueError(f'error: status{resp.status}')
 
     def form_url(self, dinstinguisher: str) -> str:
         return (
@@ -117,4 +105,4 @@ class BiliLiveChecker(BaseInfoChecker):
         return f"{name}B站直播间"
 
 
-BiliLiveChecker(10, "Bilibili直播", "房间号")
+BiliLiveChecker(5, "Bilibili直播", "房间号")
