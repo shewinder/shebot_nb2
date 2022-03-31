@@ -6,9 +6,10 @@ from hoshino import res_dir, userdata_dir
 from hoshino.sres import Res as R
 from hoshino.util.sutil import load_config, save_config
 from .bieming import biemings
-from .config import plugin_config, Config
+from .config import Config
+from hoshino.pluginconfig import get_plugin_config_by_name
 
-pc: Config = plugin_config.config
+pc: Config = get_plugin_config_by_name('imagegenerator')
 
 plug_resdir = res_dir.joinpath("imagegenerator/image_data")
 

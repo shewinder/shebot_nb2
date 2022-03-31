@@ -9,6 +9,7 @@ from aiohttp.client_exceptions import (
     ClientConnectionError,
     ClientHttpProxyError,
     ClientProxyConnectionError,
+    ClientOSError
 )
 from requests import Response
 from requests.api import request
@@ -26,12 +27,17 @@ class ProxyException(Exception):
 class TimeoutException(Exception):
     pass
 
+class NetworkException(Exception):
+    pass
+
 
 class ProxyPool:
     def __init__(self, proxy_pool_url=PROXY_POOL_URL):
         self.proxies: List[str] = []
         self.proxy_pool_url = proxy_pool_url
         self.proxy_iterator = self.fetch_proxys()
+        self.ok_cnt = 0
+        self.fail_cnt = 0
 
     def fetch_proxys(self) :
         all = requests.get(self.proxy_pool_url).text.split()
@@ -73,15 +79,20 @@ class RequestWithProxy(ProxyPool):
         proxy = self.get_proxy()
         kwargs["proxies"] = {"http": "http://" + proxy, "https": "http://" + proxy}
         try:
-            return request(method, url, **kwargs)
+            resp = request(method, url, **kwargs)
+            self.ok_cnt += 1
+            return resp
         except ProxyError:
             self.remove_proxy(proxy)
+            self.fail_cnt += 1
             raise ProxyException("connect to proxy failed")
         except Timeout:
             self.remove_proxy(proxy)
+            self.fail_cnt += 1
             raise TimeoutException
         except:
             self.remove_proxy(proxy)
+            self.fail_cnt += 1
             raise
 
     def get(self, url, **kwargs) -> Response:
@@ -129,20 +140,28 @@ class AioRequestWithProxy(ProxyPool):
             ) as session:
                 async with session.request(method, url, **kwargs) as resp:
                     await resp.read()
+                    self.ok_cnt += 1
                     return resp
         except (ClientProxyConnectionError, ClientHttpProxyError):
             self.remove_proxy(proxy)
+            self.fail_cnt += 1
             raise ProxyException("connect to proxy failed")
+        except (ClientConnectionError, ClientOSError) as e:
+            self.remove_proxy(proxy)
+            self.fail_cnt += 1
+            raise NetworkException(f'{e}')
         except asyncio.exceptions.TimeoutError:
             self.remove_proxy(proxy)
+            self.fail_cnt += 1
             raise TimeoutException
         except:
             self.remove_proxy(proxy)
+            self.fail_cnt += 1
             raise
 
     async def get(self, url, **kwargs) -> ClientResponse:
         return await self.do("get", url, **kwargs)
-
+            
     async def post(self, url, **kwargs) -> ClientResponse:
         return await self.do("post", url, **kwargs)
 

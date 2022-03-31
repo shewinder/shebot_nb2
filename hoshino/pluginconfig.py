@@ -1,9 +1,11 @@
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, TypeVar, Union, Type
 
 from pydantic import BaseModel
 
 from hoshino.util.sutil import save_config, load_config
+from hoshino import conf_dir
+from functools import wraps
 
 _all_plugin_config: Dict[str, "PluginConfig"] = {}  # 所有插件的配置数据
 
@@ -67,6 +69,14 @@ class PluginConfig:
     def __getattr__(self, name):
         return self.config.__dict__.get(name).value
 
-
 def get_plugin_config() -> Dict[str, PluginConfig]:
     return _all_plugin_config
+
+def get_plugin_config_by_name(plugin_name: str): 
+    return _all_plugin_config.get(plugin_name).config
+
+def configuration (name: str):
+    def decorator(cls):
+        PluginConfig(name, conf_dir / f"{name}.json", cls())
+        return cls
+    return decorator

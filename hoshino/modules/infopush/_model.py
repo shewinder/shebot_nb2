@@ -9,7 +9,7 @@ from hoshino import get_bot_list, Bot, userdata_dir, MessageSegment
 from hoshino.log import logger
 from ._glob import CHECKERS, SUBS
 from hoshino.util.sutil import load_config, save_config
-from ._exception import TimeoutException, ProxyException
+from ._exception import TimeoutException, ProxyException, NetworkException
 
 
 plug_dir = userdata_dir.joinpath("infopush")
@@ -26,7 +26,7 @@ class SubscribeRecord(BaseModel):
     remark: str
     url: str
     date: str
-    creator: Dict[int, List[str]]
+    creator: Dict[int, List[str]] # {group_id: [user_id, ...]}
 
     @classmethod
     def to_json(cls):
@@ -190,6 +190,9 @@ class BaseInfoChecker:
             logger.warning(f'{e}')
             return False
         except ProxyException as e:
+            logger.warning(f'{e}')
+            return False
+        except NetworkException as e:
             logger.warning(f'{e}')
             return False
         except Exception as e:

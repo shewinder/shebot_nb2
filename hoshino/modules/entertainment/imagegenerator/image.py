@@ -11,9 +11,10 @@ from nonebot.adapters.cqhttp.message import MessageSegment
 from PIL import Image, ImageDraw, ImageFont
 
 from .bieming import biemings
-from .config import Config, plugin_config
+from .config import Config
+from hoshino.pluginconfig import get_plugin_config_by_name
 
-pc: Config = plugin_config.config
+pc: Config = get_plugin_config_by_name("imagegenerator")
 
 plug_resdir = res_dir.joinpath("imagegenerator/image_data")
 

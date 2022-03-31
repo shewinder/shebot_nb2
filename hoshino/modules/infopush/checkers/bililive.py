@@ -5,7 +5,7 @@ from hoshino.util import proxypool
 from nonebot.adapters.cqhttp.message import MessageSegment
 
 from .._config import Config, plugin_config
-from .._exception import ProxyException, TimeoutException
+from .._exception import ProxyException, TimeoutException, NetworkException
 from .._model import BaseInfoChecker, InfoData, SubscribeRecord
 
 conf: Config = plugin_config.config
@@ -78,6 +78,8 @@ class BiliLiveChecker(BaseInfoChecker):
             raise TimeoutException("get bilibili live data timeout")
         except proxypool.ProxyException:
             raise ProxyException("proxy unavailable")
+        except proxypool.NetworkException:
+            raise NetworkException("network unavailable")
 
         if resp.status == 200:
             json_dic = await resp.json()

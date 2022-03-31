@@ -1,7 +1,5 @@
-from hoshino.pluginconfig import BaseConfig, PluginConfig
-from hoshino import conf_dir
+from hoshino.pluginconfig import BaseConfig, configuration
 
+@configuration('imagegenerator')
 class Config(BaseConfig):
     initial: str = 'random'
-
-plugin_config = PluginConfig('imagegenerator', conf_dir.joinpath('imagegenerator.json'), Config())

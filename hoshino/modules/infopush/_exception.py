@@ -3,3 +3,6 @@ class TimeoutException(Exception):
 
 class ProxyException(Exception):
     pass
+
+class NetworkException(Exception):
+    pass
