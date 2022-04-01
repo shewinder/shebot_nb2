@@ -11,6 +11,7 @@ from aiohttp.client_exceptions import (
     ClientProxyConnectionError,
     ClientOSError
 )
+from ssl import SSLCertVerificationError
 from requests import Response
 from requests.api import request
 from requests.exceptions import ProxyError, Timeout
@@ -146,7 +147,7 @@ class AioRequestWithProxy(ProxyPool):
             self.remove_proxy(proxy)
             self.fail_cnt += 1
             raise ProxyException("connect to proxy failed")
-        except (ClientConnectionError, ClientOSError) as e:
+        except (ClientConnectionError, ClientOSError, SSLCertVerificationError) as e:
             self.remove_proxy(proxy)
             self.fail_cnt += 1
             raise NetworkException(f'{e}')

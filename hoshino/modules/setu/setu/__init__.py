@@ -76,7 +76,7 @@ async def send_common_setu(bot: Bot, event: Event, state: T_State):
     gid = None if not isinstance(event, GroupMessageEvent) else event.group_id
     
     if not _num_limiter.check(uid):
-        await bot.send(event, conf.exceed_notice)
+        await bot.send(event, Message(conf.exceed_notice))
         return
 
     if not _freq_limiter.check(uid):
