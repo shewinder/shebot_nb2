@@ -78,7 +78,7 @@ async def pixiv_rank():
     sv_r18.logger.info("日榜图片下载完成")
     pics = filter_rank(pics, _tag_scores)
     bot: Bot = get_bot_list()[0]
-    gids = await get_service_groups(sv_name=sv.name)
+    gids = await get_service_groups(sv_name=sv_r18.name)
     notice = MessageSegment.text("Pixiv R18日榜")
     msgs = []
     for pic in pics:

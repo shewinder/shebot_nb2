@@ -17,8 +17,9 @@ class PixivUserChecker(BaseInfoChecker):
     async def notice_format(self, sub: SubscribeRecord, data: PixivData):
         msg = MessageSegment.text(f"{sub.remark}更新了！\n")
         for url in data.urls:
-            msg += MessageSegment.image(
-                url.replace("i.pximg.net", "pixiv.shewinder.win")
+            msg += await R.image_from_url(
+                url.replace("i.pximg.net", "pixiv.shewinder.win"),
+                anti_harmony=True,
             )
         return msg + MessageSegment.text(data.portal)
 
@@ -60,5 +61,4 @@ class PixivUserChecker(BaseInfoChecker):
         return f"{data.user_name}的插画"
 
 
-PixivUserChecker(3600, "Pixiv投稿", "用户ID")
-# PixivUserChecker(30)
+PixivUserChecker(600, "Pixiv投稿", "用户ID")

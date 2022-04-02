@@ -9,7 +9,7 @@ from hoshino import MessageSegment
 
 
 from hoshino import res_dir
-from hoshino.util.sutil import get_random_file
+from hoshino.util.sutil import get_random_file, anti_harmony as anti_harmony_img
 
 
 class ResImg:
@@ -94,8 +94,17 @@ class Res:
             raise ValueError('file not found')
 
     @classmethod
-    def image(cls, p: str) -> MessageSegment:
-        return cls.img(p).cqcode
+    def image(cls, p: Union[str, Path], anti_harmony: bool=False) -> MessageSegment:
+        """
+        将资源转换为可发送的图片
+        params: 
+        p: 资源路径
+        anti_harmony: 是否启用图片反和谐
+        """
+        img = cls.img(p).open()
+        if anti_harmony:
+            img = anti_harmony_img(img)
+        return cls.image_from_memory(img)
 
 
     @classmethod
@@ -138,13 +147,18 @@ class Res:
         return MessageSegment.image(file=data, cache=False)
 
     @classmethod
-    async def image_from_url(cls, url: str) -> MessageSegment:
+    async def image_from_url(cls, url: str, anti_harmony: bool=False) -> MessageSegment:
         """
         download the image from url and return a MessageSegment in base64
         should be used in async function
+        params: 
+        url: image url
+        anti_harmony: bool = False 是否启用图片反和谐
         """
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 data = await resp.read()
+        if anti_harmony:
+            data = anti_harmony_img(Image.open(BytesIO(data)))
         return cls.image_from_memory(data)
 

@@ -85,3 +85,12 @@ async def get_service_groups(sv_name):
     enable_groups = await svs[sv_name].get_enable_groups()
     return enable_groups.keys()
 
+def anti_harmony(img: Image.Image) -> Image.Image:
+    #img = img.convert('RGB')
+    W, H = img.size[0], img.size[1]
+    pos1 = 1,1
+    pos2 = W-1,H-1
+    img.putpixel(pos1,(255,255,random.randint(0,255)))
+    img.putpixel(pos2,(255,255,random.randint(0,255)))
+    return img
+
