@@ -143,11 +143,11 @@ async def sendR18_setu(bot: Bot, event: MessageEvent, state: T_State):
         return
 
     if not _num_limiter.check(uid):
-        await bot.send(event, conf.exceed_notice)
+        await bot.send(event, Message(conf.exceed_notice))
         return
 
     if not _freq_limiter.check(uid):
-        await bot.send(event, conf.too_frequent_notic)
+        await bot.send(event, Message(conf.too_frequent_notic))
         return
 
     _num_limiter.increase(uid)
