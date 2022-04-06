@@ -12,7 +12,10 @@ conf: Config = plugin_config.config
 class WeiboChecker(BaseInfoChecker):
     async def notice_format(self, sub: SubscribeRecord, data: RSSData) -> Message:
         browser = await get_browser()
-        page = await browser.new_page()
+        ctx = await browser.new_context(
+        viewport={"width": 2560, "height": 1080}, device_scale_factor=2
+        )
+        page = await ctx.new_page()
         await page.goto(data.portal)
         articles = page.locator("//article")
         screen_bytes = await articles.first.screenshot()  # 截图
