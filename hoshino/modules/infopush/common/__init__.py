@@ -4,7 +4,8 @@ from hoshino import Bot, Service
 from hoshino.typing import T_State, GroupMessageEvent
 from hoshino.permission import GROUP_ADMIN, GROUP_OWNER
 
-from .._model import SubscribeRecord, BaseInfoChecker
+from .._model import SubscribeRecord, BaseInfoChecker, InfoData
+from .._exception import TimeoutException
 
 help_ = """
 [订阅] 添加一个订阅
@@ -69,9 +70,12 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     url = checker.form_url(state["dis"])
     try:
         data = await checker.get_data(url)
+    except TimeoutException:
+        sv.logger.warning(f'订阅{checker.name}获取数据超时')
+        data = InfoData() # 使用proxy pool 超时是正常情况
     except Exception as e:
         await add_subscribe.finish(f"error: {e}")
-    if not data:
+    if data is None:
         await add_subscribe.finish("获取数据失败, 请检查输入")
     gid = event.group_id
     uid = "all" if state.get("all") else event.user_id
