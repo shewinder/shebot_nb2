@@ -12,7 +12,8 @@ from hoshino.util import DailyNumberLimiter, FreqLimiter
 from hoshino.sres import Res as R
 from hoshino.glob import R18, NR18
 from .getsetu import *
-from .config import Config, plugin_config as pc
+from .config import Config
+from hoshino.config import get_plugin_config_by_name
 from hoshino import Message
 
 help_ ="""
@@ -21,7 +22,7 @@ help_ ="""
 [就这不够色] r18色图(需要机器人管理员开启)
 """.strip()
 
-conf: Config = pc.config
+conf: Config = get_plugin_config_by_name('setu')
 
 _num = 10
 
@@ -184,7 +185,6 @@ async def set_r18(bot: Bot, event: MessageEvent):
 
     if gid not in conf.r18_groups:
         conf.r18_groups.append(gid)
-        pc.save_json()
         await bot.send(event, f'群{gid}r18开启成功')
     else:
         await bot.send(event, f'群{gid}r18已经开启,无需再次开启')
@@ -203,7 +203,6 @@ async def set_r18(bot: Bot, event: MessageEvent):
 
     if gid in conf.r18_groups:
         conf.r18_groups.remove(gid)
-        pc.save_json()
         await bot.send(event, f'群{gid}r18已关闭')
     else:
         await bot.send(event, f'群{gid}r18已经关闭,无需再次关闭')
@@ -218,7 +217,7 @@ def render_setus(setus: List[Setu]) -> Message:
 
 def check_r18(event: MessageEvent):
     if isinstance(event, PrivateMessageEvent):
-        return True # 私聊放大权限
+        return False # 拒绝私聊
     if isinstance(event, GroupMessageEvent):
         gid = event.group_id
     else:

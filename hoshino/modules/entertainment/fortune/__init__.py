@@ -13,10 +13,11 @@ from hoshino.service import Service
 from hoshino.util.sutil import load_config
 from .data_source import drawing
 from .good_luck import GOOD_LUCK
-from .config import plugin_config, Config
+from .config import Config
+from hoshino.config import get_plugin_config_by_name
 from hoshino.typing import T_State
 
-conf: Config = plugin_config.config
+conf: Config = get_plugin_config_by_name('fortune')
 
 sv = Service('运势')
 _lmt = DailyNumberLimiter(1)
@@ -84,7 +85,6 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     themes = state['themes']
     if args in themes or args == 'random':
         conf.user_theme[str(event.user_id)] = args
-        plugin_config.save_json()
         await choose.send(f'已经将抽签切换为{args}')
     else:
         await choose.send(f'{args}不存在')

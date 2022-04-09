@@ -5,27 +5,14 @@ import random
 from dataclasses import dataclass
 from typing import List
 
-from hoshino import font_dir, res_dir, userdata_dir
+from hoshino import font_dir, res_dir
 from hoshino.sres import Res as R
 from nonebot.adapters.cqhttp.message import MessageSegment
 from PIL import Image, ImageDraw, ImageFont
 
 from .bieming import biemings
-from .config import Config
-from hoshino.pluginconfig import get_plugin_config_by_name
-
-pc: Config = get_plugin_config_by_name("imagegenerator")
 
 plug_resdir = res_dir.joinpath("imagegenerator/image_data")
-
-plug_dir = userdata_dir.joinpath("imagegenerator")
-if not plug_dir.exists():
-    plug_dir.mkdir()
-
-plug_userdata = plug_dir.joinpath("user.json")
-if not plug_userdata.exists():
-    plug_userdata.touch()
-
 
 @dataclass
 class ImageConfig:

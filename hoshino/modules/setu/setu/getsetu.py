@@ -1,17 +1,17 @@
-from re import I
+from io import BytesIO
 from typing import List
 
 import aiohttp
 import requests
-from io import BytesIO
-from PIL import Image
-
+from hoshino.config import get_plugin_config_by_name
 from hoshino.log import logger
 from hoshino.util.sutil import anti_harmony
-from .config import plugin_config, Config
+from PIL import Image
+
+from .config import Config
 from .model import Setu
 
-conf: Config = plugin_config.config
+conf: Config = get_plugin_config_by_name("setu")
 
 
 def get_lolicon_setu(r18: int = 0, keyword: str = "", num: int = 1):
