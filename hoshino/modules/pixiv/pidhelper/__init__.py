@@ -8,22 +8,18 @@ from hoshino import Service, MessageSegment
 from hoshino.log import logger
 from hoshino.typing import Bot, GroupMessageEvent
 from hoshino.sres import Res as R
-from hoshino.util import FreqLimiter
 from hoshino.util.message_util import send_group_forward_msg
+from hoshino.util.sutil import anti_harmony
 from .._model import Illust
 
 help_ ="""
 [pid90173025] 发送pixiv对应pid的图片，超过10张只发前10张
 """.strip()
 
-_lmt = FreqLimiter(60)
-
 sv = Service('pid搜图', help_=help_)
 pid = sv.on_command('pid')
 @pid.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
-    if not _lmt.check(event.user_id):
-        return
     p = str(event.message).strip()
     url = f'https://api.shewinder.win/pixiv/illust_detail'
     async with aiohttp.ClientSession() as session:
@@ -64,27 +60,28 @@ async def _(bot: Bot, event: GroupMessageEvent):
             for pic in pics:
                 msgs.append(R.image_from_memory(pic))
             await send_group_forward_msg(bot, event.group_id, msgs)
-        _lmt.start_cd(event.user_id)
 
 async def download_pic(session: aiohttp.ClientSession, url):
     logger.info(f'正在下载{url}')
     async with session.get(url) as resp:
+        if resp.status != 200:
+            raise Exception(f'{url} 下载失败')
         content = await resp.read()
         logger.info(f'{url}下载完成')
         img = Image.open(BytesIO(content))
         img = img.convert('RGB')
-        img = anti_harmony(img)
+        #img = anti_harmony(img) # 转发消息试试不反和谐
         out = BytesIO()
         img.save(out, format='png')
         return out.getvalue()
 
-def anti_harmony(img: Image.Image) -> Image.Image:
-    #img = img.convert('RGB')
-    W, H = img.size[0], img.size[1]
-    pos1 = 1,1
-    pos2 = W-1,H-1
-    img.putpixel(pos1,(255,255,200))
-    img.putpixel(pos2,(255,255,200))
-    return img
+# def anti_harmony(img: Image.Image) -> Image.Image:
+#     #img = img.convert('RGB')
+#     W, H = img.size[0], img.size[1]
+#     pos1 = 1,1
+#     pos2 = W-1,H-1
+#     img.putpixel(pos1,(255,255,200))
+#     img.putpixel(pos2,(255,255,200))
+#     return img
 
     

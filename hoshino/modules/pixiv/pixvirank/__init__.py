@@ -7,13 +7,13 @@ from hoshino import (
     Service,
     get_bot_list,
     scheduled_job,
-    userdata_dir,
     sucmd,
+    userdata_dir,
 )
 from hoshino.sres import Res as R
+from hoshino.util.message_util import send_group_forward_msg
 from hoshino.util.sutil import get_service_groups, load_config, save_config
 from nonebot.adapters.cqhttp.message import Message, MessageSegment
-from hoshino.util.message_util import send_group_forward_msg
 
 from .data_source import filter_rank, get_rank, get_tags
 
@@ -52,7 +52,8 @@ async def pixiv_rank():
                 f"{pic.pid}: {pic.page_count}\n{pic.author}\n{pic.author_id}"
             )
         )
-        msgs.append(MessageSegment.image(pic.url))
+        # msgs.append(MessageSegment.image(pic.url))
+        msgs.append(await R.image_from_url(pic.url))
 
     for gid in gids:
         await asyncio.sleep(0.5)
@@ -68,7 +69,7 @@ async def pixiv_rank():
 sv_r18 = Service("Pixiv日榜R18", enable_on_default=False, visible=False)
 
 
-@scheduled_job("cron", hour=18, minute=32, id="pixiv日榜r18")
+@scheduled_job("cron", hour=18, minute=35, id="pixiv日榜r18")
 async def pixiv_rank():
     today = datetime.date.today()
     yesterday = today - datetime.timedelta(days=1)
@@ -87,10 +88,10 @@ async def pixiv_rank():
                 f"{pic.pid}: {pic.page_count}\n{pic.author}\n{pic.author_id}"
             )
         )
-        msgs.append(MessageSegment.image(pic.url))
+        msgs.append(await R.image_from_url(pic.url))
+        # msgs.append(MessageSegment.image(pic.url))
 
     for gid in gids:
-        await asyncio.sleep(0.5)
         try:
             await bot.send_group_msg(message=notice, group_id=gid)
             await send_group_forward_msg(bot, gid, msgs)
@@ -98,6 +99,7 @@ async def pixiv_rank():
         except Exception as e:
             sv_r18.logger.exception(e)
             sv_r18.logger.error(type(e))
+        await asyncio.sleep(30)
 
 
 add_tag = sucmd("add pid")
