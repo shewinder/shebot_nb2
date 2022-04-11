@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+from typing import List
 
 from hoshino import (
     Bot,
@@ -8,14 +9,14 @@ from hoshino import (
     get_bot_list,
     scheduled_job,
     sucmd,
-    userdata_dir,
 )
 from hoshino.sres import Res as R
 from hoshino.util.message_util import send_group_forward_msg
-from hoshino.util.sutil import get_service_groups, load_config, save_config
-from nonebot.adapters.cqhttp.message import Message, MessageSegment
+from hoshino.util.sutil import get_service_groups
+from nonebot.adapters.cqhttp.message import MessageSegment
 
-from .data_source import filter_rank, get_rank, get_tags
+from .data_source import RankPic, filter_rank, get_rank, get_rankpic
+from .score import score_data
 
 help_ = """
 启用后会每天固定推送Pixiv日榜
@@ -24,13 +25,11 @@ help_ = """
 
 sv = Service("Pixiv日榜", enable_on_default=False, help_=help_)
 
-plugin_dir = userdata_dir.joinpath("pixiv")
-if not plugin_dir.exists():
-    plugin_dir.mkdir()
-p = plugin_dir.joinpath("tag.json")
-if not p.exists():
-    p.touch()
-_tag_scores = load_config(p)
+
+def update_last_3_days(pics: List[RankPic]):
+    if len(score_data.last_three_days) == 3:
+        score_data.last_three_days.pop(0)
+    score_data.last_three_days.append([p.pid for p in pics])
 
 
 @scheduled_job("cron", hour=18, minute=30, id="pixiv日榜")
@@ -38,10 +37,13 @@ async def pixiv_rank():
     today = datetime.date.today()
     yesterday = today - datetime.timedelta(days=1)
     date = f"{yesterday}"
-    sv.logger.info("正在下载日榜图片")
+    sv.logger.info("正在获取日榜")
     pics = await get_rank(date)
-    sv.logger.info("日榜图片下载完成")
-    pics = filter_rank(pics, _tag_scores)
+    sv.logger.info("日榜获取完毕")
+    pics = filter_rank(pics)
+    update_last_3_days(pics)
+
+    # 处理发送
     bot: Bot = get_bot_list()[0]
     gids = await get_service_groups(sv_name=sv.name)
     notice = MessageSegment.text("今日Pixiv日榜")
@@ -77,7 +79,8 @@ async def pixiv_rank():
     sv_r18.logger.info("正在下载日榜图片")
     pics = await get_rank(date, "day_r18")
     sv_r18.logger.info("日榜图片下载完成")
-    pics = filter_rank(pics, _tag_scores)
+    pics = filter_rank(pics)
+    score_data.last_three_days[-1].extend([p.pid for p in pics]) # 由于r18榜晚发，此时过去三天已经更新过了
     bot: Bot = get_bot_list()[0]
     gids = await get_service_groups(sv_name=sv_r18.name)
     notice = MessageSegment.text("Pixiv R18日榜")
@@ -102,42 +105,76 @@ async def pixiv_rank():
         await asyncio.sleep(30)
 
 
-add_tag = sucmd("add pid")
+from .score import score_data
+
+
+def add_tag_score(tag: str, score: int):
+    if tag in score_data.tag_scores:
+        score_data.tag_scores[tag] += score
+    else:
+        score_data.tag_scores[tag] = score
+
+
+def add_author_score(author_id: str, score: int):
+    if author_id in score_data.author_scores:
+        score_data.author_scores[author_id] += score
+    else:
+        score_data.author_scores[author_id] = score
+
+
+def favor(pic: RankPic):
+    for tag in pic.tags:
+        add_tag_score(tag, 1)
+    add_author_score(str(pic.author_id), 1)
+
+
+def dislike(pic: RankPic):
+    for tag in pic.tags:
+        add_tag_score(tag, -1)
+    add_author_score(str(pic.author_id), -1)
+
+
+fav = sucmd("favor")
+
+
+@fav.handle()
+async def _(bot: Bot, event: Event):
+    try:
+        int(str(event.get_message()))
+    except ValueError:
+        await bot.send(event, "请输入正确的Pixiv ID")
+        return
+    pid = str(event.get_message())
+    rank_pic = await get_rankpic(pid)
+    favor(rank_pic)
+    await bot.send(event, f"更新tag {rank_pic.tags}\n更新作者 {rank_pic.author}")
+
+
+dis = sucmd("dislike")
+
+
+async def _(bot: Bot, event: Event):
+    try:
+        int(str(event.get_message()))
+    except ValueError:
+        await bot.send(event, "请输入正确的Pixiv ID")
+        return
+    pid = str(event.get_message())
+    rank_pic = await get_rankpic(pid)
+    dislike(rank_pic)
+    await bot.send(event, f"更新tag {rank_pic.tags}\n更新作者 {rank_pic.author}")
+
+
+add_tag = sucmd("tag", only_to_me=False)
 
 
 @add_tag.handle()
 async def _(bot: Bot, event: Event):
-    global _tag_scores
-    try:
-        pid, score = str(event.message).split(" ")
-    except:
-        pid = str(event.message).strip()
-        score = 1
-    tags = await get_tags(pid)
-    for tag in tags:
-        if tag in _tag_scores:
-            _tag_scores[tag] += int(score)
-            # pass
-        else:
-            _tag_scores[tag] = int(score)
-    save_config(_tag_scores, p)
-    await bot.send(event, f"更新tag {tags}")
-
-
-add_pid = sucmd("add tag", only_to_me=False)
-
-
-@add_pid.handle()
-async def _(bot: Bot, event: Event):
-    global _tag_scores
     try:
         tag, score = str(event.message).split(" ")
+        int(score)
     except:
         tag = str(event.message)
-        score = 1
-    if tag in _tag_scores:
-        _tag_scores[tag] += int(score)
-    else:
-        _tag_scores[tag] = int(score)
-    save_config(_tag_scores, p)
+        score = 0  # 默认为0
+    add_tag_score(tag, int(score))
     await bot.send(event, f"更新tag {tag}")

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional, List, Any
 from datetime import datetime
+from nonebot import Config
 from pydantic import BaseModel
 
 
@@ -60,3 +61,41 @@ class Illust(BaseModel):
     visible: Optional[bool] = None
     width: Optional[int] = None
     x_restrict: Optional[int] = None
+
+class PixivIllust(BaseModel):
+    caption: Optional[str] = None
+    create_date: Optional[datetime] = None
+    height: Optional[int] = None
+    id: Optional[int] = None
+    is_bookmarked: Optional[bool] = None
+    is_muted: Optional[bool] = None
+    page_count: Optional[int] = None
+    restrict: Optional[int] = None
+    sanity_level: Optional[int] = None
+    tags: Optional[List[Tag]] = None
+    title: Optional[str] = None
+    tools: Optional[List[Any]] = None
+    total_bookmarks: Optional[int] = None
+    total_comments: Optional[int] = None
+    total_view: Optional[int] = None
+    type: Optional[str] = None
+    user: Optional[User] = None
+    visible: Optional[bool] = None
+    width: Optional[int] = None
+    x_restrict: Optional[int] = None
+    urls: List[str] = []
+
+    def __init__(self, illust: Illust) -> None:
+        if illust:
+            data = illust.dict()
+        urls: List[str] = []
+        if data['page_count'] == 1:
+            urls = [data['meta_single_page']['original_image_url']]
+        else:
+            urls = [d['image_urls']['original'] for d in data['meta_pages']]
+        super().__init__(**data)
+        self.__dict__['urls'] = urls
+
+    class Config:
+        extra = 'ignore'
+

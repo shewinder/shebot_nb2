@@ -70,18 +70,9 @@ async def download_pic(session: aiohttp.ClientSession, url):
         logger.info(f'{url}下载完成')
         img = Image.open(BytesIO(content))
         img = img.convert('RGB')
-        #img = anti_harmony(img) # 转发消息试试不反和谐
+        img = anti_harmony(img) # 转发消息试试不反和谐
         out = BytesIO()
         img.save(out, format='png')
         return out.getvalue()
-
-# def anti_harmony(img: Image.Image) -> Image.Image:
-#     #img = img.convert('RGB')
-#     W, H = img.size[0], img.size[1]
-#     pos1 = 1,1
-#     pos2 = W-1,H-1
-#     img.putpixel(pos1,(255,255,200))
-#     img.putpixel(pos2,(255,255,200))
-#     return img
 
     

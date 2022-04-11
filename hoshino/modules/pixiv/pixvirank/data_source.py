@@ -3,6 +3,9 @@ from typing import Dict, List
 
 import aiohttp
 
+from .._model import Illust, PixivIllust
+from .score import score_data
+
 
 @dataclass
 class RankPic:
@@ -14,86 +17,62 @@ class RankPic:
     author: str
     author_id: int
 
-async def get_rank(date: str, mode: str='day') -> List[RankPic]:
-    url = 'https://api.shewinder.win/pixiv/rank'
-    params = {
-        "date" : date,
-        "mode" : mode,
-        "num" : 60
-    }
+def to_rankpic(illust: Illust):
+    pic = PixivIllust(illust)
+    tags = [tag.name for tag in pic.tags]
+    return RankPic(
+        pic.id,
+        pic.urls[0],
+        tags,
+        0,
+        pic.page_count,
+        pic.user.name,
+        pic.user.id,
+    )
+
+
+async def get_rank(date: str, mode: str = "day") -> List[RankPic]:
+    url = "https://api.shewinder.win/pixiv/rank"
+    params = {"date": date, "mode": mode, "num": 60}
     res = []
     async with aiohttp.ClientSession() as session:
         async with session.get(url, params=params) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 for d in data:
-                    if d['type'] != 'illust':
+                    if d["type"] != "illust":
                         continue
-                    if d['page_count'] == 1:
-                        url = d['meta_single_page']['original_image_url']
-                    else:
-                        url = d['meta_pages'][0]['image_urls']['original']
-                    res.append(RankPic(d['id'], 
-                               url.replace('i.pximg.net','pixiv.shewinder.win'), 
-                               d['tags'], 0, 
-                               d['page_count'],
-                               d['user']['name'],
-                               d['user']['id'],
-                               ))
+                    res.append(to_rankpic(Illust(**data)))
                 return res
 
-def filter_rank(pics: List[RankPic], tag_scores: Dict[str, int]) -> List[RankPic]:
+
+def filter_rank(pics: List[RankPic]) -> List[RankPic]:
+    def sum_score(pic: RankPic):
+        return sum(
+            score_data.tag_scores.get(tag, 0) for tag in pic.tags
+        ) + score_data.author_scores.get(str(pic.author_id), 0)
+
+    def already_sent_in_3_days(pic: RankPic):
+        for i in score_data.last_three_days:
+            if pic.pid in i:
+                return True
+        return False
+
+    filter(not already_sent_in_3_days, pics)
     for pic in pics:
-        sum = 0
-        for tag in pic.tags:
-            if tag['name'] in tag_scores:
-                sum += tag_scores[tag['name']]
-        pic.score = sum
+        pic.score = sum_score(pic)
+
     pics.sort(key=lambda x: x.score, reverse=True)
     return pics[0:15]
 
-async def get_tags(pid: str) -> List[str]:
-    url = 'https://api.shewinder.win/pixiv/illust_detail'
-    params = {
-        "illust_id" : pid
-    }
-    res = []
+
+async def get_rankpic(pid: str) -> RankPic:
+    url = "https://api.shewinder.win/pixiv/illust_detail"
+    params = {"illust_id": pid}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, params=params) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                #data = data['illust']
-                tags = data['tags']
-                for tag in tags:
-                    res.append(tag['name'])
-                return res
-
-if __name__ == '__main__':
-    import asyncio
-    import datetime
-    tag_scores = {
-        "原神": 2,
-        "genshin": 2, 
-        "yuri": 1, 
-        "loli": 1, 
-        "lolicon": 1, 
-        "萝莉": 1, 
-        "百合": 1, 
-        "公主连接": 1,
-        "pcr": 1, 
-        "公主链接": 1
-    }
-    async def test():
-        today = datetime.date.today()
-        yesterday = today - datetime.timedelta(days=2)
-        date = f'{yesterday}'
-        pics = await get_rank(date)
-        print(pics[0])
-        pics = filter_rank(pics, tag_scores)
-        print([pic.url + str(pic.pid) for pic in pics])
-        for pic in pics:
-            print(pic.url, pic.tags, pic.score)
-        tags = await get_tags('82418071')
-        print(tags)
-    asyncio.run(test())
-
+                return to_rankpic(Illust(**data))
+            else:
+                return None
