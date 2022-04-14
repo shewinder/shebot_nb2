@@ -1,8 +1,7 @@
 import aiohttp
 
 from hoshino.modules.infopush.checkers.bilidynamic import BiliDynamicChecker, Dynamic
-from nonebot.adapters.cqhttp import GroupMessageEvent, PrivateMessageEvent
-from hoshino import Service, Bot, Event
+from hoshino import Service, Bot, Event, GroupMessageEvent
 from hoshino.typing import T_State
 from .._model import SubscribeRecord
 

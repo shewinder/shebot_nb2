@@ -9,7 +9,7 @@ Github: http://github.com/AkiraXie/
 from nonebot.log import logger
 import os
 import sys
-from . import hsn_config
+from . import data_dir, hsn_config
 from .service import _loaded_matchers
 
 
@@ -65,7 +65,7 @@ class Filter:
         return record["level"].no >= levelno and nologflag
 
 
-log_root = hsn_config.data + '/logs/'
+log_root = data_dir / 'logs'
 os.makedirs(log_root, exist_ok=True)
 logger.remove()
 hoshino_filter = Filter()
@@ -80,6 +80,6 @@ logger.add(sys.stdout,
            diagnose=False,
            filter=hoshino_filter,
            format=default_format)
-logger.add(log_root+'hsn{time:YYYYMMDD}.log', rotation='00:00', level='INFO')
-logger.add(log_root+'hsn{time:YYYYMMDD}_error.log',
+logger.add(log_root / 'hsn{time:YYYYMMDD}.log', rotation='00:00', level='INFO')
+logger.add(log_root / 'hsn{time:YYYYMMDD}_error.log',
            rotation='00:00', level='ERROR')

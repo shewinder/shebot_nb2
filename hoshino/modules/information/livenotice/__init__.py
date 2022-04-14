@@ -1,9 +1,5 @@
 
-from typing import List
-from nonebot.adapters.cqhttp import GroupMessageEvent, PrivateMessageEvent
-
-from hoshino import Service, Bot, Event, scheduled_job
-from hoshino.log import logger
+from hoshino import Service, Bot, Event, scheduled_job, GroupMessageEvent, PrivateMessageEvent
 from hoshino.typing import T_State
 from .data_source import BiliBiliLive, DouyuLive, BaseLive, SubscribedLive
 

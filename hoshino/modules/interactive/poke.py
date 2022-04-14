@@ -7,7 +7,7 @@ Description:
 Github: http://github.com/AkiraXie/
 '''
 from hoshino import Service, Bot, Message
-from nonebot.adapters.cqhttp.event import PokeNotifyEvent, GroupRecallNoticeEvent
+from hoshino.typing import PokeNotifyEvent, GroupRecallNoticeEvent
 sv = Service('poke-and-recall',enable_on_default=False)
 poke = sv.on_notice(False)
 

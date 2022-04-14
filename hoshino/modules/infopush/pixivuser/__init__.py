@@ -1,8 +1,7 @@
-from hoshino import Bot, Event, Service
+from hoshino import Bot, Service, GroupMessageEvent
 from hoshino.modules.infopush.checkers.pixivuser import (PixivData,
                                                          PixivUserChecker)
 from hoshino.typing import T_State
-from nonebot.adapters.cqhttp import GroupMessageEvent
 
 from .._model import SubscribeRecord
 

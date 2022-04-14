@@ -1,7 +1,6 @@
 from hoshino.glob import get_browser
 from hoshino.sres import Res as R
-from nonebot.adapters.cqhttp.message import Message
-
+from hoshino import Message
 from .._config import Config, plugin_config
 from .._model import BaseInfoChecker, SubscribeRecord
 from .._rss import RSS, RSSData

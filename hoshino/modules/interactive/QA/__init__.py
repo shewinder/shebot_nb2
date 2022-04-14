@@ -6,12 +6,12 @@ LastEditTime: 2021-03-05 14:56:38
 Description: 
 Github: http://github.com/AkiraXie/
 '''
-from nonebot.typing import T_State
+from hoshino import T_State
 from .data import Question
 from hoshino.permission import ADMIN
 from argparse import Namespace
 from hoshino import Service, Bot, Event, Message
-from nonebot.rule import ArgumentParser
+from hoshino.rule import ArgumentParser
 from peewee import fn
 sv = Service('QA')
 

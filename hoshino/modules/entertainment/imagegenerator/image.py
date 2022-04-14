@@ -7,7 +7,7 @@ from typing import List
 
 from hoshino import font_dir, res_dir
 from hoshino.sres import Res as R
-from nonebot.adapters.cqhttp.message import MessageSegment
+from hoshino import MessageSegment
 from PIL import Image, ImageDraw, ImageFont
 
 from .bieming import biemings

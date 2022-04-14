@@ -1,7 +1,7 @@
-from nonebot.typing import T_State
+from hoshino.typing import T_State
 from peewee import fn
 
-from hoshino import Service, Bot, Event, res_dir
+from hoshino import Service, Bot, GroupMessageEvent
 from .model import Quest
 
 service = Service('考研政治', visible=False)
@@ -15,35 +15,35 @@ def judge(str1, str2):
     return set(str1) == set(str2)
 
 @qu.handle()
-async def choose(bot: Bot, event: Event, state: T_State):
+async def choose(bot: Bot, event: GroupMessageEvent, state: T_State):
     qus: Quest = Quest.select().order_by(fn.Random()).limit(1)
     state['qus'] = qus[0]
 
 @qu_mayuan.handle()
-async def choose(bot: Bot, event: Event, state: T_State):
+async def choose(bot: Bot, event: GroupMessageEvent, state: T_State):
     qus: Quest = Quest.select().where(((Quest.Catalog == '马原单选') | 
     (Quest.Catalog == '马原多选'))).order_by(fn.Random()).limit(1)
     state['qus'] = qus[0]
 
 @qu_mzt.handle()
-async def choose(bot: Bot, event: Event, state: T_State):
+async def choose(bot: Bot, event: GroupMessageEvent, state: T_State):
     qus: Quest = Quest.select().where(((Quest.Catalog == '毛中特单选') | 
     (Quest.Catalog == '毛中特多选'))).order_by(fn.Random()).limit(1)
     state['qus'] = qus[0]
 
 @qu_jds.handle()
-async def choose(bot: Bot, event: Event, state: T_State):
+async def choose(bot: Bot, event: GroupMessageEvent, state: T_State):
     qus: Quest = Quest.select().where(((Quest.Catalog == '近代史纲要单选') | 
     (Quest.Catalog == '近代史纲要多选'))).order_by(fn.Random()).limit(1)
     state['qus'] = qus[0]
 
 @qu_sixiu.handle()
-async def choose(bot: Bot, event: Event, state: T_State):
+async def choose(bot: Bot, event: GroupMessageEvent, state: T_State):
     qus: Quest = Quest.select().where(((Quest.Catalog == '思修单选') | 
     (Quest.Catalog == '思修多选'))).order_by(fn.Random()).limit(1)
     state['qus'] = qus[0]
 
-async def ques(bot: Bot, event: Event, state: T_State):
+async def ques(bot: Bot, event: GroupMessageEvent, state: T_State):
     qus: Quest = state['qus']
     type_ = '(单选)' if qus.Catalog.endswith('单选') else '(多选)'
     reply = [
@@ -61,7 +61,7 @@ qu_mzt.handle()(ques)
 qu_jds.handle()(ques)
 qu_sixiu.handle()(ques)
 
-async def revise(bot: Bot, event: Event, state: T_State):
+async def revise(bot: Bot, event: GroupMessageEvent, state: T_State):
     qus: Quest = state['qus']
     ans = state['ans'].upper()
     if judge(qus.Answer, ans):

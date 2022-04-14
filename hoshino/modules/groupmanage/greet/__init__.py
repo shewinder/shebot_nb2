@@ -1,8 +1,8 @@
 import os
 
-from nonebot.adapters.cqhttp import GroupIncreaseNoticeEvent, GroupDecreaseNoticeEvent
-from nonebot.adapters.cqhttp.message import MessageSegment, Message
-from nonebot.typing import T_State
+
+from hoshino import MessageSegment, Message, T_State
+from hoshino.typing import GroupIncreaseNoticeEvent, GroupDecreaseNoticeEvent
 
 from hoshino import Service, Bot, Event
 from hoshino.util.sutil import load_config, save_config

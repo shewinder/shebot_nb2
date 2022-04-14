@@ -1,10 +1,15 @@
 from functools import wraps
 from typing import Dict, Optional
-from nonebot_plugin_apscheduler import scheduler
+
 from loguru import logger
 from apscheduler import job
 from .typing import Callable, Any, Awaitable
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+try:
+    from nonebot_plugin_apscheduler import scheduler
+except:
+    scheduler = AsyncIOScheduler() # fot test
 
 def wrapper(func: Callable[[], Any], id: str, args, kwargs: Dict=None) -> Callable[[], Awaitable[Any]]:
     if not args:

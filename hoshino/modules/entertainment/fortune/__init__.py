@@ -4,7 +4,7 @@ from sre_parse import State
 from typing import Dict
 
 from PIL import Image
-from nonebot.adapters.cqhttp import GroupMessageEvent
+from hoshino import GroupMessageEvent
 
 from hoshino import Bot, Event, res_dir, font_dir
 from hoshino.util import DailyNumberLimiter

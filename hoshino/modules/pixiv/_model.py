@@ -1,7 +1,5 @@
-from dataclasses import dataclass
 from typing import Optional, List, Any
 from datetime import datetime
-from nonebot import Config
 from pydantic import BaseModel
 
 

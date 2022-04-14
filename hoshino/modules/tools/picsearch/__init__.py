@@ -1,10 +1,9 @@
-from nonebot.adapters.cqhttp.message import Message
 
 from hoshino.typing import T_State
 from hoshino import Service, Bot, Event
 from hoshino.sres import Res as R
 from hoshino.util.sutil import extract_url_from_event
-from .soucenao import soucenao_format, get_saucenao_results, SoucenaoResult
+from .soucenao import soucenao_format, get_saucenao_results
 from .tracemoe import *
 from .ascii2d import *
 

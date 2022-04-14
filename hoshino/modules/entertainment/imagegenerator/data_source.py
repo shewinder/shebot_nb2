@@ -1,6 +1,6 @@
 from typing import Optional
 
-from nonebot.adapters.cqhttp.message import MessageSegment
+from hoshino import MessageSegment
 
 from hoshino import res_dir
 from hoshino.sres import Res as R

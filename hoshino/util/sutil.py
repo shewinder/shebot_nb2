@@ -3,7 +3,6 @@ import hashlib
 from json.decoder import JSONDecodeError
 
 from loguru import logger
-from hoshino.service import Service
 import json
 import os
 import random

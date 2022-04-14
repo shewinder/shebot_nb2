@@ -1,5 +1,5 @@
 import aiohttp
-from nonebot.adapters.cqhttp.message import MessageSegment
+from hoshino import MessageSegment
 
 from hoshino.log import logger
 from hoshino.sres import Res as R

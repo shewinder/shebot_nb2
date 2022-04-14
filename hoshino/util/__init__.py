@@ -1,11 +1,3 @@
-'''
-Author: AkiraXie
-Date: 2021-01-28 14:29:01
-LastEditors: AkiraXie
-LastEditTime: 2021-03-05 00:09:37
-Description: 
-Github: http://github.com/AkiraXie/
-'''
 from typing import List, Optional, Tuple, Type
 from io import BytesIO
 from collections import defaultdict

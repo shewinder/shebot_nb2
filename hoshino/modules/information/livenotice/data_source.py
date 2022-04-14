@@ -5,7 +5,7 @@ import abc
 from typing import List
 
 import aiohttp
-from nonebot.adapters.cqhttp.message import MessageSegment
+from hoshino import MessageSegment
 import peewee as pw
 import requests
 

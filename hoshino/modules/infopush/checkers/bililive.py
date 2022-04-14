@@ -2,7 +2,7 @@ import aiohttp
 import requests
 from hoshino.log import logger
 from hoshino.util import proxypool
-from nonebot.adapters.cqhttp.message import MessageSegment
+from hoshino import MessageSegment
 
 from .._config import Config, plugin_config
 from .._exception import ProxyException, TimeoutException, NetworkException

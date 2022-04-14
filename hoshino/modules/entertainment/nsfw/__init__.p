@@ -1,7 +1,7 @@
 import random
 from loguru import logger
 
-from nonebot.typing import T_State
+from hoshino import T_State
 from hoshino import Service, Bot, Event
 from hoshino.util.sutil import extract_url_from_event
 from .data_source import detect_img_url

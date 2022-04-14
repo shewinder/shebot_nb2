@@ -1,6 +1,6 @@
 from typing import List
 import aiohttp
-from nonebot.adapters.cqhttp.message import MessageSegment, Message
+from hoshino import MessageSegment, Message
 
 from hoshino.log import logger
 from hoshino.sres import Res as R

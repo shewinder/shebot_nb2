@@ -42,8 +42,10 @@ async def get_rank(date: str, mode: str = "day") -> List[RankPic]:
                 for d in data:
                     if d["type"] != "illust":
                         continue
-                    res.append(to_rankpic(Illust(**data)))
+                    res.append(to_rankpic(Illust(**d)))
                 return res
+            else:
+                raise Exception(f'status {resp.status}')
 
 
 def filter_rank(pics: List[RankPic]) -> List[RankPic]:
