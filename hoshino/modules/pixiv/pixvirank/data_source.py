@@ -54,17 +54,17 @@ def filter_rank(pics: List[RankPic]) -> List[RankPic]:
             score_data.tag_scores.get(tag, 0) for tag in pic.tags
         ) + score_data.author_scores.get(str(pic.author_id), 0)
 
-    def already_sent_in_3_days(pic: RankPic):
+    def not_sent_in_3_days(pic: RankPic):
         for i in score_data.last_three_days:
             if pic.pid in i:
-                return True
-        return False
+                return False
+        return True
 
-    filter(not already_sent_in_3_days, pics)
+    pics = filter(not_sent_in_3_days, pics)
     for pic in pics:
         pic.score = sum_score(pic)
 
-    pics.sort(key=lambda x: x.score, reverse=True)
+    pics = sorted(pics, key = lambda x: x.score, reverse=True)
     return pics[0:15]
 
 
