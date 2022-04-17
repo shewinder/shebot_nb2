@@ -4,10 +4,11 @@ import aiohttp
 from lxml import etree
 
 
-from ._config import Config, plugin_config
+from ._config import Config
 from ._model import InfoData
+from hoshino.config import get_plugin_config_by_name
 
-conf: Config = plugin_config.config
+conf: Config = get_plugin_config_by_name('infopush')
 
 class RSSData(InfoData):
     title: str = ''

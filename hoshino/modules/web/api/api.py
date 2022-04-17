@@ -12,7 +12,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from hoshino import Bot, Service
-from hoshino.pluginconfig import PluginConfig, get_plugin_config, BaseConfig
+from hoshino.util.sutil import load_config, save_config
+from hoshino.config import get_plugin_config, get_plugin_config_by_name
 from loguru import logger
 
 import os
@@ -91,9 +92,9 @@ async def set_service(sc: ServiceConf):
 
 @router.get('/get_plugin_config')
 async def get_config():
-    config =  get_plugin_config()
-    conf = {k: v.config for (k, v) in config.items()}
-    return {'status': 200, 'data': conf}
+    configs =  get_plugin_config()
+    configs = {k: v.dict() for k, v in configs.items()}
+    return {'status': 200, 'data': configs}
 
 class PlgConfig(BaseModel):
     name: str
@@ -101,10 +102,8 @@ class PlgConfig(BaseModel):
 
 @router.post('/set_plugin')
 async def set_plugin(pc: PlgConfig):
-    plug_name = pc.name
-    plugin_config = get_plugin_config().get(plug_name)
-    for k, v in pc.config.items():
-        plugin_config.set(k, v)
+    config = get_plugin_config_by_name(pc.name)
+    config.update(pc.config)
     return {'status': 200, 'data': 'SUCCESS'}
 
 @router.get('/get_loaded_plugins')

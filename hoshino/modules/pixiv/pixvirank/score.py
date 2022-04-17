@@ -1,6 +1,5 @@
 from typing import Dict, List
 from hoshino.util.persist import Persistent
-from pathlib import Path
 from hoshino import userdata_dir
 
 class ScoreData(Persistent):

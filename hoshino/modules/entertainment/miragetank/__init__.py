@@ -6,9 +6,10 @@ from hoshino.typing import T_State
 from hoshino.util import DailyNumberLimiter, FreqLimiter
 from hoshino.util.sutil  import extract_url_from_event, get_img_from_url
 from .MTCore import gray_car, color_car
-from .config import plugin_config, Config
+from .config import Config
+from hoshino.config import get_plugin_config_by_name
 
-conf: Config = plugin_config.config
+conf: Config = get_plugin_config_by_name('miragetank')
 
 help_ = """
 [幻影坦克]

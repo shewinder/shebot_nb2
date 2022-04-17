@@ -60,7 +60,7 @@ def filter_rank(pics: List[RankPic]) -> List[RankPic]:
                 return False
         return True
 
-    pics = filter(not_sent_in_3_days, pics)
+    pics = list(filter(not_sent_in_3_days, pics))
     for pic in pics:
         pic.score = sum_score(pic)
 

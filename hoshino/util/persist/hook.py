@@ -65,6 +65,9 @@ class HookyList(UserList):
         self._after_set(i, item)
 
     def extend(self, other):
+        """
+        data of other is not hooked, be cautious
+        """
         i, item = self._before_add(None, None)
         if isinstance(other, UserList):
             self.data.extend(other.data)

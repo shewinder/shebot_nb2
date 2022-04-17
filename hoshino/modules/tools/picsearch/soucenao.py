@@ -6,9 +6,9 @@ from hoshino.sres import Res as R
 from hoshino.util.sutil import get_img_from_url
 from pydantic import BaseModel, ValidationError
 
-from .config import Config, plugin_config
+from .config import Config
 
-conf: Config = plugin_config.config
+conf = Config.get_instance('picsearch')
 
 async def get_saucenao_results(pic_url):
     url = 'https://saucenao.com/search.php'

@@ -1,7 +1,7 @@
-from typing import List, Optional, Union
+from typing import List, Optional
 
 import aiohttp
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 class TracemoeResult(BaseModel):
     filename: Optional[str]
