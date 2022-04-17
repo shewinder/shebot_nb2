@@ -1,12 +1,11 @@
 from hoshino.util import proxypool
 from hoshino import MessageSegment
 
-from .._config import Config, plugin_config
+from .._config import Config
 from .._exception import ProxyException, TimeoutException
 from .._model import BaseInfoChecker, InfoData, SubscribeRecord
 
-conf: Config = plugin_config.config
-
+conf: Config.get_instance('infopush')
 
 class DouyuLive(InfoData):
     title: str

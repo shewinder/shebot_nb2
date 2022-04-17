@@ -4,7 +4,7 @@ from hoshino import Bot, Service
 from hoshino.typing import T_State, GroupMessageEvent
 from hoshino.permission import GROUP_ADMIN, GROUP_OWNER
 
-from .._model import SubscribeRecord, BaseInfoChecker, InfoData
+from .._model import SubscribeRecord, BaseInfoChecker, InfoData, sub_data
 from .._exception import TimeoutException
 
 help_ = """

@@ -97,7 +97,7 @@ class HookyDict(UserDict):
         self._after_set(i, item)
 
     def __delitem__(self, key): 
-        i, item = self._before_del(key)
+        i, item = self._before_del(key, None)
         del self.data[key]
         self._after_del(i, item)
 

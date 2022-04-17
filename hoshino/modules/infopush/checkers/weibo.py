@@ -1,12 +1,11 @@
 from hoshino.glob import get_browser
 from hoshino.sres import Res as R
 from hoshino import Message
-from .._config import Config, plugin_config
+from .._config import Config
 from .._model import BaseInfoChecker, SubscribeRecord
 from .._rss import RSS, RSSData
 
-conf: Config = plugin_config.config
-
+conf: Config.get_instance('infopush')
 
 class WeiboChecker(BaseInfoChecker):
     async def notice_format(self, sub: SubscribeRecord, data: RSSData) -> Message:

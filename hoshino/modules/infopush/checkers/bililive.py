@@ -4,11 +4,11 @@ from hoshino.log import logger
 from hoshino.util import proxypool
 from hoshino import MessageSegment
 
-from .._config import Config, plugin_config
+from .._config import Config
 from .._exception import ProxyException, TimeoutException, NetworkException
 from .._model import BaseInfoChecker, InfoData, SubscribeRecord
 
-conf: Config = plugin_config.config
+conf: Config.get_instance('infopush')
 
 
 def get_name_from_room(room_id: str) -> str:

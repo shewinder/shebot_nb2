@@ -4,7 +4,6 @@ import requests
 
 import aiohttp
 from pydantic import BaseModel, ValidationError
-from hoshino import MessageSegment, Message
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
