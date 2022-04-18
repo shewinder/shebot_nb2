@@ -1,7 +1,7 @@
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, TypeVar, Union
+from typing import Dict, List, Tuple, Type, TypeVar, Union
 
 from hoshino import Bot, Message, MessageSegment, get_bot_list, userdata_dir
 from hoshino.log import logger
@@ -56,7 +56,7 @@ class InfoData:
     portal: str = None
     is_new: bool = True  # 用于手动指定消息是否为新消息
 
-_checkers: List["BaseInfoChecker"] = []
+_checkers: List[Type['BaseInfoChecker']] = []
 
 class BaseInfoChecker:
     """
@@ -71,12 +71,12 @@ class BaseInfoChecker:
     def get_all_checkers(cls) -> List["BaseInfoChecker"]:
         return _checkers
 
-    @classmethod
-    def get_checker(cls: T) -> T:
+    @staticmethod
+    def get_checker(name: str) -> "BaseInfoChecker":
         for checker in _checkers:
-            if type(checker) == type(cls):
+            if checker.__name__ == name:
                 return checker
-        raise ValueError('checker has not been initialized')
+        raise ValueError(f'{name} not exist')
 
     @classmethod
     def get_subscribe(cls, url: str) -> SubscribeRecord:
@@ -90,10 +90,10 @@ class BaseInfoChecker:
 
     @classmethod
     def get_creator_subs(
-        cls, group_id: int, creator_id: Union[int, str]
+        cls, group_id: str, creator_id: Union[int, str]
     ) -> List[SubscribeRecord]:
-        if isinstance(creator_id, int):
-            creator_id = str(creator_id)
+        group_id = str(group_id)
+        creator_id = str(creator_id)
         subs = sub_data.data.get(cls.__name__, [])
         return list(filter(lambda x: group_id in x.creator and creator_id in x.creator[group_id], subs))
 
@@ -101,8 +101,8 @@ class BaseInfoChecker:
     def delete_creator_sub(
         cls, group_id: int, creator_id: Union[int, str], sub: SubscribeRecord
     ):
-        if isinstance(creator_id, int):
-            creator_id = str(creator_id)
+        group_id = str(group_id)
+        creator_id = str(creator_id)
         if group_id in sub.creator and creator_id in sub.creator[group_id]:
             sub.creator[group_id].remove(creator_id)
             if len(sub.creator[group_id]) == 0:
@@ -118,8 +118,8 @@ class BaseInfoChecker:
         remark: str = None,
         creator_id: Union[int, str] = None,
     ) -> SubscribeRecord:
-        if isinstance(creator_id, int):
-            creator_id = str(creator_id)
+        group_id = str(group_id)
+        creator_id = str(creator_id)
         sub = cls.get_subscribe(url)
         if sub:
             if group_id in sub.creator:

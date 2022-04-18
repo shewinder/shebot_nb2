@@ -6,9 +6,6 @@ from pydantic import BaseModel
 
 from hoshino.sres import Res as R
 from hoshino.util.sutil import get_img_from_url
-from .config import plugin_config, Config
-
-conf: Config = plugin_config.config
 
 async def get_ascii2d_results(pic_url):
     base_url = 'https://ascii2d.net'

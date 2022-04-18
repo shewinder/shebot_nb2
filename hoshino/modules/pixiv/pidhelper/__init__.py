@@ -21,6 +21,7 @@ pid = sv.on_command('pid')
 @pid.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
     p = str(event.message).strip()
+    await bot.send(event, '正在下载')
     url = f'https://api.shewinder.win/pixiv/illust_detail'
     async with aiohttp.ClientSession() as session:
         param = {'illust_id': p}

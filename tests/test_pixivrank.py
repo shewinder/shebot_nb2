@@ -3,7 +3,7 @@ import asyncio
 import datetime
 
 import pytest
-from hoshino.modules.pixiv.pixvirank.data_source import get_rank, RankPic, filter_rank, score_data, get_rankpic
+from hoshino.modules.pixiv.pixivrank.data_source import get_rank, RankPic, filter_rank, score_data, get_rankpic
 
 # def test_get_rank():
 #     today = datetime.date.today()
