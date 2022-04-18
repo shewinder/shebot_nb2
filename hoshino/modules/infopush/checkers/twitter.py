@@ -2,12 +2,17 @@ import aiohttp
 from hoshino.sres import Res as R
 from hoshino.message import Message
 
-from .._model import BaseInfoChecker, SubscribeRecord
+from .._model import BaseInfoChecker, SubscribeRecord, checker
 from .._rss import RSS, RSSData
 
-
+@checker
 class TwitterChecker(BaseInfoChecker):
-    async def notice_format(self, sub: SubscribeRecord, data: RSSData) -> Message:
+    seconds: int = 300
+    name: str = '推特'
+    distinguisher_name: str = "用户ID"
+
+    @classmethod
+    async def notice_format(cls, sub: SubscribeRecord, data: RSSData) -> Message:
         params = {"url": data.portal}
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -22,11 +27,13 @@ class TwitterChecker(BaseInfoChecker):
         await rss.get()
         return rss.parse_xml()
 
-    def form_url(self, distinguisher: str) -> str:
+    @classmethod
+    def form_url(cls, distinguisher: str) -> str:
         return RSS.from_route(f"twitter/media/{distinguisher}").url
 
-    def form_remark(self, data: RSSData, distinguisher: str) -> str:
+    @classmethod
+    def form_remark(cls, data: RSSData, distinguisher: str) -> str:
         return f"{data.author}推特"
 
 
-TwitterChecker(600, "推特", "推特名称")
+

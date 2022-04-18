@@ -2,16 +2,23 @@ from hoshino.glob import get_browser
 from hoshino.sres import Res as R
 from hoshino import Message
 from .._config import Config
-from .._model import BaseInfoChecker, SubscribeRecord
+from .._model import BaseInfoChecker, SubscribeRecord, checker
 from .._rss import RSS, RSSData
 
-conf: Config.get_instance('infopush')
+conf: Config.get_instance("infopush")
 
+
+@checker
 class WeiboChecker(BaseInfoChecker):
+    seconds: int = 120
+    name: str = "微博"
+    distinguisher_name: str = "博主Id"
+
+    @classmethod
     async def notice_format(self, sub: SubscribeRecord, data: RSSData) -> Message:
         browser = await get_browser()
         ctx = await browser.new_context(
-        viewport={"width": 2560, "height": 1080}, device_scale_factor=2
+            viewport={"width": 2560, "height": 1080}, device_scale_factor=2
         )
         page = await ctx.new_page()
         await page.goto(data.portal)
@@ -28,11 +35,10 @@ class WeiboChecker(BaseInfoChecker):
         await rss.get()
         return rss.parse_xml()
 
-    def form_url(self, distinguisher: str) -> str:
+    @classmethod
+    def form_url(cls, distinguisher: str) -> str:
         return RSS.from_route(f"weibo/user/{distinguisher}").url
 
-    def form_remark(self, data: RSSData, distinguisher: str) -> str:
+    @classmethod
+    def form_remark(cls, data: RSSData, distinguisher: str) -> str:
         return data.channel_title
-
-
-WeiboChecker(120, "微博", "博主Id")

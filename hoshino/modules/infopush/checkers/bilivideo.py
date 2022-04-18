@@ -3,7 +3,7 @@ from hoshino import MessageSegment
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord
+from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
 
 class Video(InfoData):
     title: str
@@ -13,14 +13,20 @@ class Video(InfoData):
     UID: str
     BV: str
 
+@checker
 class BiliVideoChecker(BaseInfoChecker):
-    async def notice_format(self, sub: SubscribeRecord , data: Video):
+
+    seconds: int = 120
+    name: str = 'Bilibili投稿'
+    distinguisher_name: str = "up ID"
+    @classmethod
+    async def notice_format(cls, sub: SubscribeRecord , data: Video):
         return f'{sub.remark}更新啦！\n{data.title}'\
                 + MessageSegment.image(data.cover)\
                 + data.portal
                 
     @classmethod
-    async def get_data(self, url: str) -> Video:
+    async def get_data(cls, url: str) -> Video:
         headers = {
             'Referer': 'https://link.bilibili.com/p/center/index',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36'
@@ -48,10 +54,10 @@ class BiliVideoChecker(BaseInfoChecker):
                 logger.exception(e)
                 return None
 
-    def form_url(self, dinstinguisher: str) -> str:
+    @classmethod
+    def form_url(cls, dinstinguisher: str) -> str:
         return f'https://api.bilibili.com/x/space/acc/info?mid={dinstinguisher}&jsonp=jsonp'
     
-    def form_remark(self, data: Video, distinguisher: str) -> str:
+    @classmethod
+    def form_remark(cls, data: Video, distinguisher: str) -> str:
         return f'{data.author}的投稿'
-
-BiliVideoChecker(120, 'Bilibili投稿', 'up ID')

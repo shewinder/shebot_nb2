@@ -18,7 +18,7 @@ for module_name in os.listdir(checker_dir):
         if not module_name.endswith('.py'):
             continue
         m = importlib.import_module(f'hoshino.modules.infopush.checkers.{module_name.rstrip(".py")}')
-    except ImportError:
+    except:
         logger.error(f'error occured when importing {module_name}')
 
 checkers = BaseInfoChecker.get_all_checkers()
@@ -30,10 +30,10 @@ async def check(checkers: List[BaseInfoChecker]):
         logger.info('当前没有任何订阅')
         return
     for checker in checkers:
-        logger.info(f'{checker.__class__.__name__} start checking')
-        subs: List["SubscribeRecord"] = sub_data.data.get(checker.__class__.__name__)
+        logger.info(f'{checker.__name__} start checking')
+        subs: List["SubscribeRecord"] = sub_data.data.get(checker.__name__)
         if not subs:
-            logger.info(f'{checker.__class__.__name__} 当前无订阅')
+            logger.info(f'{checker.__name__} 当前无订阅')
             continue
         for sub in subs:
             logger.info(f'checking {sub.remark}')

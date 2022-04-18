@@ -1,4 +1,3 @@
-import imp
 from typing import Dict, List
 import requests
 
@@ -7,7 +6,7 @@ from pydantic import BaseModel, ValidationError
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord
+from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
 from hoshino.glob import get_browser, Browser
 
 def get_name_from_uid(uid: str) -> str:
@@ -22,16 +21,19 @@ class Dynamic(InfoData):
     content: str
     imgs: List[str] = []
 
+@checker
 class BiliDynamicChecker(BaseInfoChecker):
-    #async def notice_format(self, sub: SubscribeRecord , data: Dynamic):
-    #    imgs = [MessageSegment.image(img) for img in data.imgs]
-    #    msg = Message(f'{sub.remark}更新啦！\n{data.content}') \
-    #          .extend(imgs) \
-    #          .append(MessageSegment.text('\n' + data.portal))
-    #    return msg
-    async def notice_format(self, sub: SubscribeRecord , data: Dynamic):
+    seconds: int = 60
+    name: str = 'Bilibili动态'
+    distinguisher_name: str = "up id"
+
+    @classmethod
+    async def notice_format(cls, sub: SubscribeRecord , data: Dynamic):
         browser: Browser = await get_browser()
-        page = await browser.new_page()
+        ctx = await browser.new_context(
+            viewport={"width": 2560, "height": 1080}, device_scale_factor=2
+        )
+        page = await ctx.new_page()
         await page.goto(data.portal)
         tops = page.locator("//div[@class='first-card-with-title']")
         await tops.wait_for()
@@ -108,14 +110,14 @@ class BiliDynamicChecker(BaseInfoChecker):
                 logger.exception(e)
                 return None
 
-    def form_url(self, dinstinguisher: str) -> str:
+    @classmethod
+    def form_url(cls, dinstinguisher: str) -> str:
         return f'https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history?host_uid={dinstinguisher}'
 
-    def form_remark(self, data: Dynamic, distinguisher: str) -> str:
+    @classmethod
+    def form_remark(cls, data: Dynamic, distinguisher: str) -> str:
         name = get_name_from_uid(distinguisher)
         return f'{name}B站动态'
-
-BiliDynamicChecker(60, "Bilibili动态", 'up id')
 
 class Desc(BaseModel):
     uid: int 

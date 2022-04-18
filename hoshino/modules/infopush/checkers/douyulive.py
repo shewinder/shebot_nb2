@@ -3,7 +3,7 @@ from hoshino import MessageSegment
 
 from .._config import Config
 from .._exception import ProxyException, TimeoutException
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord
+from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
 
 conf: Config.get_instance('infopush')
 
@@ -13,8 +13,15 @@ class DouyuLive(InfoData):
     name: str
 
 
+@checker
 class DouyuLiveChecker(BaseInfoChecker):
-    def notice_format(self, sub: SubscribeRecord, data: DouyuLive):
+    
+    seconds: int = 5
+    name: str = '斗鱼直播'
+    distinguisher_name: str = "房间号"
+    @classmethod
+    @classmethod
+    def notice_format(cls, sub: SubscribeRecord, data: DouyuLive):
         return (
             f"{sub.remark}啦！\n{data.title}"
             + MessageSegment.image(data.cover)
@@ -56,11 +63,13 @@ class DouyuLiveChecker(BaseInfoChecker):
         else:
             raise ValueError(f"error: status{resp.status}")
 
-    def form_url(self, dinstinguisher: str) -> str:
+    @classmethod
+    def form_url(cls, dinstinguisher: str) -> str:
         return f"http://open.douyucdn.cn/api/RoomApi/room/" + dinstinguisher
 
-    def form_remark(self, data: DouyuLive, distinguisher: str) -> str:
+    @classmethod
+    def form_remark(cls, data: DouyuLive, distinguisher: str) -> str:
         return f"{data.name}直播"
 
 
-DouyuLiveChecker(5, "斗鱼直播", "房间号")
+

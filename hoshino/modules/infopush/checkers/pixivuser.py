@@ -4,7 +4,7 @@ from hoshino import MessageSegment, Message
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord
+from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
 
 
 class PixivData(InfoData):
@@ -13,8 +13,14 @@ class PixivData(InfoData):
     urls: List[str]
 
 
+@checker
 class PixivUserChecker(BaseInfoChecker):
-    async def notice_format(self, sub: SubscribeRecord, data: PixivData):
+    seconds: int = 300
+    name: str = "Pixiv投稿"
+    distinguisher_name: str = "用户ID"
+
+    @classmethod
+    async def notice_format(cls, sub: SubscribeRecord, data: PixivData):
         msg = MessageSegment.text(f"{sub.remark}更新了！\n")
         for url in data.urls:
             msg += await R.image_from_url(
@@ -24,7 +30,7 @@ class PixivUserChecker(BaseInfoChecker):
         return msg + MessageSegment.text(data.portal)
 
     @classmethod
-    async def get_data(self, url) -> PixivData:
+    async def get_data(cls, url) -> PixivData:
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(url=url) as resp:
@@ -54,11 +60,10 @@ class PixivUserChecker(BaseInfoChecker):
                 logger.exception(e)
                 return None
 
-    def form_url(self, dinstinguisher: str) -> str:
+    @classmethod
+    def form_url(cls, dinstinguisher: str) -> str:
         return f"https://api.shewinder.win/pixiv/user?user_id={dinstinguisher}"
 
-    def form_remark(self, data: PixivData, distinguisher: str) -> str:
+    @classmethod
+    def form_remark(cls, data: PixivData, distinguisher: str) -> str:
         return f"{data.user_name}的插画"
-
-
-PixivUserChecker(600, "Pixiv投稿", "用户ID")

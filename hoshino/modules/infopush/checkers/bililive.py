@@ -6,7 +6,7 @@ from hoshino import MessageSegment
 
 from .._config import Config
 from .._exception import ProxyException, TimeoutException, NetworkException
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord
+from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
 
 conf: Config.get_instance('infopush')
 
@@ -34,7 +34,12 @@ class Live(InfoData):
     cover: str
 
 
+@checker
 class BiliLiveChecker(BaseInfoChecker):
+    seconds: int = 5
+    name: str = 'Bilibili直播'
+    distinguisher_name: str = "房间号"
+    
     async def notice_format(self, sub: SubscribeRecord, data: Live):
         return (
             f"{sub.remark}啦！\n{data.title}"
@@ -94,15 +99,16 @@ class BiliLiveChecker(BaseInfoChecker):
         else:
             raise ValueError(f"error: status{resp.status}")
 
-    def form_url(self, dinstinguisher: str) -> str:
+    @classmethod
+    def form_url(cls, dinstinguisher: str) -> str:
         return (
             "https://api.live.bilibili.com/room/v1/Room/get_info?room_id="
             + dinstinguisher
         )
 
-    def form_remark(self, data: InfoData, distinguisher: str) -> str:
+    @classmethod
+    def form_remark(cls, data: InfoData, distinguisher: str) -> str:
         name = get_name_from_room(distinguisher)
         return f"{name}B站直播间"
 
 
-BiliLiveChecker(5, "Bilibili直播", "房间号")

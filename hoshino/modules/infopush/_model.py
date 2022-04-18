@@ -35,7 +35,11 @@ class SubscribeRecord(BaseModel):
 
     def save(self):
         global sub_data
-        sub_data.save_to_file()
+        if self in sub_data.data.get(self.checker, []):
+            sub_data.save_to_file()
+        else:
+            sub_data.data[self.checker].append(self)
+            sub_data.save_to_file()
 
 class SubscribeData(Persistent):
     data: Dict[str, List["SubscribeRecord"]] = defaultdict(list) # {checker_name: [SubscribeRecord ...]}
@@ -55,21 +59,13 @@ class InfoData:
 _checkers: List["BaseInfoChecker"] = []
 
 class BaseInfoChecker:
-    def __init__(
-        self,
-        seconds: int = 600,
-        name: str = 'unnamed checker',
-        distinguisher_name: str = "id",
-    ) -> None:
-        """
-        seconds: checker运行间隔秒数, 默认600s
-        distinguisher_name: 用于checker使用的区分不同订阅， 如 id， user_name，用于提示用户输入
-        """
-        self.seconds = seconds
-        self.name = name
-        self.distinguisher_name = distinguisher_name
-        assert self not in _checkers, f"{self.__class__.__name__}已存在"
-        _checkers.append(self)
+    """
+    seconds: checker运行间隔秒数, 默认600s
+    distinguisher_name: 用于checker使用的区分不同订阅， 如 id， user_name，用于提示用户输入
+    """
+    seconds: int = 600
+    name: str = 'unnamed checker'
+    distinguisher_name: str = "id"
 
     @classmethod
     def get_all_checkers(cls) -> List["BaseInfoChecker"]:
@@ -200,16 +196,25 @@ class BaseInfoChecker:
         # 获取数据,插件应实现此方法
         raise NotImplementedError
 
+    @classmethod
     def form_url(self, dinstinguisher: str) -> str:
         """
         根据唯一标识生成url, checker应实现此方法
         """
         raise NotImplementedError
 
+    @classmethod
     def form_remark(self, data: InfoData, distinguisher: str) -> str:
         """
         根据data生成remark, checker应实现此方法
         """
         raise NotImplementedError
+
+def checker(cls):
+    """
+    装饰器，将Checker添加至_checker全局变量
+    """
+    _checkers.append(cls)
+    return cls
 
 
