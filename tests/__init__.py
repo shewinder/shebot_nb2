@@ -1,3 +1,0 @@
-import nonebot
-
-nonebot.init()
