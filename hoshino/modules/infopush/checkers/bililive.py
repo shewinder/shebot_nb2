@@ -40,6 +40,7 @@ class BiliLiveChecker(BaseInfoChecker):
     name: str = 'Bilibili直播'
     distinguisher_name: str = "房间号"
     
+    @classmethod
     async def notice_format(self, sub: SubscribeRecord, data: Live):
         return (
             f"{sub.remark}啦！\n{data.title}"

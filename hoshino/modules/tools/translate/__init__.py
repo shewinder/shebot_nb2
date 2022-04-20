@@ -4,9 +4,9 @@ import requests
 from hoshino import Service, Bot, Event
 from hoshino.typing import T_State
 from hoshino.util.sutil import get_md5
-from .config import plugin_config, Config
+from .config import Config
 
-conf: Config = plugin_config.config
+conf =  Config.get_instance('translate')
 
 sv = Service('翻译')
 

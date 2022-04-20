@@ -30,7 +30,7 @@ class WeiboChecker(BaseInfoChecker):
         )
 
     @classmethod
-    async def get_data(self, url: str) -> RSSData:
+    async def get_data(cls, url: str) -> RSSData:
         rss = RSS(url=url)
         await rss.get()
         return rss.parse_xml()

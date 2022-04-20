@@ -1,4 +1,4 @@
-from hoshino.pluginconfig import BaseConfig, configuration
+from hoshino.config import BaseConfig, configuration
 
 @configuration('translate')
 class Config(BaseConfig):                                                                           

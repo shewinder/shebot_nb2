@@ -19,7 +19,7 @@ class DouyuLiveChecker(BaseInfoChecker):
     seconds: int = 5
     name: str = '斗鱼直播'
     distinguisher_name: str = "房间号"
-    @classmethod
+
     @classmethod
     def notice_format(cls, sub: SubscribeRecord, data: DouyuLive):
         return (
