@@ -52,7 +52,7 @@ async def pixiv_rank():
             )
         )
         try:
-            msgs.append(await R.image_from_url(pic.url.replace('i.pximg.net','pixiv.shewinder.win')))
+            msgs.append(await R.image_from_url(pic.url.replace('i.pximg.net','pixiv.shewinder.win'), anti_harmony=True))
         except:
             pass # 图片获取失败, skip
 
@@ -93,7 +93,7 @@ async def pixiv_rank():
             )
         )
         try:
-            msgs.append(await R.image_from_url(pic.url.replace('i.pximg.net','pixiv.shewinder.win')))
+            msgs.append(await R.image_from_url(pic.url.replace('i.pximg.net','pixiv.shewinder.win'), anti_harmony=True))
         except Exception as e:
             pass
         # msgs.append(MessageSegment.image(pic.url))

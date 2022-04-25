@@ -18,7 +18,7 @@ class RankPic:
     author_id: int
 
 def to_rankpic(illust: Illust):
-    pic = PixivIllust(illust)
+    pic = PixivIllust(**illust.dict())
     tags = [tag.name for tag in pic.tags]
     return RankPic(
         pic.id,

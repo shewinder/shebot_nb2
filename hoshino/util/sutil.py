@@ -85,7 +85,7 @@ async def get_service_groups(sv_name):
     return enable_groups.keys()
 
 def anti_harmony(img: Image.Image) -> Image.Image:
-    #img = img.convert('RGB')
+    img = img.copy()
     W, H = img.size[0], img.size[1]
     pos1 = 1,1
     pos2 = W-1,H-1

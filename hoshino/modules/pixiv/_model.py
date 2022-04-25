@@ -61,6 +61,9 @@ class Illust(BaseModel):
     x_restrict: Optional[int] = None
 
 class PixivIllust(BaseModel):
+    """
+    make urls flat
+    """
     caption: Optional[str] = None
     create_date: Optional[datetime] = None
     height: Optional[int] = None
@@ -83,15 +86,13 @@ class PixivIllust(BaseModel):
     x_restrict: Optional[int] = None
     urls: List[str] = []
 
-    def __init__(self, illust: Illust) -> None:
-        if illust:
-            data = illust.dict()
+    def __init__(self, **kwargs) -> None:
         urls: List[str] = []
-        if data['page_count'] == 1:
-            urls = [data['meta_single_page']['original_image_url']]
+        if kwargs['page_count'] == 1:
+            urls = [kwargs['meta_single_page']['original_image_url']]
         else:
-            urls = [d['image_urls']['original'] for d in data['meta_pages']]
-        super().__init__(**data)
+            urls = [d['image_urls']['original'] for d in kwargs['meta_pages']]
+        super().__init__(**kwargs)
         self.__dict__['urls'] = urls
 
     class Config:

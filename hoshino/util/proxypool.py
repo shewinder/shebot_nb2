@@ -155,6 +155,12 @@ class AioRequestWithProxy(ProxyPool):
             self.remove_proxy(proxy)
             self.fail_cnt += 1
             raise TimeoutException
+        except ValueError as e:
+            if str(e) == 'negative file descriptor': # I cound not figure out what happened
+                self.fail_cnt += 1
+                self.remove_proxy(proxy)
+            else:
+                raise
         except:
             self.remove_proxy(proxy)
             self.fail_cnt += 1

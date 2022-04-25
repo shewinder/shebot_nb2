@@ -43,7 +43,7 @@ class BiliLiveChecker(BaseInfoChecker):
     @classmethod
     async def notice_format(self, sub: SubscribeRecord, data: Live):
         return (
-            f"{sub.remark}啦！\n{data.title}"
+            f"{sub.remark}！\n{data.title}"
             + MessageSegment.image(data.cover)
             + data.portal
         )
@@ -110,6 +110,6 @@ class BiliLiveChecker(BaseInfoChecker):
     @classmethod
     def form_remark(cls, data: InfoData, distinguisher: str) -> str:
         name = get_name_from_room(distinguisher)
-        return f"{name}B站直播间"
+        return f"{name}直播"
 
 
