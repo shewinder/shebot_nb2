@@ -52,8 +52,8 @@ class InfoData:
     插件的info数据类应该继承此类
     """
 
-    pub_time: str = None
-    portal: str = None
+    pub_time: str = ''
+    portal: str = ''
     is_new: bool = True  # 用于手动指定消息是否为新消息
 
 _checkers: List[Type['BaseInfoChecker']] = []

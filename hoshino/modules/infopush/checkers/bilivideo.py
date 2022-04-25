@@ -19,6 +19,7 @@ class BiliVideoChecker(BaseInfoChecker):
     seconds: int = 120
     name: str = 'Bilibili投稿'
     distinguisher_name: str = "up ID"
+    
     @classmethod
     async def notice_format(cls, sub: SubscribeRecord , data: Video):
         return f'{sub.remark}更新啦！\n{data.title}'\
@@ -37,6 +38,10 @@ class BiliVideoChecker(BaseInfoChecker):
                                        headers=headers) as resp:
                     if resp.status == 200:
                         json_dic = await resp.json()
+                        if 'list' not in json_dic['data']:
+                            v= Video()
+                            v.author = json_dic['data']['name']
+                            return v
                         data = json_dic['data']['list']['vlist'][0]
                         v = Video()
                         v.pub_time = str(data['created'])
