@@ -1,6 +1,8 @@
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union
 from datetime import datetime
 from pydantic import BaseModel
+import aiohttp
+
 
 
 class ImageUrls(BaseModel):
@@ -98,3 +100,15 @@ class PixivIllust(BaseModel):
     class Config:
         extra = 'ignore'
 
+async def get_pixiv_illust(pid: Union[int, str]) -> PixivIllust:
+    try:
+        pid = int(pid)
+    except ValueError:
+        raise ValueError('illust id must be int')
+    apiurl = 'https://api.shewinder.win/pixiv/illust_detail'
+    params = {'illust_id': pid}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(apiurl, params=params) as resp:
+            json_dic = await resp.json()
+    illust = Illust(**json_dic)
+    return PixivIllust(**illust.dict())

@@ -19,7 +19,8 @@ class RankPic:
 
 def to_rankpic(illust: Illust):
     pic = PixivIllust(**illust.dict())
-    tags = [tag.name for tag in pic.tags]
+    tags = [tag.name for tag in pic.tags if tag.name]
+    tags.extend([tag.translated_name for tag in pic.tags if tag.translated_name])
     return RankPic(
         pic.id,
         pic.urls[0],

@@ -157,6 +157,8 @@ class Res:
         """
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
+                if resp.status != 200:
+                    raise ValueError('请求失败')
                 data = await resp.read()
         if anti_harmony:
             data = anti_harmony_img(Image.open(BytesIO(data)))

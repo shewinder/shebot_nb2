@@ -1,12 +1,15 @@
 import json
 from typing import Dict, List, Tuple, Union
 from pygtrie import CharTrie
+from ._tag import tag_data
 
 class TagParser:
-    def __init__(self, path):
-        with open(path, mode="r", encoding="utf-8") as f:
-            dictionary: List[str] = json.load(f)
+    def __init__(self, dictionary: List[str] = []):
         self._tree = CharTrie()
+        for tag in dictionary:
+            self._tree[tag[::-1]] = True
+
+    def append_dictionary(self, dictionary: List[str]):
         for tag in dictionary:
             self._tree[tag[::-1]] = True
 
@@ -27,3 +30,6 @@ class TagParser:
         keyword = tags[0]
         tags.pop(0)
         return keyword, tags
+
+parser = TagParser()
+parser.append_dictionary(tag_data.tags)

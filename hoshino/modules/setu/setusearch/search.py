@@ -1,6 +1,6 @@
 from typing import List, Tuple
 from hoshino.util import aiohttpx
-from .model import Setu
+from .._model import Setu
 
 async def search_by_tag(keyword: str, tags: List[str]) -> Tuple[List[Setu], List[str]]:
     apiurl = 'https://api.shewinder.win/setu/search'
