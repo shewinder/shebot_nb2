@@ -9,7 +9,7 @@ from aiohttp.client_exceptions import (
     ClientConnectionError,
     ClientHttpProxyError,
     ClientProxyConnectionError,
-    ClientOSError
+    ClientOSError,
 )
 from ssl import SSLCertVerificationError
 from requests import Response
@@ -28,6 +28,7 @@ class ProxyException(Exception):
 class TimeoutException(Exception):
     pass
 
+
 class NetworkException(Exception):
     pass
 
@@ -40,11 +41,11 @@ class ProxyPool:
         self.ok_cnt = 0
         self.fail_cnt = 0
 
-    def fetch_proxys(self) :
+    def fetch_proxys(self):
         all = requests.get(self.proxy_pool_url).text.split()
         for i in all:
             yield i
-    
+
     def refresh(self):
         self.proxy_iterator = self.fetch_proxys()
 
@@ -69,6 +70,7 @@ class ProxyPool:
         except ValueError:
             # in async mode, the proxy may have been removed by another coroutine
             pass
+
 
 class RequestWithProxy(ProxyPool):
     def __init__(self, timeout: int = 3):
@@ -150,15 +152,20 @@ class AioRequestWithProxy(ProxyPool):
         except (ClientConnectionError, ClientOSError, SSLCertVerificationError) as e:
             self.remove_proxy(proxy)
             self.fail_cnt += 1
-            raise NetworkException(f'{e}')
+            raise NetworkException(f"{e}")
         except asyncio.exceptions.TimeoutError:
             self.remove_proxy(proxy)
             self.fail_cnt += 1
             raise TimeoutException
         except ValueError as e:
-            if str(e) == 'negative file descriptor': # I cound not figure out what happened
+            if (
+                str(e) == "negative file descriptor"
+            ):  # I cound not figure out what happened
                 self.fail_cnt += 1
                 self.remove_proxy(proxy)
+                raise ProxyException(
+                    "negative file descriptor (this is a exception i can not handle, so let it tepmporary as a proxy exception)"
+                )
             else:
                 raise
         except:
@@ -168,7 +175,7 @@ class AioRequestWithProxy(ProxyPool):
 
     async def get(self, url, **kwargs) -> ClientResponse:
         return await self.do("get", url, **kwargs)
-            
+
     async def post(self, url, **kwargs) -> ClientResponse:
         return await self.do("post", url, **kwargs)
 
@@ -215,9 +222,9 @@ if __name__ == "__main__":
     cnt = 0
     for i in range(50):
         try:
-            #print(aioreq.proxies)
-            #asyncio.run(test())
-            
+            # print(aioreq.proxies)
+            # asyncio.run(test())
+
             print(req.proxies)
             time.sleep(1)
             test2()
@@ -234,5 +241,3 @@ if __name__ == "__main__":
             print("other exception")
             raise
     print("success:", cnt)
-
-
