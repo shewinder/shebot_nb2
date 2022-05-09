@@ -1,6 +1,6 @@
 
 from hoshino.typing import T_State
-from hoshino import Service, Bot, Event
+from hoshino import Service, Bot, Event, Message
 from hoshino.sres import Res as R
 from hoshino.util.sutil import extract_url_from_event
 from .soucenao import soucenao_format, get_saucenao_results
@@ -27,7 +27,13 @@ async def _(bot: "Bot", event: "Event", state: T_State):
 
     url = urls[0] 
     await bot.send(event, '正在搜索，请稍后~')
-    results = await get_saucenao_results(url)
+
+    sv.logger.info('soucenao search')
+    results = []
+    try:
+        results = await get_saucenao_results(url)
+    except Exception as e:
+        sv.logger.error(e)
     results = results[0:3] if len(results) >= 3 else results
     if results:
         reply = '以下结果来自souceNao\n'
@@ -36,21 +42,25 @@ async def _(bot: "Bot", event: "Event", state: T_State):
         await search_pic.finish(reply)
 
     # 自动转为ascii2d
+    sv.logger.info('ascii2d search')
     results = await get_ascii2d_results(url)
     if results:
         reply = '以下结果来自ascii2d\n\n'
-        r = results[0]
-        reply += await ascii2d_format(r)
+        reply += '色合搜索结果\n'
+        color_r, bovw_r = results[0], results[1]
+        reply += await ascii2d_format(color_r) + '\n'
+        reply += '特征搜索结果\n'
+        reply += await ascii2d_format(bovw_r)
         await search_pic.finish(reply)
 
     # 自动转为搜索番剧模式
-    results = await get_tracemoe_results(url, 0.9)
-    if results:
-        reply = '以下结果来自whatanime\n\n'
-        results = results[0:3] if len(results) >= 3 else results
-        for r in results:
-            reply += await tracemoe_format(r) + '\n\n'
-        await search_pic.finish(reply)
+    # results = await get_tracemoe_results(url, 0.9)
+    # if results:
+    #     reply = '以下结果来自whatanime\n\n'
+    #     results = results[0:3] if len(results) >= 3 else results
+    #     for r in results:
+    #         reply += await tracemoe_format(r) + '\n\n'
+    #     await search_pic.finish(reply)
 
     # 都没有结果
     await bot.send(event, '没找到结果哦')

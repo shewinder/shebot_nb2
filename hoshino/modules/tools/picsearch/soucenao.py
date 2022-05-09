@@ -1,4 +1,3 @@
-from traceback import print_exc
 from typing import Dict, List, Optional, Union
 
 import aiohttp
@@ -23,12 +22,10 @@ async def get_saucenao_results(pic_url):
     res_list: List[SoucenaoResult] = []
     async with aiohttp.ClientSession() as session:
         async with session.get(url, params=params) as resp:
-            try:
-                results = await resp.json()
-                results = results['results']
-            except:
-                print_exc()
-                return []
+            results = await resp.json()
+            if results['header']['status'] != 0:
+                raise Exception(results['header']['message'])
+            results = results.get('results', [])
             for i in results:
                 try:
                     r = SoucenaoResult(**i)
@@ -36,8 +33,7 @@ async def get_saucenao_results(pic_url):
                         continue
                     res_list.append(r)
                 except ValidationError:
-                    print_exc()
-                    pass
+                    continue
             return res_list
 
 

@@ -47,15 +47,3 @@ class RSS:
         d.pub_time = item.find(".pubDate").text.strip()
         d.author = item.find(".author").text.strip()
         return d
-
-
-if __name__ == "__main__":
-    rss = RSS.from_route("twitter/user/digimon215")
-    import asyncio
-
-    async def test():
-        await rss.get()
-        d = rss.parse_xml()
-        print(d)
-
-    asyncio.run(test())

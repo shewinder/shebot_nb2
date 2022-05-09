@@ -138,7 +138,7 @@ class BaseInfoChecker:
                 date="",
                 creator={group_id: [creator_id]},
             )
-            sub_data.data[cls.__name__].append(sub)
+            sub_data.data[cls.__name__] = [sub]
         return sub
 
 

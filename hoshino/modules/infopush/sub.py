@@ -60,7 +60,8 @@ async def add_sub(bot: Bot, event: GroupMessageEvent, state: T_State):
         checker.add_sub(gid, url, remark=remark, creator_id=uid)
         await bot.send(event, f"成功订阅{remark}")
     except Exception as e:
-        await bot.send(event, str(e))
+        await sv.logger.error(e)
+        await bot.send(event, f"error: {e}")
 
 for cmd, checker in cmds.items():
     sv.on_command(cmd, only_group=True).handle()(add_sub)
