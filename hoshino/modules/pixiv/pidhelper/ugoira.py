@@ -20,7 +20,7 @@ async def get_ugoira_gif(pid: str) -> bytes:
                 ugoira_json = await resp.json()
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        zip_url: str = ugoira_json["ugoira_metadata"]["zip_urls"]['medium']
+        zip_url: str = ugoira_json["zip_urls"]['medium']
         zip_url = zip_url.replace('600x600', '1920x1080')
         print(f'download form {zip_url}')
         zip_file = await download(
@@ -31,10 +31,10 @@ async def get_ugoira_gif(pid: str) -> bytes:
         frames = list(
             map(
                 lambda x: Image.open(os.path.join(frame_dir, x["file"])),
-                ugoira_json["ugoira_metadata"]["frames"],
+                ugoira_json["frames"],
             )
         )
-        delays = list(map(lambda x: x["delay"], ugoira_json["ugoira_metadata"]["frames"]))
+        delays = list(map(lambda x: x["delay"], ugoira_json["frames"]))
         return generate_gif(frames, delays)
 
 

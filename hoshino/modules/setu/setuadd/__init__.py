@@ -2,9 +2,7 @@ from typing import Union
 from hoshino import sucmd, Bot, GroupMessageEvent, PrivateMessageEvent
 from .._model import Setu
 from hoshino.util.pixiv import get_pixiv_illust
-from hoshino.util import aiohttpx
-from .._tag import tag_data
-from .._tag_parser import parser
+from hoshino.util import aiohttpx, normalize_str
 
 add_setu = sucmd("/setu add")
 
@@ -58,6 +56,7 @@ async def _(bot: Bot, event: Union[GroupMessageEvent, PrivateMessageEvent]):
             if tag.translated_name and len(tag.translated_name) > 1
         ]
     )
+    setu.tags = list(map(lambda x: normalize_str(x), setu.tags))
     setu.tags = ",".join(setu.tags)
     setu.ext = "jpg"
     setu.upload_date = illust.create_date
@@ -67,8 +66,6 @@ async def _(bot: Bot, event: Union[GroupMessageEvent, PrivateMessageEvent]):
     if resp.status_code == 200:
         d = resp.json
         rows = d["rows affected"]
-        parser.append_dictionary(setu.tags.split(","))
-        tag_data.tags.extend(setu.tags.split(","))
         await bot.send(event, f"{rows} rows affected")
     else:
         await bot.send(event, f"添加失败 {resp.status_code}")

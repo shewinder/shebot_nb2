@@ -1,3 +1,4 @@
+import aiohttp
 from hoshino.glob import get_browser
 from hoshino.sres import Res as R
 from hoshino import Message
@@ -16,18 +17,13 @@ class WeiboChecker(BaseInfoChecker):
 
     @classmethod
     async def notice_format(self, sub: SubscribeRecord, data: RSSData) -> Message:
-        browser = await get_browser()
-        ctx = await browser.new_context(
-            viewport={"width": 2560, "height": 1080}, device_scale_factor=2
-        )
-        page = await ctx.new_page()
-        await page.goto(data.portal)
-        articles = page.locator("//article")
-        screen_bytes = await articles.first.screenshot()  # 截图
-        await page.close()
-        return (
-            f"{sub.remark}更新了！" + R.image_from_memory(screen_bytes) + f"{data.portal}"
-        )
+        params = {"url": data.portal}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.shewinder.win/screenshot/weibo", params=params
+            ) as resp:
+                img = await resp.read()
+        return f"{sub.remark}更新" + R.image_from_memory(img) + data.portal
 
     @classmethod
     async def get_data(cls, url: str) -> RSSData:

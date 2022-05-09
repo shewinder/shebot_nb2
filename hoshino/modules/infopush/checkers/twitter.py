@@ -16,7 +16,7 @@ class TwitterChecker(BaseInfoChecker):
         params = {"url": data.portal}
         async with aiohttp.ClientSession() as session:
             async with session.get(
-                "https://api.shewinder.win/screenshot/twitter/article", params=params
+                "https://api.shewinder.win/screenshot/twitter", params=params
             ) as resp:
                 img = await resp.read()
         return f"{sub.remark}推特更新" + R.image_from_memory(img) + data.portal

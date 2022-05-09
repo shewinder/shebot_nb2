@@ -147,7 +147,7 @@ class Res:
         return MessageSegment.image(file=data, cache=False)
 
     @classmethod
-    async def image_from_url(cls, url: str, anti_harmony: bool=False) -> MessageSegment:
+    async def image_from_url(cls, url: str, anti_harmony: bool=False, timeout=30) -> MessageSegment:
         """
         download the image from url and return a MessageSegment in base64
         should be used in async function
@@ -155,10 +155,11 @@ class Res:
         url: image url
         anti_harmony: bool = False 是否启用图片反和谐
         """
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=timeout)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    raise ValueError('请求失败')
+                    raise ValueError(f'请求失败 {resp.status}')
                 data = await resp.read()
         if anti_harmony:
             data = anti_harmony_img(Image.open(BytesIO(data)))

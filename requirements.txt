@@ -17,4 +17,4 @@ aiofiles>=0.6.0
 pyjwt>=2.1.0
 sqlitedict>=1.7.0
 aioaria2
-playwright
+fuzzywuzzy
