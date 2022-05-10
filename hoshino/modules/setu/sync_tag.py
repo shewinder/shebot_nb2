@@ -68,13 +68,9 @@ async def sync():
     parser = TagParser(_tags)
     logger.info(f"update {len(tags)} tags")
 
-    # update translation from pixiv to yande
-    def process(translate: Dict[str, str]):
-        for key, value in translate.items():
-            translate[key] = value.replace("s'", "s") # girls'_frontline yande 不认
+    # update tag translation
     url = 'https://api.shewinder.win/tag-translate/'
     resp = requests.get(url)
     if resp.status_code == 200:
         d = resp.json()
-        process(d)
         _translate.update(d)

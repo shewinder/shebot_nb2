@@ -61,6 +61,7 @@ _checkers: List[Type['BaseInfoChecker']] = []
 class BaseInfoChecker:
     """
     seconds: checker运行间隔秒数, 默认600s
+    name: checker名称, 仅用作显示
     distinguisher_name: 用于checker使用的区分不同订阅， 如 id， user_name，用于提示用户输入
     """
     seconds: int = 600

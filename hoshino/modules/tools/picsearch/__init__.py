@@ -43,7 +43,10 @@ async def _(bot: "Bot", event: "Event", state: T_State):
 
     # 自动转为ascii2d
     sv.logger.info('ascii2d search')
-    results = await get_ascii2d_results(url)
+    try:
+        results = await get_ascii2d_results(url)
+    except Exception as e:
+        sv.logger.error(e)
     if results:
         reply = '以下结果来自ascii2d\n\n'
         reply += '色合搜索结果\n'
