@@ -1,5 +1,4 @@
 import aiohttp
-from hoshino.glob import get_browser
 from hoshino.sres import Res as R
 from hoshino import Message
 from .._config import Config
