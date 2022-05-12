@@ -6,9 +6,10 @@ from hoshino.sres import Res as R
 from ..sync_tag import get_parser, get_translate
 from .search import search_by_tag, search_yande
 from hoshino.util.message_util import send_group_forward_msg
+from hoshino.util import normalize_str
 from .config import Config
 from .._model import Setu
-from fuzzywuzzy import process, fuzz
+from fuzzywuzzy import process
 
 conf = Config.get_instance('setu_search')
 
@@ -43,6 +44,8 @@ async def send_setu(bot: Bot, event: GroupMessageEvent, state: T_State):
 
     async def get_setus_from_yande(tags: List[str]) -> Tuple[List[Setu], List[str]]:
         trans = get_translate()
+        for k in list(trans.keys()):
+            trans[normalize_str(k)] = trans[k]
         yande_tags = []
         for tag in tags:
             res = process.extractOne(tag, trans.keys(), score_cutoff=95)
@@ -105,7 +108,7 @@ async def send_setu(bot: Bot, event: GroupMessageEvent, state: T_State):
                 await R.image_from_url(
                     setu.url,
                     anti_harmony=anti_harmony,
-                    timeout=10
+                    timeout=30
                 )
             )
             sv.logger.info(f'download finished')
