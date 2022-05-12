@@ -29,7 +29,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     try:
         int(p)
     except:
-        await bot.send(event, 'invalid pid')
+        await bot.send(event, "invalid pid")
         return
 
     # 获取illust信息
@@ -45,11 +45,13 @@ async def _(bot: Bot, event: GroupMessageEvent):
     # 处理动图
     if illust.type == "ugoira":
         await bot.send(event, "该图片是动图，转为gif发送")
-        sv.logger.info('processing gif')
+        sv.logger.info("processing gif")
         gif_bytes = await get_ugoira_gif(p)
-        sv.logger.info('gif process finished')
-        #await bot.send(event, R.image_from_memory(gif_bytes))
-        await send_group_forward_msg(bot, event.group_id, [R.image_from_memory(gif_bytes)])
+        sv.logger.info("gif process finished")
+        # await bot.send(event, R.image_from_memory(gif_bytes))
+        await send_group_forward_msg(
+            bot, event.group_id, [R.image_from_memory(gif_bytes)]
+        )
         return
 
     # 获取普通图片
@@ -77,6 +79,14 @@ async def _(bot: Bot, event: GroupMessageEvent):
             f"作者id：{illust.user.id}",
         ]
         msgs = [MessageSegment.text("\n".join(reply))]
+        msgs.append(
+            MessageSegment.text(
+                "标签： "
+                + ",".join(
+                    [tag.translated_name for tag in illust.tags if tag.translated_name]
+                )
+            )
+        )
         for pic in pics:
             msgs.append(R.image_from_memory(pic))
         await send_group_forward_msg(bot, event.group_id, msgs)

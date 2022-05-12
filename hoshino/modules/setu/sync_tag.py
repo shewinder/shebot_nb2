@@ -69,8 +69,13 @@ async def sync():
     logger.info(f"update {len(tags)} tags")
 
     # update tag translation
-    url = 'https://api.shewinder.win/tag-translate/'
-    resp = requests.get(url)
-    if resp.status_code == 200:
-        d = resp.json()
-        _translate.update(d)
+    tag_url = 'https://api.shewinder.win/tag-translate/'
+    artist_url = 'https://api.shewinder.win/yande-artist/'
+    resp = requests.get(tag_url)
+    resp.raise_for_status()
+    d = resp.json()
+    _translate.update(d)
+    resp = requests.get(artist_url)
+    resp.raise_for_status()
+    d = resp.json()
+    _translate.update(d)
