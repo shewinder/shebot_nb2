@@ -3,26 +3,27 @@ from collections import defaultdict
 from random import choice
 from typing import Any, Dict, List
 
-from hoshino import MessageSegment, Service, userdata_dir, Message
+from hoshino import Message, MessageSegment, Service, T_State, userdata_dir
 from hoshino.permission import SUPERUSER
 from hoshino.sres import Res as R
 from hoshino.typing import Bot, GroupMessageEvent
+from hoshino.util import aiohttpx
 
-from .data import (
-    CustomReply,
-    ExistsException,
-    KeywordConflictException,
-    NotFoundException,
-)
+from .data import (CustomReply, ExistsException, KeywordConflictException,
+                   NotFoundException)
 
 
 class BaseHandler:
     def __init__(self, matcher: str) -> None:
+        self.matcher = matcher
+        self.refresh()
+
+    def refresh(self):
         recs: List[CustomReply] = CustomReply.select().where(
-            CustomReply.matcher == matcher
+            CustomReply.matcher == self.matcher
         )
         self._dict: Dict[str, List[str]] = defaultdict(list)
-        self.matcher = matcher
+        self.matcher = self.matcher
         for rec in recs:
             if rec.word in self._dict:
                 self._dict[rec.word].append(rec.reply)
@@ -52,17 +53,14 @@ class FullmatchHandler(BaseHandler):
         super().__init__("fullmatch")
 
     def add(self, word: str, reply: str) -> None:
-        if word in self._dict:
-            if reply in self._dict[word]:
-                raise ExistsException(
-                    f"reply {reply} already exists in fullmatch for {word}"
-                )
-            self._dict[word].append(reply)
-            # 存入数据库
-            CustomReply.create(word=word, reply=reply, matcher="fullmatch")
-        else:
-            self._dict[word] = [reply]
-            CustomReply.create(word=word, reply=reply, matcher="fullmatch")
+        if word in self._dict and reply in self._dict[word]:
+            raise ExistsException(
+                f"reply {reply} already exists in fullmatch for {word}"
+            )
+        # 存入数据库
+        CustomReply.create(word=word, reply=reply, matcher="fullmatch")
+        # 刷新内存
+        self.refresh()
 
     def find_reply(self, event: GroupMessageEvent) -> str:
         if len(event.message) == 0:
@@ -85,18 +83,15 @@ class KeywordHandler(BaseHandler):
     def __init__(self) -> None:
         super().__init__("keyword")
 
-    def add(self, keyword: str, reply: str) -> None:
-        if keyword in self._dict:
-            self._dict[keyword].append(reply)
-            CustomReply.create(word=keyword, reply=reply, matcher="keyword")
-            return True
+    def add(self, keyword: str, reply: str):
         for k in self._dict:
             if keyword in k or k in keyword:
                 raise KeywordConflictException(
                     f"{keyword} conflicts with existed keyword {k}"
                 )
-        self._dict[keyword] = [reply]
+
         CustomReply.create(word=keyword, reply=reply, matcher="keyword")
+        self.refresh()
 
     def find_reply(self, event: GroupMessageEvent) -> str:
         if len(event.message) == 0:
@@ -119,13 +114,9 @@ class RexHandler(BaseHandler):
     def __init__(self) -> None:
         super().__init__("rex")
 
-    def add(self, pattern: str, reply: str) -> None:
-        if pattern in self._dict:
-            self._dict[pattern].append(reply)
-            CustomReply.create(word=pattern, reply=reply, matcher="rex")
-            return True
-        self._dict[pattern] = [reply]
+    def add(self, pattern: str, reply: str):
         CustomReply.create(word=pattern, reply=reply, matcher="rex")
+        self.refresh()
 
     def find_reply(self, event: GroupMessageEvent) -> str:
         if len(event.message) == 0:
@@ -159,7 +150,7 @@ async def reply(bot: Bot, event: GroupMessageEvent):
         reply = h.find_reply(event)
         if reply:
             sv.logger.info(
-                f"群{event.group_id} {event.user_id}({event.sender.nickname}) triggerd matcher: {h.matcher} reply: {reply[:10]}"
+                f"群{event.group_id} {event.user_id} triggerd matcher: {h.matcher} reply: {reply[:10]}"
             )
             await bot.send(event, Message(reply))
             return
@@ -176,9 +167,11 @@ if not data_dir.exists():
     data_dir.mkdir(parents=True)
 
 
-async def add_reply(bot: Bot, event: GroupMessageEvent):
+async def handler1(bot: Bot, event: GroupMessageEvent, state: T_State):
     matcher = event.raw_message.strip().split()[0]
+    word, reply = "", ""
     start = event.message.pop(0)
+
     if start.type == "text":
         tmp: List[str] = start.data["text"].strip().split()
         if len(tmp) == 2:
@@ -196,6 +189,36 @@ async def add_reply(bot: Bot, event: GroupMessageEvent):
             url = m.data["url"]
             reply += await R.image_from_url(url)
 
+    if not word:
+        return
+    state["matcher"] = matcher
+    state["word"] = word
+    if reply:
+        state["reply"] = reply
+        state["special"] = False  # a flag to indicate that this is a special reply
+
+
+async def handler2(bot: Bot, event: GroupMessageEvent, state: T_State):
+    """
+    处理无法在一条消息中完成的情况，例如reply为语音
+    """
+    if state["special"] == False:
+        return
+
+    msg = event.message[0]
+    if msg.type == "record":
+        rec_url = msg.data["url"]
+        resp = await aiohttpx.get(rec_url)
+        rec_bytes = resp.content
+        state["reply"] = MessageSegment.record(rec_bytes)
+
+
+async def handler3(bot: Bot, event: GroupMessageEvent, state: T_State):
+    matcher = state["matcher"]
+    word = state["word"]
+    reply = state["reply"]
+    if not reply:
+        return
     try:
         handler: BaseHandler = eval(matcher)
         handler.add(word, reply)
@@ -210,9 +233,17 @@ async def add_reply(bot: Bot, event: GroupMessageEvent):
         await bot.send(event, f"添加失败，{ex}")
 
 
-add_full.handle()(add_reply)
-add_key.handle()(add_reply)
-add_rex.handle()(add_reply)
+add_full.handle()(handler1)
+add_key.handle()(handler1)
+add_rex.handle()(handler1)
+
+add_full.got("special")(handler2)
+add_key.got("special")(handler2)
+add_rex.got("special")(handler2)
+
+add_full.handle()(handler3)
+add_key.handle()(handler3)
+add_rex.handle()(handler3)
 
 del_full = sv.on_command("del fullmatch", permission=SUPERUSER)
 del_key = sv.on_command("del keyword", permission=SUPERUSER)
