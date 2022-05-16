@@ -20,6 +20,7 @@ sv = Service("setu_search")
 
 search_with_author = sv.on_regex(r"^来点(.{0,40})$", only_group=False)
 
+max_once = 3
 
 @search_with_author.handle()
 async def send_setu(bot: Bot, event: GroupMessageEvent, state: T_State):
@@ -67,8 +68,8 @@ async def send_setu(bot: Bot, event: GroupMessageEvent, state: T_State):
             setus, hit_tags = await search_by_tag(keyword, tags)
             sv.logger.info(f'pixiv found {len(setus)} setus')
 
-        if len(setus) > 5:
-            setus = random.sample(setus, 5)
+        if len(setus) > max_once:
+            setus = random.sample(setus, max_once)
 
     elif conf.mode == 1:
         sv.logger.info(f'keyword = {keyword}, tags = {tags}')
@@ -78,8 +79,8 @@ async def send_setu(bot: Bot, event: GroupMessageEvent, state: T_State):
         if not setus: # pixel not found, try yande
             sv.logger.info(f'trying to translate {keyword} to yande tag')
             setus, hit_tags = await get_setus_from_yande([keyword] + tags)
-        if len(setus) > 5:
-            setus = random.sample(setus, 5)
+        if len(setus) > max_once:
+            setus = random.sample(setus, max_once)
     
     elif conf.mode == 2:
         sv.logger.info(f'trying to translate {keyword} to yande tag')
@@ -90,8 +91,8 @@ async def send_setu(bot: Bot, event: GroupMessageEvent, state: T_State):
         setus.extend(setus_database)
         hit_tags.extend(hit_tags_databbase)
         sv.logger.info(f'found {len(setus)} setus')
-        if len(setus) > 5:
-            setus = random.sample(setus, 5)
+        if len(setus) > max_once:
+            setus = random.sample(setus, max_once)
 
 
 

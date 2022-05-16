@@ -71,10 +71,9 @@ class Yande(BaseModel):
 def yande_to_setu(yande: Yande) -> Setu:
     st = Setu()
     st.r18 = 'uncensored' in yande.tags
-    st.url = yande.sample_url.replace('files.yande.re', 'files.yande.shewinder.win')
-    #st.url = yande.file_url.replace('files.yande.re', 'files.yande.shewinder.win')
-    #st.url = yande.jpeg_url.replace('files.yande.re', 'files.yande.shewinder.win')
-    st.url = st.url.replace('https', 'http')
+    #st.url = yande.sample_url.replace('files.yande.re', 'files.shewinder.win')
+    st.url = yande.jpeg_url.replace('files.yande.re', 'files.shewinder.win')
+    #st.url = yande.file_url.replace('files.yande.re', 'files.shewinder.win')
     return st
 
     
