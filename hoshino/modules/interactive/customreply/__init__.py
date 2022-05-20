@@ -84,12 +84,10 @@ class KeywordHandler(BaseHandler):
         super().__init__("keyword")
 
     def add(self, keyword: str, reply: str):
-        for k in self._dict:
-            if keyword in k or k in keyword:
-                raise KeywordConflictException(
-                    f"{keyword} conflicts with existed keyword {k}"
-                )
-
+        if keyword in self._dict and reply == self._dict[keyword]:
+            raise ExistsException(
+                f"reply {reply} already exists in keyword for {keyword}"
+            )
         CustomReply.create(word=keyword, reply=reply, matcher="keyword")
         self.refresh()
 
