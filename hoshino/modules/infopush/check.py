@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import os
 import pathlib
@@ -40,7 +41,8 @@ async def check(checkers: List[BaseInfoChecker]):
             updated, data = await checker.check(sub)
             if updated:
                 await checker.notice(sub, data)
-            logger.info('checking complete')         
+            logger.info('checking complete')
+            await asyncio.sleep(checker.seconds / len(subs) - 1)       
 
 for seconds, checker_group in checker_groups:
     add_job(check, 
