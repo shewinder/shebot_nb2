@@ -8,11 +8,11 @@ from random import choice, randint, shuffle
 import aiohttp
 from PIL import Image
 
-from .config import Config, plugin_config
+from .config import Config
 from hoshino.util.sutil import load_config
 from hoshino.sres import Res as R
 
-conf: Config = plugin_config.config
+conf = Config.get_instance('conhead')
 
 class KyaruHead:
     def __init__(self, head_name, angle, face_width, chin_tip_x, chin_tip_y, cqcode) -> None:

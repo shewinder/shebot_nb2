@@ -3,13 +3,13 @@ from hoshino.event import GroupMessageEvent, HonorNotifyEvent
 from hoshino.sres import Res as R
 from hoshino.util import DailyNumberLimiter
 from hoshino.util.sutil import get_img_from_url
-from .config import plugin_config, Config
+from .config import Config
 
 help_ = '[迫害龙王] 艾特龙王出来并迫害'
 
 plug_res = res_dir.joinpath('teasedragonking')
 
-conf: Config = plugin_config.config
+conf = Config.get_instance('teasedragonking')
 
 _nlt = DailyNumberLimiter(conf.daily_max_num)
 

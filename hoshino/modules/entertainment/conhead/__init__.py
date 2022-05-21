@@ -15,9 +15,9 @@ from hoshino.util import DailyNumberLimiter, FreqLimiter
 from hoshino.util.sutil  import extract_url_from_event
 from .data_source import detect_face, concat, gen_head
 from .opencv import add
-from .config import plugin_config, Config
+from .config import Config
 
-conf: Config = plugin_config.config
+conf = Config.get_instance('conhead')
 
 sv = Service('接头霸王')
 _nlt = DailyNumberLimiter(5)
