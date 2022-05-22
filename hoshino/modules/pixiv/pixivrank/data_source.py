@@ -16,6 +16,7 @@ class RankPic:
     page_count: int
     author: str
     author_id: int
+    urls: List[str]
 
 def to_rankpic(illust: Illust):
     pic = PixivIllust(**illust.dict())
@@ -29,6 +30,7 @@ def to_rankpic(illust: Illust):
         pic.page_count,
         pic.user.name,
         pic.user.id,
+        pic.urls,
     )
 
 
