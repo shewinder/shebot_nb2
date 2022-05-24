@@ -32,7 +32,7 @@ async def _(bot: Bot, event: Event):
 @test4.handle()
 async def _(bot: Bot, event: Event):
     from hoshino.util.message_util import send_group_forward_msg
-    msgs1 = [MessageSegment.text("hello"), MessageSegment.text("world")]
+    msgs1 = ["hello", MessageSegment.text("world")]
     #msgs1 = [Message("hello"), Message("world")]
     msgs2 = [msgs1]
     msgs3 = [msgs2]

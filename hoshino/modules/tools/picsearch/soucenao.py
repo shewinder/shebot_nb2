@@ -121,6 +121,14 @@ async def ehentai_format(r: SoucenaoResult):
         + f'eng_name: {r.data.eng_name}\n' \
         + f'jp_name: {r.data.jp_name}\n' \
 
+async def yande_format(r: SoucenaoResult):
+    img = await R.image_from_url(r.header.thumbnail)
+    return  img \
+        + f'相似度 {r.header.similarity}\n' \
+        + f'yande id: {r.data.yandere_id}\n' \
+        + f'material: {r.data.material}\n' \
+        + f'source: {r.data.source}\n' \
+
 async def soucenao_format(r: SoucenaoResult):
     if r.data.pixiv_id is not None:
         return await pixiv_format(r)
@@ -130,3 +138,5 @@ async def soucenao_format(r: SoucenaoResult):
         return await danbooru_format(r)
     elif r.header.index_id == 38:
         return await ehentai_format(r)
+    elif r.header.index_id == 12:
+        return await yande_format(r)
