@@ -8,11 +8,13 @@ from fastapi import Request, Response
 # from .routers.config import router as config_router
 from hoshino.modules.web.routers.login import router as login_router
 from hoshino.modules.web.routers.bot_manage import router as bot_manage_router
+from hoshino.modules.web.routers.custom_reply import router as custom_reply_router
 
 app: FastAPI = nonebot.get_app()
 
 app.include_router(login_router)
 app.include_router(bot_manage_router)
+app.include_router(custom_reply_router)
 
 # 设置拦截
 # @app.middleware('http')

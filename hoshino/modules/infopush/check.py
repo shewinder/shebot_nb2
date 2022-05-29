@@ -30,6 +30,7 @@ async def check(checkers: List[BaseInfoChecker]):
     if not sub_data:
         logger.info('当前没有任何订阅')
         return
+    print('this is a test log remember to delete later', checkers)
     for checker in checkers:
         logger.info(f'{checker.__name__} start checking')
         subs: List["SubscribeRecord"] = sub_data.data.get(checker.__name__)
