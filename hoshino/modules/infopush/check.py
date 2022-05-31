@@ -23,6 +23,7 @@ for module_name in os.listdir(checker_dir):
         logger.error(f'error occured when importing {module_name}')
 
 checkers = BaseInfoChecker.get_all_checkers()
+print("test info", checkers)
 checker_groups = groupby(sorted(checkers, key=lambda x: getattr(x, 'seconds')), 
                         key=lambda x: getattr(x, 'seconds'))
 

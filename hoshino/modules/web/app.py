@@ -1,4 +1,5 @@
-from logging import log
+from hoshino.log import logger
+from ._util import check_auth
 from typing import Callable
 import nonebot
 from fastapi import FastAPI
@@ -16,23 +17,22 @@ app.include_router(login_router)
 app.include_router(bot_manage_router)
 app.include_router(custom_reply_router)
 
-# 设置拦截
-# @app.middleware('http')
-# async def _(req: Request, call_next: Callable):
-#     path = req.scope['path']
-#     if path == '/api/login': # 访问登录  路由不拦截
-#         resp = await call_next(req)
-#         return resp
-#     else:
-#         headers = req.headers
-#         if not 'token' in headers:
-#             logger.info('request api without access token')
-#             return Response(status_code=401, content='no token')
-#         token = headers['token']
-#         if not util.check_auth(token):
-#             return Response(status_code=401, content='wrong token or token expired')
-#         resp = await call_next(req)
-#         return resp
+@app.middleware('http')
+async def _(req: Request, call_next: Callable):
+    path = req.scope['path']
+    if path == '/login': # 访问登录  路由不拦截
+        resp = await call_next(req)
+        return resp
+    else:
+        headers = req.headers
+        if not 'token' in headers:
+            logger.info('request api without access token')
+            return Response(status_code=401, content='no token')
+        token = headers['token']
+        if not check_auth(token):
+            return Response(status_code=401, content='wrong token or token expired')
+        resp = await call_next(req)
+        return resp
 
 # origins = [
 #     "http://localhost",
