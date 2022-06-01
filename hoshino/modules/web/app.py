@@ -10,12 +10,14 @@ from fastapi import Request, Response
 from hoshino.modules.web.routers.login import router as login_router
 from hoshino.modules.web.routers.bot_manage import router as bot_manage_router
 from hoshino.modules.web.routers.custom_reply import router as custom_reply_router
+from hoshino.modules.web.routers.infopush_api import router as infopush_router
 
 app: FastAPI = nonebot.get_app()
 
 app.include_router(login_router)
 app.include_router(bot_manage_router)
 app.include_router(custom_reply_router)
+app.include_router(infopush_router)
 
 @app.middleware('http')
 async def _(req: Request, call_next: Callable):
@@ -24,13 +26,13 @@ async def _(req: Request, call_next: Callable):
         resp = await call_next(req)
         return resp
     else:
-        headers = req.headers
-        if not 'token' in headers:
-            logger.info('request api without access token')
-            return Response(status_code=401, content='no token')
-        token = headers['token']
-        if not check_auth(token):
-            return Response(status_code=401, content='wrong token or token expired')
+        # headers = req.headers
+        # if not 'token' in headers:
+        #     logger.info('request api without access token')
+        #     return Response(status_code=401, content='no token')
+        # token = headers['token']
+        # if not check_auth(token):
+        #     return Response(status_code=401, content='wrong token or token expired')
         resp = await call_next(req)
         return resp
 

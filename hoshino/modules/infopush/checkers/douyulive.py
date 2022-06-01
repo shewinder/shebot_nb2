@@ -3,7 +3,7 @@ from hoshino import MessageSegment
 
 from .._config import Config
 from .._exception import ProxyException, TimeoutException
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe, checker
 
 conf: Config.get_instance('infopush')
 
@@ -21,7 +21,7 @@ class DouyuLiveChecker(BaseInfoChecker):
     distinguisher_name: str = "房间号"
 
     @classmethod
-    def notice_format(cls, sub: SubscribeRecord, data: DouyuLive):
+    def notice_format(cls, sub: Subscribe, data: DouyuLive):
         return (
             f"{sub.remark}啦！\n{data.title}"
             + MessageSegment.image(data.cover)

@@ -2,7 +2,7 @@ import aiohttp
 from hoshino.sres import Res as R
 from hoshino.message import Message
 
-from .._model import BaseInfoChecker, SubscribeRecord, checker
+from .._model import BaseInfoChecker, Subscribe, checker
 from .._rss import RSS, RSSData
 
 @checker
@@ -12,7 +12,7 @@ class TwitterChecker(BaseInfoChecker):
     distinguisher_name: str = "用户ID"
 
     @classmethod
-    async def notice_format(cls, sub: SubscribeRecord, data: RSSData) -> Message:
+    async def notice_format(cls, sub: Subscribe, data: RSSData) -> Message:
         params = {"url": data.portal}
         async with aiohttp.ClientSession() as session:
             async with session.get(

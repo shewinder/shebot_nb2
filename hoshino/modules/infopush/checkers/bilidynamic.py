@@ -3,7 +3,7 @@ import requests
 from hoshino.log import logger
 from hoshino.sres import Res as R
 
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe, checker
 
 
 def get_name_from_uid(uid: str) -> str:
@@ -28,7 +28,7 @@ class BiliDynamicChecker(BaseInfoChecker):
     distinguisher_name: str = "up id"
 
     @classmethod
-    async def notice_format(cls, sub: SubscribeRecord, data: Dynamic):
+    async def notice_format(cls, sub: Subscribe, data: Dynamic):
         params = {"url": data.portal}
         async with aiohttp.ClientSession() as session:
             async with session.get(

@@ -2,7 +2,7 @@ import aiohttp
 from hoshino.sres import Res as R
 from hoshino import Message
 from .._config import Config
-from .._model import BaseInfoChecker, SubscribeRecord, checker
+from .._model import BaseInfoChecker, Subscribe, checker
 from .._rss import RSS, RSSData
 
 conf: Config.get_instance("infopush")
@@ -15,7 +15,7 @@ class WeiboChecker(BaseInfoChecker):
     distinguisher_name: str = "博主Id"
 
     @classmethod
-    async def notice_format(self, sub: SubscribeRecord, data: RSSData) -> Message:
+    async def notice_format(self, sub: Subscribe, data: RSSData) -> Message:
         params = {"url": data.portal}
         async with aiohttp.ClientSession() as session:
             async with session.get(

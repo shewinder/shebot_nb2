@@ -4,7 +4,7 @@ from hoshino import MessageSegment, Message
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe, checker
 
 
 class PixivData(InfoData):
@@ -20,7 +20,7 @@ class PixivUserChecker(BaseInfoChecker):
     distinguisher_name: str = "用户ID"
 
     @classmethod
-    async def notice_format(cls, sub: SubscribeRecord, data: PixivData):
+    async def notice_format(cls, sub: Subscribe, data: PixivData):
         msg = MessageSegment.text(f"{sub.remark}更新了！\n")
         for url in data.urls:
             msg += await R.image_from_url(

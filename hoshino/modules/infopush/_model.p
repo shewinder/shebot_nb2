@@ -3,75 +3,48 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Type, TypeVar, Union
 
-from numpy import record
-from tomlkit import date
-
-from hoshino import Bot, Message, MessageSegment, get_bot_list
+from hoshino import Bot, Message, MessageSegment, get_bot_list, userdata_dir
 from hoshino.log import logger
+from hoshino.util.persist import Persistent
 from pydantic import BaseModel
 
 from ._exception import NetworkException, ProxyException, TimeoutException
-from ._data import SubscribeRecord, query_records
 
-_sub_data: Dict[str, List["Subscribe"]] = defaultdict(
-    list
-)  # {checker_name: [Subscribe ...]}
+T = TypeVar('T')
 
+plug_dir = userdata_dir.joinpath("infopush")
+if not plug_dir.exists():
+    plug_dir.mkdir()
 
-def get_sub_data() -> Dict[str, List["Subscribe"]]:
-    return _sub_data
-
-
-# 这个函数是更换了存储介质的转换器， 所以很屎
-def refresh_subdata():
-    """
-    刷新内存中的订阅数据
-    """
-    global _sub_data
-    _sub_data = defaultdict(list)
-    subs: List[SubscribeRecord] = query_records()
-    _dict: Dict[str, Subscribe] = {}
-    for sub in subs:
-        if sub.url in _dict:
-            _dict[sub.url].creator[sub.group].append(sub.creator)
-        else:
-            _dict[sub.url] = Subscribe(
-                    url=sub.url,
-                    checker=sub.checker,
-                    remark=sub.remark,
-                    date=sub.date,
-                    creator={sub.group: [sub.creator]},
-                )
-    for sub_item in _dict.values():
-            _sub_data[sub_item.checker].append(sub_item)
+json_filepath = plug_dir.joinpath("sub.json")
+if not json_filepath.exists():
+    json_filepath.touch()
 
 
-class Subscribe(BaseModel):
+
+class SubscribeRecord(BaseModel):
     checker: str
     remark: str
     url: str
     date: str
-    creator: Dict[str, List[str]]  # {group_id: [user_id, ...]}
+    creator: Dict[str, List[str]] # {group_id: [user_id, ...]}
 
     def delete(self):
-        SubscribeRecord.select().where(SubscribeRecord.url == self.url).delete()
-        refresh_subdata()
+        global sub_data
+        sub_data.data.get(self.checker).remove(self)
 
-    # def save(self):
-    #     global sub_data
-    #     if self in get_sub_data().get(self.checker, []):
-    #         sub_data.save_to_file()
-    #     else:
-    #         get_sub_data()[self.checker].append(self)
-    #         sub_data.save_to_file()
+    def save(self):
+        global sub_data
+        if self in sub_data.data.get(self.checker, []):
+            sub_data.save_to_file()
+        else:
+            sub_data.data[self.checker].append(self)
+            sub_data.save_to_file()
 
+class SubscribeData(Persistent):
+    data: Dict[str, List["SubscribeRecord"]] = defaultdict(list) # {checker_name: [SubscribeRecord ...]}
 
-def get_creators() -> Dict[str, List[str]]:
-    creators = defaultdict(list)
-    for sub in get_sub_data():
-        creators[sub.group].append(sub.creator)
-    return creators
-
+sub_data = SubscribeData(json_filepath)
 
 @dataclass
 class InfoData:
@@ -79,13 +52,11 @@ class InfoData:
     插件的info数据类应该继承此类
     """
 
-    pub_time: str = ""
-    portal: str = ""
+    pub_time: str = ''
+    portal: str = ''
     is_new: bool = True  # 用于手动指定消息是否为新消息
 
-
-_checkers: List[Type["BaseInfoChecker"]] = []
-
+_checkers: List[Type['BaseInfoChecker']] = []
 
 class BaseInfoChecker:
     """
@@ -93,9 +64,8 @@ class BaseInfoChecker:
     name: checker名称, 仅用作显示
     distinguisher_name: 用于checker使用的区分不同订阅， 如 id， user_name，用于提示用户输入
     """
-
     seconds: int = 600
-    name: str = "unnamed checker"
+    name: str = 'unnamed checker'
     distinguisher_name: str = "id"
 
     @classmethod
@@ -107,14 +77,14 @@ class BaseInfoChecker:
         for checker in _checkers:
             if checker.__name__ == name:
                 return checker
-        raise ValueError(f"{name} not exist")
+        raise ValueError(f'{name} not exist')
 
     @classmethod
-    def get_subscribe(cls, url: str) -> Subscribe:
+    def get_subscribe(cls, url: str) -> SubscribeRecord:
         """
         通过订阅的唯一标识即url获取SubscribeRecord对象
         """
-        for sub in get_sub_data().get(cls.__name__, []):
+        for sub in sub_data.data.get(cls.__name__, []):
             if sub.url == url:
                 return sub
         return None
@@ -122,20 +92,15 @@ class BaseInfoChecker:
     @classmethod
     def get_creator_subs(
         cls, group_id: str, creator_id: Union[int, str]
-    ) -> List[Subscribe]:
+    ) -> List[SubscribeRecord]:
         group_id = str(group_id)
         creator_id = str(creator_id)
-        subs = get_sub_data().get(cls.__name__, [])
-        return list(
-            filter(
-                lambda x: group_id in x.creator and creator_id in x.creator[group_id],
-                subs,
-            )
-        )
+        subs = sub_data.data.get(cls.__name__, [])
+        return list(filter(lambda x: group_id in x.creator and creator_id in x.creator[group_id], subs))
 
     @classmethod
     def delete_creator_sub(
-        cls, group_id: int, creator_id: Union[int, str], sub: Subscribe
+        cls, group_id: int, creator_id: Union[int, str], sub: SubscribeRecord
     ):
         group_id = str(group_id)
         creator_id = str(creator_id)
@@ -144,35 +109,49 @@ class BaseInfoChecker:
             if len(sub.creator[group_id]) == 0:
                 del sub.creator[group_id]
             if len(sub.creator) == 0:
-                get_sub_data().get(cls.__name__).remove(sub)
+                sub_data.data.get(cls.__name__).remove(sub)
 
     @classmethod
     def add_sub(
         cls,
         group_id: int,
         url: str,
-        remark: str,
-        creator_id: Union[int, str],
-    ) -> Subscribe:
-        SubscribeRecord.create(
-            group=group_id,
-            checker=cls.__name__,
-            url=url,
-            creator=creator_id,
-            remark=remark,
-            date = '',
-        )
-        refresh_subdata()
+        remark: str = None,
+        creator_id: Union[int, str] = None,
+    ) -> SubscribeRecord:
+        group_id = str(group_id)
+        creator_id = str(creator_id)
+        sub = cls.get_subscribe(url)
+        if sub:
+            if group_id in sub.creator:
+                if creator_id in sub.creator[group_id]:
+                    raise ValueError("重复订阅")
+                else:
+                    sub.creator[group_id].append(creator_id)
+                    sub.save()
+            else:
+                sub.creator[group_id] = [creator_id]
+        else:
+            sub = SubscribeRecord(
+                checker=cls.__name__,
+                url=url,
+                remark=remark,
+                date="",
+                creator={group_id: [creator_id]},
+            )
+            sub_data.data[cls.__name__] = [sub]
+        return sub
+
 
     @classmethod
-    async def notice_format(cls, sub: Subscribe, data: InfoData) -> Message:
+    async def notice_format(cls, sub: SubscribeRecord, data: InfoData) -> Message:
         """
         默认的通知排版格式，子类可重写此函数
         """
         return Message(f"{sub.remark}更新啦！\n传送门{data.portal}")
 
     @classmethod
-    async def notice(cls, sub: Subscribe, data: InfoData):
+    async def notice(cls, sub: SubscribeRecord, data: InfoData):
         bot: Bot = get_bot_list()[0]
         for gid in sub.creator:
             try:
@@ -187,17 +166,17 @@ class BaseInfoChecker:
             await asyncio.sleep(0.5)
 
     @classmethod
-    async def check(cls, sub: Subscribe) -> Tuple[bool, InfoData]:
+    async def check(cls, sub: SubscribeRecord) -> Tuple[bool, InfoData]:
         try:
             data = await cls.get_data(sub.url)
         except TimeoutException as e:
-            logger.warning(f"{e}")
+            logger.warning(f'{e}')
             return False, None
         except ProxyException as e:
-            logger.warning(f"{e}")
+            logger.warning(f'{e}')
             return False, None
         except NetworkException as e:
-            logger.warning(f"{e}")
+            logger.warning(f'{e}')
             return False, None
         except Exception as e:
             raise
@@ -208,10 +187,7 @@ class BaseInfoChecker:
         if sub.date != curr_date and data.is_new:
             logger.info(f"检测到{sub.remark}更新")
             sub.date = curr_date
-            SubscribeRecord.select().where(SubscribeRecord.url == sub.url).update(
-                date=curr_date
-            )
-            refresh_subdata()
+            sub_data.save_to_file()
             return True, data
         else:
             return False, data
@@ -235,10 +211,11 @@ class BaseInfoChecker:
         """
         raise NotImplementedError
 
-
 def checker(cls):
     """
     装饰器，将Checker添加至_checker全局变量
     """
     _checkers.append(cls)
     return cls
+
+

@@ -21,7 +21,7 @@ driver = nonebot.get_driver()
 driver.register_adapter('cqhttp', Bot)
 config = driver.config
 
-if not config.modules and not config.data:
+if not config.modules and not config.data: 
     env = os.environ.copy()
     modules = parse_raw_as(Set[str], env.get('modules'))
     data = env.get('data')

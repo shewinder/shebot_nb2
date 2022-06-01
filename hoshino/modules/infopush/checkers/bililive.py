@@ -6,7 +6,7 @@ from hoshino import MessageSegment
 
 from .._config import Config
 from .._exception import ProxyException, TimeoutException, NetworkException
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe, checker
 
 conf: Config.get_instance('infopush')
 
@@ -41,7 +41,7 @@ class BiliLiveChecker(BaseInfoChecker):
     distinguisher_name: str = "房间号"
     
     @classmethod
-    async def notice_format(self, sub: SubscribeRecord, data: Live):
+    async def notice_format(self, sub: Subscribe, data: Live):
         return (
             f"{sub.remark}！\n{data.title}"
             + MessageSegment.image(data.cover)

@@ -3,7 +3,7 @@ from hoshino import MessageSegment
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, SubscribeRecord, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe, checker
 
 class Video(InfoData):
     title: str
@@ -21,7 +21,7 @@ class BiliVideoChecker(BaseInfoChecker):
     distinguisher_name: str = "up ID"
     
     @classmethod
-    async def notice_format(cls, sub: SubscribeRecord , data: Video):
+    async def notice_format(cls, sub: Subscribe , data: Video):
         return f'{sub.remark}更新啦！\n{data.title}'\
                 + MessageSegment.image(data.cover)\
                 + data.portal

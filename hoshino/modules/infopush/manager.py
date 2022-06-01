@@ -5,7 +5,7 @@ from hoshino.permission import GROUP_ADMIN, GROUP_OWNER
 from hoshino.typing import GroupMessageEvent, T_State
 
 from ._exception import TimeoutException
-from ._model import BaseInfoChecker, InfoData, SubscribeRecord
+from ._model import BaseInfoChecker, InfoData, Subscribe
 
 help_ = """
 [订阅] 添加一个订阅
@@ -100,7 +100,7 @@ del_subscribe.handle()(check_perm)
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     gid = event.group_id
     uid = "all" if state.get("all") else event.user_id
-    subs: List[SubscribeRecord] = []
+    subs: List[Subscribe] = []
     for checker in _checkers:
         subs.extend(checker.get_creator_subs(gid, uid))
     if not subs:
@@ -115,7 +115,7 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
 
 @del_subscribe.got("choice")
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
-    subs: List[SubscribeRecord] = state["subs"]
+    subs: List[Subscribe] = state["subs"]
     try:
         choice = int(state["choice"]) - 1
     except:
@@ -134,7 +134,7 @@ show_subscribe.handle()(check_perm)
 
 @show_subscribe.handle()
 async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
-    subs: List[SubscribeRecord] = []
+    subs: List[Subscribe] = []
     uid = "all" if state.get("all") else event.user_id
     for checker in _checkers:
         subs.extend(checker.get_creator_subs(event.group_id, uid))
