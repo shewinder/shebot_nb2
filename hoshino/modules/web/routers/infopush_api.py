@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter
 from pydantic import BaseModel
 from hoshino.modules.infopush._data import SubscribeRecord
-from hoshino.modules.infopush._model import refresh_subdata, get_sub_data, _sub_data
+from hoshino.modules.infopush._model import refresh_subdata
 
 def sub_to_dict(sub: SubscribeRecord) -> dict:
     return {

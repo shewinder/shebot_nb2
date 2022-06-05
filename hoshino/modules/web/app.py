@@ -6,10 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request, Response
 
-from .routers.custom_reply import router as custom_reply_router
-from .routers.infopush_api import router as infopush_router
-from .routers.bot_manage import router as bot_manage_router
-from .routers.login import router as login_router
+from hoshino.modules.web.routers.custom_reply import router as custom_reply_router
+from hoshino.modules.web.routers.infopush_api import router as infopush_router
+from hoshino.modules.web.routers.bot_manage import router as bot_manage_router
+from hoshino.modules.web.routers.login import router as login_router
 
 app: FastAPI = nonebot.get_app()
 
