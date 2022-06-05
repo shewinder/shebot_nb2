@@ -2,8 +2,9 @@ from typing import Dict, Type
 
 from hoshino import Bot, Service
 from hoshino.typing import GroupMessageEvent, T_State
+from hoshino.util.proxypool import ProxyException
 
-from ._exception import TimeoutException
+from ._exception import TimeoutException, ProxyException, NetworkException
 from ._model import BaseInfoChecker, InfoData
 from hoshino.modules.infopush.checkers.pixivuser import PixivUserChecker
 from hoshino.modules.infopush.checkers.bililive import BiliLiveChecker
@@ -39,7 +40,7 @@ async def add_sub(bot: Bot, event: GroupMessageEvent, state: T_State):
     url = checker.form_url(dis)
     try:
         data = await checker.get_data(url)
-    except TimeoutException:
+    except (ProxyException, TimeoutException, NetworkException) as e:
         sv.logger.warning(f'订阅{checker.name}获取数据超时')
         data = InfoData() # 使用proxy pool 超时是正常情况
     except Exception as e:
@@ -60,7 +61,7 @@ async def add_sub(bot: Bot, event: GroupMessageEvent, state: T_State):
         checker.add_sub(gid, url, remark=remark, creator_id=uid)
         await bot.send(event, f"成功订阅{remark}")
     except Exception as e:
-        await sv.logger.error(e)
+        sv.logger.error(e)
         await bot.send(event, f"error: {e}")
 
 for cmd, checker in cmds.items():

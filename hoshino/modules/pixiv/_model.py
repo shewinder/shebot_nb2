@@ -2,7 +2,6 @@ from typing import Optional, List, Any
 from datetime import datetime
 from pydantic import BaseModel
 
-
 class ImageUrls(BaseModel):
     large: Optional[str] = None
     medium: Optional[str] = None
