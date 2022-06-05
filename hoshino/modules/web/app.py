@@ -6,11 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request, Response
 
-# from .routers.config import router as config_router
-from hoshino.modules.web.routers.login import router as login_router
-from hoshino.modules.web.routers.bot_manage import router as bot_manage_router
-from hoshino.modules.web.routers.custom_reply import router as custom_reply_router
-from hoshino.modules.web.routers.infopush_api import router as infopush_router
+from .routers.custom_reply import router as custom_reply_router
+from .routers.infopush_api import router as infopush_router
+from .routers.bot_manage import router as bot_manage_router
+from .routers.login import router as login_router
 
 app: FastAPI = nonebot.get_app()
 
@@ -19,10 +18,11 @@ app.include_router(bot_manage_router)
 app.include_router(custom_reply_router)
 app.include_router(infopush_router)
 
-@app.middleware('http')
+
+@app.middleware("http")
 async def _(req: Request, call_next: Callable):
-    path = req.scope['path']
-    if path == '/login': # 访问登录  路由不拦截
+    path = req.scope["path"]
+    if path == "/login":  # 访问登录  路由不拦截
         resp = await call_next(req)
         return resp
     else:
@@ -35,6 +35,7 @@ async def _(req: Request, call_next: Callable):
         #     return Response(status_code=401, content='wrong token or token expired')
         resp = await call_next(req)
         return resp
+
 
 # origins = [
 #     "http://localhost",

@@ -8,7 +8,11 @@ from typing import List
 from hoshino import add_job
 from hoshino.log import logger
 
-from ._model import BaseInfoChecker, Subscribe, get_sub_data
+from hoshino.modules.infopush._model import BaseInfoChecker, Subscribe, get_sub_data, refresh_subdata, _sub_data
+
+# init data
+refresh_subdata()
+
 
 checker_dir = pathlib.Path(__file__).parent.joinpath('checkers')
 
@@ -28,6 +32,7 @@ checker_groups = groupby(sorted(checkers, key=lambda x: getattr(x, 'seconds')),
                         key=lambda x: getattr(x, 'seconds'))
 
 async def check(checkers: List[BaseInfoChecker]):
+    global sub_data
     sub_data = get_sub_data()
     if not sub_data:
         logger.info('当前没有任何订阅')

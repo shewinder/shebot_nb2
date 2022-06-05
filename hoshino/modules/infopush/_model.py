@@ -3,8 +3,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Type, TypeVar, Union
 
-from numpy import record
-from tomlkit import date
 
 from hoshino import Bot, Message, MessageSegment, get_bot_list
 from hoshino.log import logger
@@ -13,9 +11,7 @@ from pydantic import BaseModel
 from ._exception import NetworkException, ProxyException, TimeoutException
 from ._data import SubscribeRecord, query_records
 
-_sub_data: Dict[str, List["Subscribe"]] = defaultdict(
-    list
-)  # {checker_name: [Subscribe ...]}
+from hoshino.glob import _sub_data
 
 
 def get_sub_data() -> Dict[str, List["Subscribe"]]:
@@ -28,7 +24,7 @@ def refresh_subdata():
     刷新内存中的订阅数据
     """
     global _sub_data
-    _sub_data = defaultdict(list)
+    _sub_data.clear()
     subs: List[SubscribeRecord] = query_records()
     _dict: Dict[str, Subscribe] = {}
     for sub in subs:
@@ -36,14 +32,14 @@ def refresh_subdata():
             _dict[sub.url].creator[sub.group].append(sub.creator)
         else:
             _dict[sub.url] = Subscribe(
-                    url=sub.url,
-                    checker=sub.checker,
-                    remark=sub.remark,
-                    date=sub.date,
-                    creator={sub.group: [sub.creator]},
-                )
+                url=sub.url,
+                checker=sub.checker,
+                remark=sub.remark,
+                date=sub.date,
+                creator={sub.group: [sub.creator]},
+            )
     for sub_item in _dict.values():
-            _sub_data[sub_item.checker].append(sub_item)
+        _sub_data[sub_item.checker].append(sub_item)
 
 
 class Subscribe(BaseModel):
@@ -160,7 +156,7 @@ class BaseInfoChecker:
             url=url,
             creator=creator_id,
             remark=remark,
-            date = '',
+            date="",
         )
         refresh_subdata()
 
@@ -208,9 +204,9 @@ class BaseInfoChecker:
         if sub.date != curr_date and data.is_new:
             logger.info(f"检测到{sub.remark}更新")
             sub.date = curr_date
-            SubscribeRecord.select().where(SubscribeRecord.url == sub.url).update(
-                date=curr_date
-            )
+            SubscribeRecord.update(date=curr_date).where(
+                SubscribeRecord.url == sub.url
+            ).execute()
             refresh_subdata()
             return True, data
         else:
