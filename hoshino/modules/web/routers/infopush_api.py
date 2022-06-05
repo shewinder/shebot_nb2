@@ -3,8 +3,7 @@ from typing import List
 from fastapi import APIRouter
 from pydantic import BaseModel
 from hoshino.modules.infopush._data import SubscribeRecord
-from hoshino.modules.infopush._model import Subscribe, refresh_subdata
-
+from hoshino.modules.infopush._model import refresh_subdata, get_sub_data, _sub_data
 
 def sub_to_dict(sub: SubscribeRecord) -> dict:
     return {
@@ -14,6 +13,7 @@ def sub_to_dict(sub: SubscribeRecord) -> dict:
         "date": sub.date,
         "creator": sub.creator,
         "group": sub.group,
+        "id": sub.id,
     }
 
 
@@ -37,30 +37,42 @@ async def list_user_subscribe(user_id: str) -> List[dict]:
     }
 
 
-class DeleteItem(BaseModel):
-    url: str
-    group: str
-    creator: str
-
-
 class DeleteForm(BaseModel):
-    items: List[DeleteItem]
+    ids: List[int]
 
-
-@router.post("/delete")
-async def batch_delete(form: DeleteForm):
+@router.post("/delete_by_ids")
+async def delete_by_ids(form: DeleteForm):
     cnt = 0
-    for item in form.items:
-        try:
-            SubscribeRecord.delete().where(
-                SubscribeRecord.url == item.url,
-                SubscribeRecord.group == item.group,
-                SubscribeRecord.creator == item.creator,
-            ).execute()
-            cnt += 1
-        except:
-            raise
-    return {"status": f"{cnt} items deleted"}
+    for id_ in form.ids:
+        SubscribeRecord.delete_by_id(id_)
+        cnt = cnt + 1
+    refresh_subdata()
+    return {"status": 200, "data": f"{cnt} items deleted"}
+
+# @router.post("/delete")
+# async def batch_delete(form: DeleteForm):
+#     cnt = 0
+#     for item in form.item:
+#         try:
+#             SubscribeRecord.delete().where(
+#                 SubscribeRecord.id == item.id,
+#             ).execute()
+#             cnt = cnt + 1
+#         except:
+#             raise
+
+
+#     for item in form.items:
+#         try:
+#             SubscribeRecord.delete().where(
+#                 SubscribeRecord.url == item.url,
+#                 SubscribeRecord.group == item.group,
+#                 SubscribeRecord.creator == item.creator,
+#             ).execute()
+#             cnt = cnt + 1
+#         except:
+#             raise
+#     return {"status": f"{cnt} items deleted"}
 
 
 class AddItem(BaseModel):
