@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 sv = Service("setu_search")
 
-search_with_author = sv.on_regex(r"^来点(.{0,40})$", only_group=False)
+search_with_author = sv.on_regex(r"^来点(.{1,40})$", only_group=False)
 
 max_once = 3
 
