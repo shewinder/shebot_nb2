@@ -52,7 +52,7 @@ class Subscribe(BaseModel):
     creator: defaultdict  # {group_id: [user_id, ...]}
 
     def delete(self):
-        SubscribeRecord.select().where(SubscribeRecord.url == self.url).delete()
+        SubscribeRecord.delete().where(SubscribeRecord.url == self.url).execute()
         refresh_subdata()
 
     # def save(self):
