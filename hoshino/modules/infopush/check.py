@@ -8,8 +8,7 @@ from typing import List
 from hoshino import add_job
 from hoshino.log import logger
 
-from hoshino.modules.infopush._model import BaseInfoChecker, Subscribe, get_sub_data, refresh_subdata, _sub_data
-
+from hoshino.modules.infopush._model import BaseInfoChecker, Subscribe, get_sub_data, refresh_subdata
 # init data
 refresh_subdata()
 
