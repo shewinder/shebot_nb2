@@ -18,10 +18,8 @@ def get_name_from_uid(uid: str) -> str:
 
 
 class Dynamic(InfoData):
-    pass
+    uname: str
 
-
-@checker
 class BiliDynamicChecker(BaseInfoChecker):
     seconds: int = 60
     name: str = "Bilibili动态"
@@ -60,6 +58,7 @@ class BiliDynamicChecker(BaseInfoChecker):
                         dyc.portal = (
                             f'https://space.bilibili.com/{data["desc"]["uid"]}/dynamic'
                         )
+                        dyc.uname = data['desc']['user_profile']['info']['uname']
                         return dyc
                     else:
                         logger.warning(f"访问{url}失败，status： {resp.status}")
@@ -74,5 +73,6 @@ class BiliDynamicChecker(BaseInfoChecker):
 
     @classmethod
     def form_remark(cls, data: Dynamic, distinguisher: str) -> str:
-        name = get_name_from_uid(distinguisher)
-        return f"{name}B站动态"
+        return data.uname
+
+BiliDynamicChecker()
