@@ -73,6 +73,6 @@ class BiliDynamicChecker(BaseInfoChecker):
 
     @classmethod
     def form_remark(cls, data: Dynamic, distinguisher: str) -> str:
-        return data.uname
+        return f'{data.uname}B站动态'
 
 BiliDynamicChecker()
