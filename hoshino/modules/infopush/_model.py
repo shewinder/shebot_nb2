@@ -3,15 +3,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Type, TypeVar, Union
 
-
 from hoshino import Bot, Message, MessageSegment, get_bot_list
+from hoshino.glob import _checkers, _sub_data
 from hoshino.log import logger
 from pydantic import BaseModel
 
-from ._exception import NetworkException, ProxyException, TimeoutException
 from ._data import SubscribeRecord, query_records
-
-from hoshino.glob import _sub_data
+from ._exception import NetworkException, ProxyException, TimeoutException
 
 
 def get_sub_data() -> Dict[str, List["Subscribe"]]:
@@ -42,6 +40,8 @@ def refresh_subdata():
             )
     for sub_item in _dict.values():
         _sub_data[sub_item.checker].append(sub_item)
+    
+    print(_sub_data)
 
 
 class Subscribe(BaseModel):
@@ -54,6 +54,7 @@ class Subscribe(BaseModel):
     def delete(self):
         SubscribeRecord.delete().where(SubscribeRecord.url == self.url).execute()
         refresh_subdata()
+
 
 def get_creators() -> Dict[str, List[str]]:
     creators = defaultdict(list)
@@ -72,8 +73,6 @@ class InfoData:
     portal: str = ""
     is_new: bool = True  # 用于手动指定消息是否为新消息
 
-
-from hoshino.glob import _checkers
 
 class BaseInfoChecker:
     """
@@ -113,19 +112,6 @@ class BaseInfoChecker:
                 subs,
             )
         )
-
-    @classmethod
-    def delete_creator_sub(
-        cls, group_id: int, creator_id: Union[int, str], sub: Subscribe
-    ):
-        group_id = str(group_id)
-        creator_id = str(creator_id)
-        if group_id in sub.creator and creator_id in sub.creator[group_id]:
-            sub.creator[group_id].remove(creator_id)
-            if len(sub.creator[group_id]) == 0:
-                del sub.creator[group_id]
-            if len(sub.creator) == 0:
-                get_sub_data().get(cls.__name__).remove(sub)
 
     @classmethod
     def add_sub(

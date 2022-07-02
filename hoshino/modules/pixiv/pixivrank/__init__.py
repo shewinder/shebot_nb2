@@ -58,12 +58,12 @@ async def send_rank(sv: Service, pics: List[RankPic]):
 
     # Create a new image with the size of the first image.
     width = 1800
-    height = 3000
     header = 200
+    height = 3000 + header
     canvas = Image.new("RGB", (width, height), color=(250, 250, 250))
     font = ImageFont.truetype(font_dir.joinpath("msyh.ttf").as_posix(), 100)
     draw = ImageDraw.Draw(canvas)
-    tip = "发送pr<n>获取原图" if sv.name == 'Pixiv日榜' else "发送prr<n>获取原图"
+    tip = "发送pr<n>获取原图, 例pr3" if sv.name == 'Pixiv日榜' else "发送prr<n>获取原图,例prr3"
     w, h = font.getsize(tip)
     draw.text((int((width - w) / 2), (int((header - h) / 2))), tip, fill='black', font=font)
     for i, im in enumerate(imgs):
