@@ -4,20 +4,27 @@ from io import BytesIO
 from typing import List
 
 import aiohttp
-
-from hoshino import Bot, Service, event, get_bot_list, scheduled_job, sucmd
+from hoshino import (
+    Bot,
+    MessageSegment,
+    Service,
+    event,
+    font_dir,
+    get_bot_list,
+    scheduled_job,
+    sucmd,
+)
 from hoshino.sres import Res as R
 from hoshino.typing import GroupMessageEvent
 from hoshino.util import aiohttpx
 from hoshino.util.message_util import send_group_forward_msg
 from hoshino.util.pixiv import PixivIllust
-from hoshino.util.sutil import anti_harmony, get_service_groups, get_img_from_url
-from hoshino import MessageSegment
+from hoshino.util.sutil import anti_harmony, get_img_from_url, get_service_groups
+from PIL import Image, ImageFont, ImageDraw
 
+from .config import Config
 from .data_source import RankPic, filter_rank, get_rank, get_rankpic
 from .score import score_data
-from .config import Config
-from PIL import Image
 
 help_ = """
 启用后会每天固定推送Pixiv日榜
@@ -36,52 +43,6 @@ def update_last_3_days(pics: List[RankPic]):
     score_data.last_three_days.append([p.pid for p in pics])
 
 
-# async def send_rank(sv: Service, pics: List[RankPic]):
-#     bot: Bot = get_bot_list()[0]
-#     gids = await get_service_groups(sv_name=sv.name)
-#     msgs = []
-#     for pic in pics:
-#         msgs.append(
-#             MessageSegment.text(
-#                 f"{pic.pid}: {pic.page_count}\n{pic.author}\n{pic.author_id}"
-#             )
-#         )
-#         if pic.page_count == 1:
-#             try:
-#                 sv.logger.info(f"downloading {pic.url}")
-#                 msgs.append(
-#                     await R.image_from_url(
-#                         pic.url.replace("i.pximg.net", "pixiv.shewinder.win"),
-#                         anti_harmony=False,
-#                     )
-#                 )
-#             except:
-#                 pass
-#         else:
-#             nest_msgs = []
-#             for url in pic.urls:
-#                 try:
-#                     sv.logger.info(f"downloading {url}")
-#                     nest_msgs.append(
-#                         await R.image_from_url(
-#                             url.replace("i.pximg.net", "pixiv.shewinder.win"),
-#                             anti_harmony=False,
-#                         )
-#                     )
-#                 except:
-#                     pass
-#             msgs.append(nest_msgs)
-#     for gid in gids:
-#         try:
-#             await bot.send_group_msg(message=f"今日{sv.name}", group_id=gid)
-#             await send_group_forward_msg(bot, gid, msgs)
-#             sv.logger.info(f"群{gid} 投递成功！")
-#         except Exception as e:
-#             sv.logger.exception(e)
-#             sv.logger.error(type(e))
-#         await asyncio.sleep(30)
-
-
 async def send_rank(sv: Service, pics: List[RankPic]):
     imgs: List[Image.Image] = []
     for pic in pics:
@@ -98,7 +59,13 @@ async def send_rank(sv: Service, pics: List[RankPic]):
     # Create a new image with the size of the first image.
     width = 1800
     height = 3000
+    header = 200
     canvas = Image.new("RGB", (width, height), color=(250, 250, 250))
+    font = ImageFont.truetype(font_dir.joinpath("msyh.ttf").as_posix(), 100)
+    draw = ImageDraw.Draw(canvas)
+    tip = "发送pr<n>获取原图" if sv.name == 'Pixiv日榜' else "发送prr<n>获取原图"
+    w, h = font.getsize(tip)
+    draw.text((int((width - w) / 2), (int((header - h) / 2))), tip, fill='black', font=font)
     for i, im in enumerate(imgs):
         row, col = divmod(i, 3)
         if im.height > im.width:  # 竖向图
@@ -109,13 +76,14 @@ async def send_rank(sv: Service, pics: List[RankPic]):
             im = im.resize((int(600 / im.height * im.width), 600))
             margin = int((im.width - 600) / 2)
             im = im.crop(box=(margin, 0, im.height + margin, im.height))
-        canvas.paste(im, (col * 600, row * 600))
+        canvas.paste(im, (col * 600, row * 600 + header))
 
     bot: Bot = get_bot_list()[0]
     gids = await get_service_groups(sv_name=sv.name)
     sv.logger.info("sending pixiv rank")
     for gid in gids:
         try:
+            canvas = anti_harmony(canvas)
             await bot.send_group_msg(group_id=gid, message=R.image_from_memory(canvas))
             sv.logger.info(f"群{gid} 投递成功！")
         except Exception as e:
@@ -127,7 +95,7 @@ async def send_rank(sv: Service, pics: List[RankPic]):
 @scheduled_job("cron", hour=conf.hour, minute=conf.minute, id="pixiv日榜")
 async def pixiv_rank():
     today = datetime.date.today()
-    yesterday = today - datetime.timedelta(days=2)
+    yesterday = today - datetime.timedelta(days=1)
     date = f"{yesterday}"
     sv.logger.info("正在获取日榜")
     pics = await get_rank(date)
@@ -319,7 +287,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
 @scheduled_job("cron", hour=conf.hour, minute=conf.minute + 5, id="pixiv日榜r18")
 async def pixiv_rank():
     today = datetime.date.today()
-    yesterday = today - datetime.timedelta(days=2)
+    yesterday = today - datetime.timedelta(days=1)
     date = f"{yesterday}"
     sv_r18.logger.info("正在下载日榜图片")
     pics = await get_rank(date, "day_r18")

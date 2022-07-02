@@ -3,7 +3,7 @@ import requests
 from hoshino.log import logger
 from hoshino.sres import Res as R
 
-from .._model import BaseInfoChecker, InfoData, Subscribe, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe
 
 
 def get_name_from_uid(uid: str) -> str:
@@ -74,5 +74,3 @@ class BiliDynamicChecker(BaseInfoChecker):
     @classmethod
     def form_remark(cls, data: Dynamic, distinguisher: str) -> str:
         return f'{data.uname}B站动态'
-
-BiliDynamicChecker()

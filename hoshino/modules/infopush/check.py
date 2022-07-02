@@ -9,23 +9,44 @@ from hoshino import add_job
 from hoshino.log import logger
 
 from hoshino.modules.infopush._model import BaseInfoChecker, Subscribe, get_sub_data, refresh_subdata
+from hoshino.glob import _checkers
+
 # init data
 refresh_subdata()
 
 
 checker_dir = pathlib.Path(__file__).parent.joinpath('checkers')
 
-for module_name in os.listdir(checker_dir):
-    try:
-        if module_name.startswith('__'): # 排除__pycache__
-            continue
-        if not module_name.endswith('.py'):
-            continue
-        m = importlib.import_module(f'hoshino.modules.infopush.checkers.{module_name.rstrip(".py")}')
-    except:
-        logger.error(f'error occured when importing {module_name}')
+# for module_name in os.listdir(checker_dir):
+#     try:
+#         if module_name.startswith('__'): # 排除__pycache__
+#             continue
+#         if not module_name.endswith('.py'):
+#             continue
+#         m = importlib.import_module(f'hoshino.modules.infopush.checkers.{module_name.rstrip(".py")}')
+#     except:
+#         logger.error(f'error occured when importing {module_name}')
 
-checkers = BaseInfoChecker.get_all_checkers()
+from hoshino.modules.infopush.checkers.bilidynamic import BiliDynamicChecker
+from hoshino.modules.infopush.checkers.bililive import BiliLiveChecker
+from hoshino.modules.infopush.checkers.bilivideo import BiliVideoChecker
+from hoshino.modules.infopush.checkers.douyulive import DouyuLiveChecker
+from hoshino.modules.infopush.checkers.pixivuser import PixivUserChecker
+from hoshino.modules.infopush.checkers.weibo import WeiboChecker
+from hoshino.modules.infopush.checkers.twitter import TwitterChecker
+
+_checkers.extend([
+    BiliDynamicChecker,
+    BiliLiveChecker,
+    BiliVideoChecker,
+    DouyuLiveChecker,
+    PixivUserChecker,
+    WeiboChecker,
+    TwitterChecker,
+])
+
+checkers = _checkers
+
 print("test info", checkers)
 checker_groups = groupby(sorted(checkers, key=lambda x: getattr(x, 'seconds')), 
                         key=lambda x: getattr(x, 'seconds'))

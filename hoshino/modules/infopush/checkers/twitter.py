@@ -2,10 +2,9 @@ import aiohttp
 from hoshino.sres import Res as R
 from hoshino.message import Message
 
-from .._model import BaseInfoChecker, Subscribe, checker
+from .._model import BaseInfoChecker, Subscribe
 from .._rss import RSS, RSSData
 
-@checker
 class TwitterChecker(BaseInfoChecker):
     seconds: int = 300
     name: str = '推特'

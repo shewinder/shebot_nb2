@@ -2,13 +2,11 @@ import aiohttp
 from hoshino.sres import Res as R
 from hoshino import Message
 from .._config import Config
-from .._model import BaseInfoChecker, Subscribe, checker
+from .._model import BaseInfoChecker, Subscribe
 from .._rss import RSS, RSSData
 
 conf: Config.get_instance("infopush")
 
-
-@checker
 class WeiboChecker(BaseInfoChecker):
     seconds: int = 120
     name: str = "微博"

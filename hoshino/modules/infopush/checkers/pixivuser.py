@@ -4,7 +4,7 @@ from hoshino import MessageSegment, Message
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, Subscribe, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe
 
 
 class PixivData(InfoData):
@@ -12,8 +12,6 @@ class PixivData(InfoData):
     user_name: str
     urls: List[str]
 
-
-@checker
 class PixivUserChecker(BaseInfoChecker):
     seconds: int = 300
     name: str = "Pixiv投稿"

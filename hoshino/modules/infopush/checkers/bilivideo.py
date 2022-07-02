@@ -3,7 +3,7 @@ from hoshino import MessageSegment
 
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from .._model import BaseInfoChecker, InfoData, Subscribe, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe
 
 class Video(InfoData):
     title: str
@@ -13,7 +13,6 @@ class Video(InfoData):
     UID: str
     BV: str
 
-@checker
 class BiliVideoChecker(BaseInfoChecker):
 
     seconds: int = 120

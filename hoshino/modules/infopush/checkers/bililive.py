@@ -6,7 +6,7 @@ from hoshino import MessageSegment
 
 from .._config import Config
 from .._exception import ProxyException, TimeoutException, NetworkException
-from .._model import BaseInfoChecker, InfoData, Subscribe, checker
+from .._model import BaseInfoChecker, InfoData, Subscribe
 
 conf: Config.get_instance('infopush')
 
@@ -33,8 +33,6 @@ class Live(InfoData):
     title: str
     cover: str
 
-
-@checker
 class BiliLiveChecker(BaseInfoChecker):
     seconds: int = 5
     name: str = 'Bilibili直播'

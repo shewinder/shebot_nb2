@@ -9,3 +9,5 @@ from collections import defaultdict
 _sub_data = defaultdict(
     list
 )  # {checker_name: [Subscribe ...]}
+
+_checkers = []

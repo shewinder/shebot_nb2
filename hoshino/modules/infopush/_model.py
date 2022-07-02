@@ -55,15 +55,6 @@ class Subscribe(BaseModel):
         SubscribeRecord.delete().where(SubscribeRecord.url == self.url).execute()
         refresh_subdata()
 
-    # def save(self):
-    #     global sub_data
-    #     if self in get_sub_data().get(self.checker, []):
-    #         sub_data.save_to_file()
-    #     else:
-    #         get_sub_data()[self.checker].append(self)
-    #         sub_data.save_to_file()
-
-
 def get_creators() -> Dict[str, List[str]]:
     creators = defaultdict(list)
     for sub in get_sub_data():
@@ -82,8 +73,7 @@ class InfoData:
     is_new: bool = True  # 用于手动指定消息是否为新消息
 
 
-_checkers: List[Type["BaseInfoChecker"]] = []
-
+from hoshino.glob import _checkers
 
 class BaseInfoChecker:
     """
@@ -99,13 +89,6 @@ class BaseInfoChecker:
     @classmethod
     def get_all_checkers(cls) -> List["BaseInfoChecker"]:
         return _checkers
-
-    @staticmethod
-    def get_checker(name: str) -> "BaseInfoChecker":
-        for checker in _checkers:
-            if checker.__name__ == name:
-                return checker
-        raise ValueError(f"{name} not exist")
 
     @classmethod
     def get_subscribe(cls, url: str) -> Subscribe:
@@ -232,11 +215,3 @@ class BaseInfoChecker:
         根据data生成remark, checker应实现此方法
         """
         raise NotImplementedError
-
-
-def checker(cls):
-    """
-    装饰器，将Checker添加至_checker全局变量
-    """
-    _checkers.append(cls)
-    return cls
