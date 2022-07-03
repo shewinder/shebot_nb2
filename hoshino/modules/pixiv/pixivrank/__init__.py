@@ -20,6 +20,7 @@ from hoshino.util import aiohttpx
 from hoshino.util.message_util import send_group_forward_msg
 from hoshino.util.pixiv import PixivIllust
 from hoshino.util.sutil import anti_harmony, get_img_from_url, get_service_groups
+from hoshino.util.handle_msg import handle_msg
 from PIL import Image, ImageFont, ImageDraw
 
 from .config import Config
@@ -63,9 +64,11 @@ async def send_rank(sv: Service, pics: List[RankPic]):
     canvas = Image.new("RGB", (width, height), color=(250, 250, 250))
     font = ImageFont.truetype(font_dir.joinpath("msyh.ttf").as_posix(), 100)
     draw = ImageDraw.Draw(canvas)
-    tip = "发送pr<n>获取原图, 例pr3" if sv.name == 'Pixiv日榜' else "发送prr<n>获取原图,例prr3"
+    tip = "发送pr<n>获取原图, 例pr3" if sv.name == "Pixiv日榜" else "发送prr<n>获取原图,例prr3"
     w, h = font.getsize(tip)
-    draw.text((int((width - w) / 2), (int((header - h) / 2))), tip, fill='black', font=font)
+    draw.text(
+        (int((width - w) / 2), (int((header - h) / 2))), tip, fill="black", font=font
+    )
     for i, im in enumerate(imgs):
         row, col = divmod(i, 3)
         if im.height > im.width:  # 竖向图
@@ -126,73 +129,9 @@ async def _(bot: Bot, event: GroupMessageEvent):
         await bot.send(event, "日榜未更新")
         return
     p = _today_rank[idx]
-    try:
-        int(p)
-    except:
-        await bot.send(event, "invalid pid")
-        return
 
-    # 获取illust信息
-    resp = await aiohttpx.get(
-        f"https://api.shewinder.win/pixiv/illust_detail/", params={"illust_id": p}
-    )
-    illust_json = resp.json
-    if illust_json.get("error"):
-        await bot.send(event, illust_json["error"]["user_message"])
-        return
-    illust = PixivIllust(**illust_json)
-
-    # 获取普通图片
-    await bot.send(event, "正在下载")
-
-    urls = illust.urls
-    if len(urls) > 10:
-        await bot.send(event, f"该pid包含{len(urls)}张，只发送前10张")
-        urls = urls[:10]
-    pics = []
-
-    async def download_pic(session: aiohttp.ClientSession, url):
-        sv.logger.info(f"正在下载{url}")
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise Exception(f"{url} 下载失败")
-            content = await resp.read()
-            sv.logger.info(f"{url}下载完成")
-            img = Image.open(BytesIO(content))
-            img = img.convert("RGB")
-            img = anti_harmony(img)  # 转发消息试试不反和谐
-            out = BytesIO()
-            img.save(out, format="png")
-            return out.getvalue()
-
-    async with aiohttp.ClientSession() as session:
-        for url in urls:
-            url = url.replace("i.pximg.net", "pixiv.shewinder.win")
-            try:
-                picbytes = await download_pic(session, url)
-                pics.append(picbytes)
-            except Exception as e:
-                await bot.send(event, f"download {url} failed  {e}")
-                sv.logger.exception(e)
-                await bot.send(event, f"{url} 下载失败")
-                continue
-        reply = [
-            f"标题：{illust.title}",
-            f"作者：{illust.user.name}",
-            f"作者id：{illust.user.id}",
-        ]
-        msgs = [MessageSegment.text("\n".join(reply))]
-        msgs.append(
-            MessageSegment.text(
-                "标签： "
-                + ",".join(
-                    [tag.translated_name for tag in illust.tags if tag.translated_name]
-                )
-            )
-        )
-        for pic in pics:
-            msgs.append(R.image_from_memory(pic))
-        await send_group_forward_msg(bot, event.group_id, msgs)
+    # call pid xxx
+    await handle_msg(bot, event, f"pid {p}")
 
 
 sv_r18 = Service("Pixiv日榜R18", enable_on_default=False, visible=False)
@@ -215,73 +154,8 @@ async def _(bot: Bot, event: GroupMessageEvent):
         await bot.send(event, "日榜未更新")
         return
     p = _today_rank_r18[idx]
-    try:
-        int(p)
-    except:
-        await bot.send(event, "invalid pid")
-        return
 
-    # 获取illust信息
-    resp = await aiohttpx.get(
-        f"https://api.shewinder.win/pixiv/illust_detail/", params={"illust_id": p}
-    )
-    illust_json = resp.json
-    if illust_json.get("error"):
-        await bot.send(event, illust_json["error"]["user_message"])
-        return
-    illust = PixivIllust(**illust_json)
-
-    # 获取普通图片
-    await bot.send(event, "正在下载")
-
-    urls = illust.urls
-    if len(urls) > 10:
-        await bot.send(event, f"该pid包含{len(urls)}张，只发送前10张")
-        urls = urls[:10]
-    pics = []
-
-    async def download_pic(session: aiohttp.ClientSession, url):
-        sv.logger.info(f"正在下载{url}")
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise Exception(f"{url} 下载失败")
-            content = await resp.read()
-            sv.logger.info(f"{url}下载完成")
-            img = Image.open(BytesIO(content))
-            img = img.convert("RGB")
-            img = anti_harmony(img)  # 转发消息试试不反和谐
-            out = BytesIO()
-            img.save(out, format="png")
-            return out.getvalue()
-
-    async with aiohttp.ClientSession() as session:
-        for url in urls:
-            url = url.replace("i.pximg.net", "pixiv.shewinder.win")
-            try:
-                picbytes = await download_pic(session, url)
-                pics.append(picbytes)
-            except Exception as e:
-                await bot.send(event, f"download {url} failed  {e}")
-                sv.logger.exception(e)
-                await bot.send(event, f"{url} 下载失败")
-                continue
-        reply = [
-            f"标题：{illust.title}",
-            f"作者：{illust.user.name}",
-            f"作者id：{illust.user.id}",
-        ]
-        msgs = [MessageSegment.text("\n".join(reply))]
-        msgs.append(
-            MessageSegment.text(
-                "标签： "
-                + ",".join(
-                    [tag.translated_name for tag in illust.tags if tag.translated_name]
-                )
-            )
-        )
-        for pic in pics:
-            msgs.append(R.image_from_memory(pic))
-        await send_group_forward_msg(bot, event.group_id, msgs)
+    await handle_msg(bot, event, f"pid {p}")
 
 
 @scheduled_job("cron", hour=conf.hour, minute=conf.minute + 5, id="pixiv日榜r18")

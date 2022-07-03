@@ -6,6 +6,7 @@ LastEditTime: 2021-02-02 23:48:55
 Description: 
 Github: http://github.com/AkiraXie/
 '''
+
 from hoshino.matcher import get_matchers
 from hoshino.event import Event, get_event
 from hoshino import Bot, get_bot_list, sucmd, MessageSegment, Message
@@ -13,6 +14,7 @@ test1 = sucmd('testgetbot', True)
 test2 = sucmd('testmatchers', True)
 test3 = sucmd('testevent', True)
 test4 = sucmd('testnode', True)
+test5 = sucmd('handle', True)
 
 
 @test1.handle()
@@ -39,3 +41,9 @@ async def _(bot: Bot, event: Event):
     await send_group_forward_msg(bot, event.group_id, msgs1)
     # await send_group_forward_msg(bot, event.group_id, msgs2)
     # await send_group_forward_msg(bot, event.group_id, msgs3)
+
+@test5.handle()
+async def _(bot: Bot, event: Event):
+    from nonebot.message import handle_event
+    print('==========================', event)
+    await handle_event(bot, event)
