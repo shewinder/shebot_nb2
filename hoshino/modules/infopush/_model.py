@@ -41,9 +41,6 @@ def refresh_subdata():
     for sub_item in _dict.values():
         _sub_data[sub_item.checker].append(sub_item)
     
-    print(_sub_data)
-
-
 class Subscribe(BaseModel):
     checker: str
     remark: str

@@ -47,7 +47,6 @@ _checkers.extend([
 
 checkers = _checkers
 
-print("test info", checkers)
 checker_groups = groupby(sorted(checkers, key=lambda x: getattr(x, 'seconds')), 
                         key=lambda x: getattr(x, 'seconds'))
 

@@ -19,6 +19,7 @@ def get_name_from_uid(uid: str) -> str:
 
 class Dynamic(InfoData):
     uname: str
+    link: str
 
 class BiliDynamicChecker(BaseInfoChecker):
     seconds: int = 60
@@ -27,13 +28,13 @@ class BiliDynamicChecker(BaseInfoChecker):
 
     @classmethod
     async def notice_format(cls, sub: Subscribe, data: Dynamic):
-        params = {"url": data.portal}
+        params = {"url": data.link}
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 "https://api.shewinder.win/screenshot/bilibili", params=params
             ) as resp:
                 img = await resp.read()
-        return f"{sub.remark}更新了！" + R.image_from_memory(img) + f"{data.portal}"
+        return f"{sub.remark}更新了！" + R.image_from_memory(img) + f"{data.link}"
 
     @classmethod
     async def get_data(cls, url: str) -> Dynamic:
@@ -59,6 +60,7 @@ class BiliDynamicChecker(BaseInfoChecker):
                             f'https://space.bilibili.com/{data["desc"]["uid"]}/dynamic'
                         )
                         dyc.uname = data['desc']['user_profile']['info']['uname']
+                        dyc.link = f'https://t.bilibili.com/{data["desc"]["dynamic_id"]}'
                         return dyc
                     else:
                         logger.warning(f"访问{url}失败，status： {resp.status}")
