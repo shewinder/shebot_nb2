@@ -44,7 +44,7 @@ def update_last_3_days(pics: List[RankPic]):
     score_data.last_three_days.append([p.pid for p in pics])
 
 
-async def send_rank(sv: Service, pics: List[RankPic]):
+async def generate_preview(sv: Service, pics: List[RankPic]) -> Image.Image:
     imgs: List[Image.Image] = []
     for pic in pics:
         try:
@@ -80,7 +80,11 @@ async def send_rank(sv: Service, pics: List[RankPic]):
             margin = int((im.width - 600) / 2)
             im = im.crop(box=(margin, 0, im.height + margin, im.height))
         canvas.paste(im, (col * 600, row * 600 + header))
+    return canvas
 
+
+async def send_rank(sv: Service, pics: List[RankPic]):
+    canvas = await generate_preview(sv, pics)
     bot: Bot = get_bot_list()[0]
     gids = await get_service_groups(sv_name=sv.name)
     sv.logger.info("sending pixiv rank")
@@ -91,7 +95,6 @@ async def send_rank(sv: Service, pics: List[RankPic]):
             sv.logger.info(f"群{gid} 投递成功！")
         except Exception as e:
             sv.logger.exception(e)
-            sv.logger.error(type(e))
         await asyncio.sleep(30)
 
 

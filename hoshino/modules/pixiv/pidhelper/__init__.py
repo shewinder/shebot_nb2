@@ -15,7 +15,7 @@ from .._model import PixivIllust
 from .ugoira import get_ugoira_gif
 
 help_ = """
-[pid90173025] 发送pixiv对应pid的图片，超过10张只发前10张
+[pid90173025] 发送pixiv对应pid的图片,超过10张只发前10张
 如果图片是动图会自动转为gif发送
 """.strip()
 
@@ -44,7 +44,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
 
     # 处理动图
     if illust.type == "ugoira":
-        await bot.send(event, "该图片是动图，转为gif发送")
+        await bot.send(event, "该图片是动图,转为gif发送")
         sv.logger.info("processing gif")
         gif_bytes = await get_ugoira_gif(p)
         sv.logger.info("gif process finished")
@@ -59,7 +59,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
 
     urls = illust.urls
     if len(urls) > 10:
-        await bot.send(event, f"该pid包含{len(urls)}张，只发送前10张")
+        await bot.send(event, f"该pid包含{len(urls)}张,只发送前10张")
         urls = urls[:10]
     pics = []
     async with aiohttp.ClientSession() as session:
@@ -74,14 +74,15 @@ async def _(bot: Bot, event: GroupMessageEvent):
                 await bot.send(event, f"{url} 下载失败")
                 continue
         reply = [
-            f"标题：{illust.title}",
-            f"作者：{illust.user.name}",
-            f"作者id：{illust.user.id}",
+            f"pid:{illust.id}",
+            f"标题:{illust.title}",
+            f"作者:{illust.user.name}",
+            f"作者id:{illust.user.id}",
         ]
         msgs = [MessageSegment.text("\n".join(reply))]
         msgs.append(
             MessageSegment.text(
-                "标签： "
+                "标签: "
                 + ",".join(
                     [tag.translated_name for tag in illust.tags if tag.translated_name]
                 )
@@ -101,7 +102,7 @@ async def download_pic(session: aiohttp.ClientSession, url):
         logger.info(f"{url}下载完成")
         img = Image.open(BytesIO(content))
         img = img.convert("RGB")
-        img = anti_harmony(img)  # 转发消息试试不反和谐
+        img = anti_harmony(img)
         out = BytesIO()
         img.save(out, format="png")
         return out.getvalue()

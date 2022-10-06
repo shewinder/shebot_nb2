@@ -102,20 +102,20 @@ async def send_setu(bot: Bot, event: GroupMessageEvent, state: T_State):
         await bot.send(event, f"没有找到关键字为{keyword}的色图")
         return
 
-    # msgs = [MessageSegment.text(f'关键字: {keyword} 命中tag: {",".join(hit_tags)}')]
-    # for setu in setus:
-    #     anti_harmony = True if setu.r18 else False
-    #     try:
-    #         sv.logger.info(f"downloading {setu.url}")
-    #         msgs.append(
-    #             await R.image_from_url(setu.url, anti_harmony=anti_harmony, timeout=30)
-    #         )
-    #         sv.logger.info(f"download finished")
-    #     except Exception as e:
-    #         sv.logger.error(f"{setu.url} url error: {e}")
-    # sv.logger.info(f"sending group forward msg...")
-    # await send_group_forward_msg(bot, event.group_id, msgs)
-    setu = random.choice(setus)
-    anti_harmony = True if setu.r18 else False
-    pic = await R.image_from_url(setu.url, anti_harmony=anti_harmony, timeout=30)
-    await bot.send(event, pic)
+    msgs = [MessageSegment.text(f'关键字: {keyword} 命中tag: {",".join(hit_tags)}')]
+    for setu in setus:
+        anti_harmony = True # if setu.r18 else False
+        try:
+            sv.logger.info(f"downloading {setu.url}")
+            msgs.append(
+                await R.image_from_url(setu.url, anti_harmony=anti_harmony, timeout=30)
+            )
+            sv.logger.info(f"download finished")
+        except Exception as e:
+            sv.logger.error(f"{setu.url} url error: {e}")
+    sv.logger.info(f"sending group forward msg...")
+    await send_group_forward_msg(bot, event.group_id, msgs)
+    # setu = random.choice(setus)
+    # anti_harmony = True if setu.r18 else False
+    # pic = await R.image_from_url(setu.url, anti_harmony=anti_harmony, timeout=30)
+    # await bot.send(event, pic)

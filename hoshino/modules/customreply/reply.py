@@ -15,7 +15,7 @@ from ._data import (
     KeywordConflictException,
     NotFoundException,
 )
-from ._handler import BaseHandler, chain
+from ._handler import BaseHandler, chain, fullmatch, rex, keyword
 
 sv = Service("自定义回复", visible=False)
 custom = sv.on_message()
