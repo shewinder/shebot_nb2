@@ -26,7 +26,7 @@ class FanboxData(InfoData):
 
 
 class FanboxChecker(BaseInfoChecker):
-    seconds: int = 600
+    seconds: int = 10
     name: str = "Pixiv投稿"
     distinguisher_name: str = "用户ID"
 
@@ -125,13 +125,18 @@ class FanboxChecker(BaseInfoChecker):
                 j = await FanboxChecker.get_post(post_id, ck)
                 d: dict = j["body"]
                 if d.get("body"):
+                    headers = {
+                        "Origin": "https://www.fanbox.cc",
+                        "Cookie": f"FANBOXSESSID={ck}",
+                    }
                     logger.info("the post can be accessed")
                     if d["type"] == "image":
                         logger.info("the type is image")
                         for im in d["body"]["images"]:
-                            msg += await R.image_from_url(
-                                im["originalUrl"], anti_harmony=True
-                            )
+                            url = im["originalUrl"]
+                            resp = await aiohttpx.get(url, headers=headers)
+                            pic_bytes = resp.content
+                            msg += R.image_from_memory(pic_bytes)
                     elif d["type"] == "file":
                         logger.info("the type is file")
                         for file in d["body"]["files"]:
