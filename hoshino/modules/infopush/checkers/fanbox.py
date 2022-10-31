@@ -26,7 +26,7 @@ class FanboxData(InfoData):
 
 
 class FanboxChecker(BaseInfoChecker):
-    seconds: int = 10
+    seconds: int = 600
     name: str = "Pixiv投稿"
     distinguisher_name: str = "用户ID"
 
