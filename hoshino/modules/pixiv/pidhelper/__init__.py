@@ -38,7 +38,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     )
     illust_json = resp.json
     if illust_json.get("error"):
-        await bot.send(event, illust_json["error"]["user_message"])
+        await bot.send(event, str(illust_json))
         return
     illust = PixivIllust(**illust_json)
 

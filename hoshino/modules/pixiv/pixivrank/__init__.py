@@ -82,20 +82,59 @@ async def generate_preview(sv: Service, pics: List[RankPic]) -> Image.Image:
         canvas.paste(im, (col * 600, row * 600 + header))
     return canvas
 
+async def generate_forward(sv: Service, pics: List[RankPic]):
+    msgs = []
+    for pic in pics:
+        msgs.append(
+            MessageSegment.text(
+                f"{pic.pid}: {pic.page_count}\n{pic.author}\n{pic.author_id}"
+            )
+        )
+        if pic.page_count == 1:
+            try:
+                sv.logger.info(f"downloading {pic.url}")
+                msgs.append(
+                    await R.image_from_url(
+                        pic.url.replace("i.pximg.net", "pixiv.shewinder.win"),
+                        anti_harmony=True,
+                    )
+                )
+            except:
+                pass
+        else:
+            nest_msgs = []
+            if len(pic.urls) > 5:
+                pic.urls = pic.urls[0 : 5]
+            for url in pic.urls:
+                try:
+                    sv.logger.info(f"downloading {url}")
+                    nest_msgs.append(
+                        await R.image_from_url(
+                            url.replace("i.pximg.net", "pixiv.shewinder.win"),
+                            anti_harmony=True,
+                        )
+                    )
+                except:
+                    pass
+            msgs.append(nest_msgs)
+    return msgs
+
 
 async def send_rank(sv: Service, pics: List[RankPic]):
-    canvas = await generate_preview(sv, pics)
+    preview = await generate_preview(sv, pics)
     bot: Bot = get_bot_list()[0]
     gids = await get_service_groups(sv_name=sv.name)
     sv.logger.info("sending pixiv rank")
+
     for gid in gids:
         try:
-            canvas = anti_harmony(canvas)
-            await bot.send_group_msg(group_id=gid, message=R.image_from_memory(canvas))
+            preview = anti_harmony(preview)
+            await bot.send_group_msg(group_id=gid, message=R.image_from_memory(preview))
+            #await send_group_forward_msg(bot, gid, msgs)
             sv.logger.info(f"群{gid} 投递成功！")
         except Exception as e:
             sv.logger.exception(e)
-        await asyncio.sleep(30)
+        await asyncio.sleep(120)
 
 
 @scheduled_job("cron", hour=conf.hour, minute=conf.minute, id="pixiv日榜")
@@ -161,7 +200,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     await handle_msg(bot, event, f"pid {p}")
 
 
-@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 5, id="pixiv日榜r18")
+@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 15, id="pixiv日榜r18")
 async def pixiv_rank():
     today = datetime.date.today()
     yesterday = today - datetime.timedelta(days=1)

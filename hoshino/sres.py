@@ -143,7 +143,7 @@ class Res:
             data.save(out, format='png')
             data = out.getvalue()
         if not isinstance(data, bytes):
-            raise ValueError('不支持的参数类型')
+            raise ValueError(f'不支持的参数类型 {type(data)}')
         return MessageSegment.image(file=data, cache=False)
 
     @classmethod

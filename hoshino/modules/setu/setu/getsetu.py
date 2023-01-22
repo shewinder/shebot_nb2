@@ -32,7 +32,7 @@ def get_lolicon_setu(r18: int = 0, keyword: str = "", num: int = 1):
 
 async def download_setu(session: aiohttp.ClientSession, setu: Setu):
     url: str = setu.url
-    url = url.replace("https://i.pixiv.cat/", conf.proxy_site)
+    url = url.replace("https://i.pixiv.re/", conf.proxy_site)
     try:
         logger.info(f"正在下载{url}")
         async with session.get(url) as resp:
@@ -47,7 +47,7 @@ async def download_setu(session: aiohttp.ClientSession, setu: Setu):
             img.save(out, format="png")
             setu.picbytes = out.getvalue()
     except Exception as ex:
-        print(ex)
+        logger.exception(ex)
         setu.picbytes = None
     return setu
 

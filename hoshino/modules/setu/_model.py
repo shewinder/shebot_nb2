@@ -70,6 +70,7 @@ class Yande(BaseModel):
 
 def yande_to_setu(yande: Yande) -> Setu:
     st = Setu()
+    st.tags = yande.tags
     st.r18 = 'uncensored' in yande.tags
     st.url = yande.sample_url.replace('files.yande.re', 'files.shewinder.win')
     # st.url = yande.jpeg_url.replace('files.yande.re', 'files.shewinder.win')
