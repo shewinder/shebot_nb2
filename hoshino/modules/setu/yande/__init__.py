@@ -23,7 +23,6 @@ max_once = 2
 
 @search_with_author.handle()
 async def send_setu(bot: Bot, event: MessageEvent, state: T_State):
-    await bot.send(event, "正在搜索...")
     match: re.Match = state["match"]
     tag_expr: str = match.group(1)
     tag_expr = tag_expr.replace("yande", "")
@@ -68,7 +67,7 @@ async def send_setu(bot: Bot, event: MessageEvent, state: T_State):
     if len(setus) > max_once:
         setus = random.sample(setus, max_once)
 
-    await bot.send(event, MessageSegment.text(f'hit tag: {",".join(hit_tags)}'))
+    await bot.send(event, f'search tag: {",".join(hit_tags)}')
     msgs = []
     for setu in setus:
         try:

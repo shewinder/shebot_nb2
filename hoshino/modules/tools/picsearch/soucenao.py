@@ -86,8 +86,7 @@ class SoucenaoResult(BaseModel):
 
 
 async def pixiv_format(r: SoucenaoResult):
-    img = await get_img_from_url(r.header.thumbnail)
-    img = R.image_from_memory(img)
+    img = await R.image_from_url(r.header.thumbnail, anti_harmony=True)
     return  img \
         +f'相似度 {r.header.similarity}\n' \
         + f'标题: {r.data.title}\n' \
@@ -97,8 +96,7 @@ async def pixiv_format(r: SoucenaoResult):
         + f'链接： {r.data.ext_urls[0]}'
 
 async def twitter_format(r: SoucenaoResult):
-    img = await get_img_from_url(r.header.thumbnail)
-    img = R.image_from_memory(img)
+    img = await R.image_from_url(r.header.thumbnail, anti_harmony=True)
     return  img \
         + f'相似度 {r.header.similarity}\n' \
         + f'tweet_id: {r.data.tweet_id}\n' \
@@ -106,15 +104,14 @@ async def twitter_format(r: SoucenaoResult):
         + f'链接： {r.data.ext_urls[0]}'
 
 async def danbooru_format(r: SoucenaoResult):
-    img = await get_img_from_url(r.header.thumbnail)
-    img = R.image_from_memory(img)
+    img = await R.image_from_url(r.header.thumbnail, anti_harmony=True)
     return  img \
         + f'相似度 {r.header.similarity}\n' \
         + f'链接: {r.data.ext_urls[0]}\n' \
         + f'source: {r.data.source}'
 
 async def ehentai_format(r: SoucenaoResult):
-    img = await R.image_from_url(r.header.thumbnail)
+    img = await R.image_from_url(r.header.thumbnail, anti_harmony=True)
     return  img \
         + f'相似度 {r.header.similarity}\n' \
         + f'source: {r.data.source}\n' \
@@ -122,7 +119,7 @@ async def ehentai_format(r: SoucenaoResult):
         + f'jp_name: {r.data.jp_name}\n' \
 
 async def yande_format(r: SoucenaoResult):
-    img = await R.image_from_url(r.header.thumbnail)
+    img = await R.image_from_url(r.header.thumbnail, anti_harmony=True)
     return  img \
         + f'相似度 {r.header.similarity}\n' \
         + f'yande id: {r.data.yandere_id}\n' \
