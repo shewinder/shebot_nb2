@@ -1,7 +1,7 @@
 import random
 from typing import TYPE_CHECKING, List, Tuple
 
-from hoshino import Service, MessageEvent, Bot, T_State, MessageSegment
+from hoshino import Service, MessageEvent, Bot, T_State, MessageSegment, GroupMessageEvent, PrivateMessageEvent
 from hoshino.sres import Res as R
 from ..sync_tag import get_parser, get_translate
 from .search import search_by_tag, search_yande
@@ -80,5 +80,7 @@ async def send_setu(bot: Bot, event: MessageEvent, state: T_State):
         except Exception as e:
             sv.logger.error(f"{setu.url} url error: {e}")
     sv.logger.info(f"sending group forward msg...")
-    await bot.send(event, msgs)
-    # await send_group_forward_msg(bot, event.group_id, msgs)
+    if isinstance(event, GroupMessageEvent):
+        await send_group_forward_msg(bot, event.group_id, msgs)
+    else:
+        await bot.send(event, msgs)

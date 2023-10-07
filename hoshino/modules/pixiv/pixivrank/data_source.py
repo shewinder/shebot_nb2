@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from random import choices
 from typing import Dict, List
 
 import aiohttp
@@ -66,9 +67,15 @@ def filter_rank(pics: List[RankPic]) -> List[RankPic]:
     pics = list(filter(not_sent_in_3_days, pics))
     for pic in pics:
         pic.score = sum_score(pic)
-
-    pics = sorted(pics, key = lambda x: x.score, reverse=True)
-    return pics[0:15]
+    pics = list(filter(lambda x: x.score >= 0, pics))
+    selected_pics = []
+    for _ in range(15):
+        try:
+            sidx = choices(range(len(pics)), weights=[x.score + 1 for x in pics], k=1)[0]
+            selected_pics.append(pics.pop(sidx))
+        except:
+            continue
+    return selected_pics
 
 
 async def get_rankpic(pid: str) -> RankPic:

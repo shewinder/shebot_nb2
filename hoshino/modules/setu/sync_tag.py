@@ -2,7 +2,7 @@ import datetime
 from typing import Dict, List, Tuple
 from hoshino import scheduled_job
 from hoshino.log import logger
-import requests
+from hoshino.util import aiorequests
 from pygtrie import CharTrie
 
 _tags: List[str] = []
@@ -58,8 +58,10 @@ def get_translate() -> Dict[str, str]:
 async def sync():
     logger.info("downloading tags from https://api.shewinder.win/setu/tags")
     base_url = "https://api.shewinder.win/setu/"
-    tags: List[str] = requests.get(base_url + "tags").json()
-    authors: List[Dict[str, str]] = requests.get(base_url + "authors").json()
+    resp = await aiorequests.get(base_url + "tags")
+    tags: List[str] = await resp.json()
+    resp = await aiorequests.get(base_url + "authors")
+    authors: List[Dict[str, str]] = await resp.json()
     _tags.clear()
     _tags.extend(tags)
     _tags.extend([author["author"] for author in authors])
@@ -71,11 +73,9 @@ async def sync():
     # update tag translation
     tag_url = 'https://api.shewinder.win/tag-translate/'
     artist_url = 'https://api.shewinder.win/yande-artist/'
-    resp = requests.get(tag_url)
-    resp.raise_for_status()
-    d = resp.json()
+    resp = await aiorequests.get(tag_url, timeout=5)
+    d = await resp.json()
     _translate.update(d)
-    resp = requests.get(artist_url)
-    resp.raise_for_status()
-    d = resp.json()
+    resp = await aiorequests.get(artist_url, timeout=5)
+    d = await resp.json()
     _translate.update(d)

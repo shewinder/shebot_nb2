@@ -8,17 +8,14 @@ from hoshino import (
     Bot,
     MessageSegment,
     Service,
-    event,
     font_dir,
     get_bot_list,
     scheduled_job,
     sucmd,
 )
+from hoshino.log import logger
 from hoshino.sres import Res as R
 from hoshino.typing import GroupMessageEvent
-from hoshino.util import aiohttpx
-from hoshino.util.message_util import send_group_forward_msg
-from hoshino.util.pixiv import PixivIllust
 from hoshino.util.sutil import anti_harmony, get_img_from_url, get_service_groups
 from hoshino.util.handle_msg import handle_msg
 from PIL import Image, ImageFont, ImageDraw
@@ -29,13 +26,13 @@ from .score import score_data
 
 help_ = """
 启用后会每天固定推送Pixiv日榜
-(该功能还在完善中)
 """.strip()
 
 conf = Config.get_instance("pixivrank")
 sv = Service("Pixiv日榜", enable_on_default=False, help_=help_)
-_today_rank: List[int] = []
-_today_rank_r18: List[int] = []
+sv_r18 = Service("Pixiv日榜R18", enable_on_default=False, visible=False)
+_today_rank: List[RankPic] = []
+_today_rank_r18: List[RankPic] = []
 
 
 def update_last_3_days(pics: List[RankPic]):
@@ -82,6 +79,7 @@ async def generate_preview(sv: Service, pics: List[RankPic]) -> Image.Image:
         canvas.paste(im, (col * 600, row * 600 + header))
     return canvas
 
+
 async def generate_forward(sv: Service, pics: List[RankPic]):
     msgs = []
     for pic in pics:
@@ -104,7 +102,7 @@ async def generate_forward(sv: Service, pics: List[RankPic]):
         else:
             nest_msgs = []
             if len(pic.urls) > 5:
-                pic.urls = pic.urls[0 : 5]
+                pic.urls = pic.urls[0:5]
             for url in pic.urls:
                 try:
                     sv.logger.info(f"downloading {url}")
@@ -120,36 +118,22 @@ async def generate_forward(sv: Service, pics: List[RankPic]):
     return msgs
 
 
-async def send_rank(sv: Service, pics: List[RankPic]):
+async def send_rank(sv: Service, pics: List[RankPic], gids: List[int]=None):
     preview = await generate_preview(sv, pics)
     bot: Bot = get_bot_list()[0]
-    gids = await get_service_groups(sv_name=sv.name)
+    if not gids:
+        gids = await get_service_groups(sv_name=sv.name)
     sv.logger.info("sending pixiv rank")
 
     for gid in gids:
         try:
             preview = anti_harmony(preview)
             await bot.send_group_msg(group_id=gid, message=R.image_from_memory(preview))
-            #await send_group_forward_msg(bot, gid, msgs)
+            # await send_group_forward_msg(bot, gid, msgs)
             sv.logger.info(f"群{gid} 投递成功！")
         except Exception as e:
             sv.logger.exception(e)
         await asyncio.sleep(120)
-
-
-@scheduled_job("cron", hour=conf.hour, minute=conf.minute, id="pixiv日榜")
-async def pixiv_rank():
-    today = datetime.date.today()
-    yesterday = today - datetime.timedelta(days=1)
-    date = f"{yesterday}"
-    sv.logger.info("正在获取日榜")
-    pics = await get_rank(date)
-    sv.logger.info("日榜获取完毕")
-    pics = filter_rank(pics)
-    update_last_3_days(pics)
-    _today_rank.clear()
-    _today_rank.extend([pic.pid for pic in pics])
-    await send_rank(sv, pics)
 
 
 detail = sv.on_command("pr")
@@ -173,10 +157,9 @@ async def _(bot: Bot, event: GroupMessageEvent):
     p = _today_rank[idx]
 
     # call pid xxx
-    await handle_msg(bot, event, f"pid {p}")
+    await handle_msg(bot, event, f"pid {p.pid}")
 
 
-sv_r18 = Service("Pixiv日榜R18", enable_on_default=False, visible=False)
 detail_r18 = sv_r18.on_command("prr")
 
 
@@ -197,24 +180,50 @@ async def _(bot: Bot, event: GroupMessageEvent):
         return
     p = _today_rank_r18[idx]
 
-    await handle_msg(bot, event, f"pid {p}")
+    await handle_msg(bot, event, f"pid {p.pid}")
 
 
-@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 15, id="pixiv日榜r18")
+@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 5, id="pixiv日榜")
 async def pixiv_rank():
+    await send_rank(sv, _today_rank)
+
+
+@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 10, id="pixiv日榜r18")
+async def pixiv_rank():
+    await send_rank(sv_r18, _today_rank_r18)
+
+
+async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
     today = datetime.date.today()
     yesterday = today - datetime.timedelta(days=1)
     date = f"{yesterday}"
-    sv_r18.logger.info("正在下载日榜图片")
-    pics = await get_rank(date, "day_r18")
-    sv_r18.logger.info("日榜图片下载完成")
+    logger.info("正在下载日榜")
+    pics = await get_rank(date)
+    logger.info("日榜下载完成")
     pics = filter_rank(pics)
-    score_data.last_three_days[-1].extend(
-        [p.pid for p in pics]
-    )  # 由于r18榜晚发，此时过去三天已经更新过了
+    update_last_3_days(pics)
+    _today_rank.clear()
+    _today_rank.extend(pics)
+
+    logger.info("正在下载r18日榜")
+    pics = await get_rank(date, "day_r18")
+    pics = filter_rank(pics)
+    logger.info("r18日榜下载完成")
+    score_data.last_three_days[-1].extend([p.pid for p in pics])
     _today_rank_r18.clear()
-    _today_rank_r18.extend([pic.pid for pic in pics])
-    await send_rank(sv_r18, pics)
+    _today_rank_r18.extend(pics)
+
+
+sucmd("更新日榜").handle()(update_rank)
+
+
+@sucmd("预览日榜").handle()
+async def _(bot: Bot, event: GroupMessageEvent):
+    await send_rank(sv, _today_rank, gids=[event.group_id])
+    await send_rank(sv_r18, _today_rank_r18, gids=[event.group_id])
+
+
+scheduled_job("cron", hour=conf.hour, minute=conf.minute, id="pixiv日榜数据更新")(update_rank)
 
 
 def add_tag_score(tag: str, score: int):
