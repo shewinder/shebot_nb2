@@ -38,7 +38,10 @@ async def _(bot: "Bot", event: "Event", state: T_State):
     if results:
         reply = '以下结果来自souceNao\n'
         for r in results:
-            reply += await soucenao_format(r)
+            try:
+                reply += await soucenao_format(r)
+            except Exception as e:
+                sv.logger.exception(e)
         await search_pic.finish(reply)
 
     # 自动转为ascii2d

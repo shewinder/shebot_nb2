@@ -125,6 +125,12 @@ async def yande_format(r: SoucenaoResult):
         + f'yande id: {r.data.yandere_id}\n' \
         + f'material: {r.data.material}\n' \
         + f'source: {r.data.source}\n' \
+        
+async def default_format(r: SoucenaoResult):
+    img = await R.image_from_url(r.header.thumbnail, anti_harmony=True)
+    return  img \
+        + f'相似度 {r.header.similarity}\n' \
+        + f'source: {r.data.source}\n'
 
 async def soucenao_format(r: SoucenaoResult):
     if r.data.pixiv_id is not None:
@@ -133,7 +139,9 @@ async def soucenao_format(r: SoucenaoResult):
         return await twitter_format(r)
     elif r.data.danbooru_id is not None:
         return await danbooru_format(r)
-    elif r.header.index_id == 38:
+    elif r.header.index_id in [38, 18]:
         return await ehentai_format(r)
     elif r.header.index_id == 12:
         return await yande_format(r)
+    else:
+        return await default_format(r)
