@@ -38,7 +38,8 @@ def get_md5(val: Union[bytes, str]) -> str:
     return m.hexdigest()
 
 def extract_url_from_event(event: Event) -> List[str]:
-    urls = re.findall(r'http.*?term=\d', str(event.message))
+    urls: List[str] = re.findall(r'http.+=\d', str(event.message))
+    urls = list(map(lambda x: x.replace("amp;", ""), urls))
     return urls
 
 def save_config(config:dict,path:str, indent=2):
