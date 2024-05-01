@@ -6,6 +6,14 @@ from hoshino.util.sutil import extract_url_from_event
 from .soucenao import soucenao_format, get_saucenao_results
 from .tracemoe import *
 from .ascii2d import *
+import nonebot
+from urllib.parse import quote_plus
+
+
+driver = nonebot.get_driver()
+config = driver.config
+HOST = config.hostip
+port = config.port
 
 sv = Service('搜图找番')
 
@@ -23,9 +31,9 @@ async def _(bot: "Bot", event: "Event", state: T_State):
         await search_pic.finish('本次搜图已经取消')
     urls = extract_url_from_event(event)
     if not urls:
-        await search_pic.reject(event,'未检测到图片，请重新发送或者发送“取消”结束')
+        await search_pic.reject('未检测到图片，请重新发送或者发送“取消”结束')
 
-    url = urls[0] 
+    url = urls[0]
     await bot.send(event, '正在搜索，请稍后~')
 
     sv.logger.info('soucenao search')
@@ -47,6 +55,8 @@ async def _(bot: "Bot", event: "Event", state: T_State):
     # 自动转为ascii2d
     sv.logger.info('ascii2d search')
     try:
+        if HOST:
+            url = f"http://{HOST}:{port}/public/qqimg?url={quote_plus(url)}"
         results = await get_ascii2d_results(url)
     except Exception as e:
         sv.logger.error(e)

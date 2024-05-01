@@ -10,6 +10,7 @@ from hoshino.modules.web.routers.custom_reply import router as custom_reply_rout
 from hoshino.modules.web.routers.infopush_api import router as infopush_router
 from hoshino.modules.web.routers.bot_manage import router as bot_manage_router
 from hoshino.modules.web.routers.login import router as login_router
+from hoshino.modules.web.routers.public import router as public_router
 
 app: FastAPI = nonebot.get_app()
 
@@ -17,14 +18,17 @@ app.include_router(login_router)
 app.include_router(bot_manage_router)
 app.include_router(custom_reply_router)
 app.include_router(infopush_router)
+app.include_router(public_router)
 
+_whitelist = ["/login", "/public"]
 
 @app.middleware("http")
 async def _(req: Request, call_next: Callable):
-    path = req.scope["path"]
-    if path == "/login":  # 访问登录  路由不拦截
-        resp = await call_next(req)
-        return resp
+    path: str = req.scope["path"]
+    for p in _whitelist:
+        if path.startswith(p):
+            resp = await call_next(req)
+            return resp
     else:
         # headers = req.headers
         # if not 'token' in headers:
