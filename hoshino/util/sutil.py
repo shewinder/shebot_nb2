@@ -62,8 +62,9 @@ def load_config(path):
         return {}
 
 async def get_img_from_url(url) -> Image.Image:
+    headers = {"User-Agent": "PostmanRuntime/7.29.0"}
     async with  aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
+        async with session.get(url, headers=headers) as resp:
             cont = await resp.read()
             img = Image.open(BytesIO(cont))
             return img

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from hoshino.sres import Res as R
 from hoshino.util.sutil import get_img_from_url
+from hoshino import MessageSegment
 
 class Ascii2dResult(BaseModel):
     thumb: str
@@ -52,6 +53,9 @@ async def get_ascii2d_results(pic_url) -> List[Ascii2dResult]:
         return res_list
 
 async def ascii2d_format(data: Ascii2dResult):
-    img = await get_img_from_url(data.thumb)
-    img = R.image_from_memory(img)
+    try:
+        img = await get_img_from_url(data.thumb)
+        img = R.image_from_memory(img)
+    except:
+        img = MessageSegment.text("预览图下载失败")
     return img + data.ext_url
