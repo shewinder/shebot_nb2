@@ -18,3 +18,4 @@ pyjwt>=2.1.0
 sqlitedict>=1.7.0
 aioaria2
 fuzzywuzzy
+pytz
