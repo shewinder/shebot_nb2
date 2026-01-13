@@ -11,9 +11,9 @@ import re
 import os
 import json
 from collections import defaultdict
-from nonebot.adapters.cqhttp.utils import escape
+from nonebot.adapters.onebot.v11.utils import escape
 from nonebot.matcher import current_bot, current_event
-from nonebot.typing import T_ArgsParser, T_Handler
+from nonebot.typing import T_Handler
 from nonebot.message import run_preprocessor, run_postprocessor
 from hoshino import Bot, service_dir as _service_dir, Message, MessageSegment
 from hoshino.event import Event
@@ -319,7 +319,7 @@ class matcher_wrapper:
     def got(self,
             key: str,
             prompt: Optional[Union[str, "Message", "MessageSegment"]] = None,
-            args_parser: Optional[T_ArgsParser] = None):
+            args_parser = None):
         def deco(func: T_Handler):
             return self.matcher.got(key, prompt, args_parser)(func)
         return deco

@@ -6,6 +6,6 @@ LastEditTime: 2021-01-29 23:49:24
 Description: 
 Github: http://github.com/AkiraXie/
 '''
-from nonebot.adapters.cqhttp.message import MessageSegment, Message
+from nonebot.adapters.onebot.v11 import *
 
 

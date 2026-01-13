@@ -8,8 +8,8 @@ Github: http://github.com/AkiraXie/
 '''
 from typing import List, Set, Any, Dict, Union, TypeVar, Optional, Callable, Iterable, Final, Type,Awaitable
 from multidict import CIMultiDictProxy
-from nonebot.typing import T_State,T_Handler,T_ArgsParser
+from nonebot.typing import T_State,T_Handler
 from nonebot.exception import FinishedException, IgnoredException,PausedException,RejectedException
-from nonebot.adapters.cqhttp.event import *
 from nonebot.adapters.cqhttp import Bot
 from argparse import Namespace
+from nonebot.adapters.onebot.v11 import Bot, Event

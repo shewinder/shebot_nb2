@@ -1,16 +1,12 @@
 from typing import Dict, TypeVar
-from hoshino.util.persist import Persistent
 from hoshino import conf_dir
+from pydantic import BaseModel
 
 _all_plugin_config: Dict[str, "BaseConfig"] = {}  # 所有插件的配置数据
 
 T = TypeVar('T')
 
-class BaseConfig(Persistent):
-    """
-    继承自Persistent，一个和json文件绑定的类
-    任何对对象的修改都会触发json dump
-    """
+class BaseConfig(BaseModel):
     @classmethod
     def get_instance(cls: T, name: str) -> T:
         return _all_plugin_config[name]
@@ -20,7 +16,10 @@ def configuration (name: str):
     被装饰类的实例会放到_all_plugin_config中,便于统一管理
     """
     def decorator(cls):
-        _all_plugin_config[name] = cls(conf_dir / f"{name}.json")
+        config_json = open(conf_dir / f"{name}.json", "r").read()
+        if not config_json:
+            config_json = "{}"
+        _all_plugin_config[name] = cls.model_validate_json(config_json)
         return cls
     return decorator
 

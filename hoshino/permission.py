@@ -6,7 +6,7 @@ LastEditTime: 2021-01-31 02:39:55
 Description: 
 Github: http://github.com/AkiraXie/
 '''
-from nonebot.adapters.cqhttp.permission import GROUP, GROUP_ADMIN, GROUP_OWNER, PRIVATE
+from nonebot.adapters.onebot.v11.permission import GROUP, GROUP_ADMIN, GROUP_OWNER, PRIVATE
 from nonebot.permission import SUPERUSER, Permission
 ADMIN = SUPERUSER | GROUP_ADMIN | GROUP_OWNER
 PADMIN = SUPERUSER | GROUP_ADMIN | GROUP_OWNER | PRIVATE

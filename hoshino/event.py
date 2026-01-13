@@ -7,8 +7,7 @@ Description:
 Github: http://github.com/AkiraXie/
 '''
 from nonebot.adapters.cqhttp import Event
-from nonebot.adapters.cqhttp.event import *
-from nonebot.adapters.cqhttp import *
+from nonebot.adapters.onebot.v11 import *
 
 
 def get_event(event: Event) -> str:

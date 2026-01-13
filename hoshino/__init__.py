@@ -48,7 +48,7 @@ e.g：
 R: Final[rhelper] = rhelper()
 
 
-from nonebot.adapters.cqhttp import Bot
+from nonebot.adapters.onebot.v11 import Bot
 from .util import aiohttpx, get_bot_list, sucmd, sucmds
 from .message import MessageSegment, Message
 from .event import Event, GroupMessageEvent, PrivateMessageEvent, MessageEvent
