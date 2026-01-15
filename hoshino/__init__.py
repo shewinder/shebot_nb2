@@ -55,3 +55,5 @@ from .event import Event, GroupMessageEvent, PrivateMessageEvent, MessageEvent
 from .service import Service
 from .schedule import scheduled_job, add_job
 from .typing import T_State
+from nonebot.params import ArgPlainText, ShellCommandArgs, ShellCommandArgv
+from nonebot.exception import ParserExit

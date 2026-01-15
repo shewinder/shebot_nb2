@@ -9,9 +9,9 @@ Github: http://github.com/AkiraXie/
 import re
 from typing import Union,Set
 from nonebot.typing import T_State
-from nonebot.adapters.cqhttp import Bot, Event
-from nonebot.rule import ArgumentParser, Rule, to_me
+from nonebot.rule import Rule, to_me, ArgumentParser, Namespace
 from hoshino.util import normalize_str
+from nonebot.adapters.onebot.v11 import Bot, Event
 
 
 def regex(regex: str, flags: Union[int, re.RegexFlag] = 0, normal: bool = True) -> Rule:

@@ -10,23 +10,42 @@ import re
 from functools import cmp_to_key
 from hoshino.event import GroupMessageEvent, PrivateMessageEvent
 from hoshino import Service, Bot, Event
-from hoshino.rule import to_me, ArgumentParser
+from hoshino.rule import to_me, ArgumentParser, Namespace
 from hoshino.permission import ADMIN
 from hoshino.matcher import on_shell_command
 from hoshino.util import text2Seg
 from hoshino.typing import T_State, FinishedException
 from .util import parse_gid, parse_service
+from typing import Annotated
+from nonebot.params import ShellCommandArgs
+from nonebot.exception import ParserExit
+
+
 parser = ArgumentParser()
 parser.add_argument('-a', '--all', action='store_true')
 parser.add_argument('-p', '--picture', action='store_true')
 parser1 = ArgumentParser()
 parser1.add_argument('-a', '--all', action='store_true')
+
+
 lssv = on_shell_command('lssv', to_me(), aliases={
                         '服务列表', '功能列表'}, parser=parser)
 enable = on_shell_command('enable', to_me(), aliases={
                           '开启', '打开', '启用'}, parser=parser1, state={'action': '开启'})
 disable = on_shell_command('disable', to_me(), aliases={
                            '关闭', '停用', '禁用'}, parser=parser1, state={'action': '关闭'})
+
+
+# 解析失败
+@lssv.handle()
+async def _(foo: Annotated[ParserExit, ShellCommandArgs()]):
+    if foo.status != 0:
+        await lssv.finish("不支持的参数")
+
+# 解析成功
+@lssv.handle()
+async def _(state:T_State, foo: Annotated[Namespace, ShellCommandArgs()]):
+    state["args"] = foo
 
 
 @lssv.handle()
@@ -37,11 +56,13 @@ async def _(bot: Bot, event: Event, state: T_State):
 
 @lssv.got('gids', prompt='请输入群号，并用空格隔开。')
 async def _(bot: Bot, event: Event, state: T_State):
-    await parse_gid(bot, event, state)
+    if not 'gids' in state:
+        await parse_gid(bot, event, state)
 
     if not 'gids' in state:
         await bot.send(event, '无效输入')
         raise FinishedException
+    print(state)
     verbose_all = state['args'].all
     as_pic = state['args'].picture
     svs = Service.get_loaded_services().values()
