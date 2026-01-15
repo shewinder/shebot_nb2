@@ -37,6 +37,7 @@ config = driver.config
 
 # 商店插件
 nonebot.load_plugin("nonebot_plugin_wordle")
+nonebot.load_plugin("nonebot_plugin_handle")
 
 nonebot.load_plugins(base)
 if modules := config.modules:

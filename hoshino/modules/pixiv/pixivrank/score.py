@@ -13,8 +13,11 @@ if not d.exists():
 p = d.joinpath('pixiv_score.json')
 if not p.exists():
     p.touch()
-    p.write_text(ScoreData.model_dump_json())
+    p.write_text(ScoreData().model_dump_json())
 
 
 score_data = ScoreData.model_validate_json(p.read_text())
+
+save_score_data = lambda: p.write_text(score_data.model_dump_json())
+load_score_data = lambda: ScoreData.model_validate_json(p.read_text())
     

@@ -22,7 +22,7 @@ from PIL import Image, ImageFont, ImageDraw
 
 from .config import Config
 from .data_source import RankPic, filter_rank, get_rank, get_rankpic
-from .score import score_data
+from .score import score_data, save_score_data, load_score_data
 
 help_ = """
 启用后会每天固定推送Pixiv日榜
@@ -35,10 +35,22 @@ _today_rank: List[RankPic] = []
 _today_rank_r18: List[RankPic] = []
 
 
+def get_text_size(font, text):
+    """兼容新旧版本Pillow的文本尺寸获取函数"""
+    try:
+        # Pillow >= 10.0.0
+        bbox = font.getbbox(text)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except AttributeError:
+        # Pillow < 10.0.0
+        return font.getsize(text)
+
+
 def update_last_3_days(pics: List[RankPic]):
     if len(score_data.last_three_days) == 3:
         score_data.last_three_days.pop(0)
     score_data.last_three_days.append([p.pid for p in pics])
+    save_score_data()
 
 
 async def generate_preview(sv: Service, pics: List[RankPic]) -> Image.Image:
@@ -62,7 +74,7 @@ async def generate_preview(sv: Service, pics: List[RankPic]) -> Image.Image:
     font = ImageFont.truetype(font_dir.joinpath("msyh.ttf").as_posix(), 100)
     draw = ImageDraw.Draw(canvas)
     tip = "发送pr<n>获取原图, 例pr3" if sv.name == "Pixiv日榜" else "发送prr<n>获取原图,例prr3"
-    w, h = font.getsize(tip)
+    w, h = get_text_size(font, tip)
     draw.text(
         (int((width - w) / 2), (int((header - h) / 2))), tip, fill="black", font=font
     )
@@ -183,19 +195,19 @@ async def _(bot: Bot, event: GroupMessageEvent):
     await handle_msg(bot, event, f"pid {p.pid}")
 
 
-@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 5, id="pixiv日榜")
+@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 1, id="pixiv日榜")
 async def pixiv_rank():
     await send_rank(sv, _today_rank)
 
 
-@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 10, id="pixiv日榜r18")
+@scheduled_job("cron", hour=conf.hour, minute=conf.minute + 5, id="pixiv日榜r18")
 async def pixiv_rank():
     await send_rank(sv_r18, _today_rank_r18)
 
 
 async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
     today = datetime.date.today()
-    yesterday = today - datetime.timedelta(days=1)
+    yesterday = today - datetime.timedelta(days=2)
     date = f"{yesterday}"
     logger.info("正在下载日榜")
     pics = await get_rank(date)
@@ -212,6 +224,7 @@ async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
     score_data.last_three_days[-1].extend([p.pid for p in pics])
     _today_rank_r18.clear()
     _today_rank_r18.extend(pics)
+    save_score_data()
 
 
 sucmd("更新日榜").handle()(update_rank)
@@ -231,6 +244,7 @@ def add_tag_score(tag: str, score: int):
         score_data.tag_scores[tag] += score
     else:
         score_data.tag_scores[tag] = score
+    save_score_data()
 
 
 def add_author_score(author_id: str, score: int):
@@ -238,6 +252,7 @@ def add_author_score(author_id: str, score: int):
         score_data.author_scores[author_id] += score
     else:
         score_data.author_scores[author_id] = score
+    save_score_data()
 
 
 def favor(pic: RankPic):

@@ -169,6 +169,7 @@ def get_event_image(event: Event) -> List[str]:
         if s.type == 'image' and 'file' in s.data
     ]
     return imglist
+
 def get_event_imageurl(event: Event) -> List[str]:
     msg=event.get_message()
     imglist=[
@@ -177,3 +178,13 @@ def get_event_imageurl(event: Event) -> List[str]:
         if s.type == 'image' and 'url' in s.data
     ]
     return imglist
+
+async def _strip_cmd(bot: "Bot", event: "Event", state: T_State):
+    message = event.get_message()
+    segment = message.pop(0)
+    segment_text = str(segment).lstrip()
+    new_message = message.__class__(
+        segment_text[len(state["_prefix"]["raw_command"]) :].lstrip()
+    )  # type: ignore
+    for new_segment in reversed(new_message):
+        message.insert(0, new_segment)

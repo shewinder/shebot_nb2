@@ -13,7 +13,7 @@ from hoshino import Service, Bot, Event
 from hoshino.rule import to_me, ArgumentParser, Namespace
 from hoshino.permission import ADMIN
 from hoshino.matcher import on_shell_command
-from hoshino.util import text2Seg
+from hoshino.util import text2Seg, _strip_cmd
 from hoshino.typing import T_State, FinishedException
 from .util import parse_gid, parse_service
 from typing import Annotated
@@ -31,9 +31,9 @@ parser1.add_argument('-a', '--all', action='store_true')
 lssv = on_shell_command('lssv', to_me(), aliases={
                         '服务列表', '功能列表'}, parser=parser)
 enable = on_shell_command('enable', to_me(), aliases={
-                          '开启', '打开', '启用'}, parser=parser1, state={'action': '开启'})
+                          '开启', '打开', '启用'}, parser=parser1, state={'action': '开启'}, handlers=[_strip_cmd])
 disable = on_shell_command('disable', to_me(), aliases={
-                           '关闭', '停用', '禁用'}, parser=parser1, state={'action': '关闭'})
+                           '关闭', '停用', '禁用'}, parser=parser1, state={'action': '关闭'}, handlers=[_strip_cmd])
 
 
 # 解析失败
@@ -62,7 +62,6 @@ async def _(bot: Bot, event: Event, state: T_State):
     if not 'gids' in state:
         await bot.send(event, '无效输入')
         raise FinishedException
-    print(state)
     verbose_all = state['args'].all
     as_pic = state['args'].picture
     svs = Service.get_loaded_services().values()
@@ -78,6 +77,18 @@ async def _(bot: Bot, event: Event, state: T_State):
                 reply.append(f"|{ox}| {sv.name}")
         reply.append('发送帮助+服务名查看详情，例如：帮助 色图') # edit by shewinder
         await lssv.finish("\n".join(reply)) if not as_pic else await lssv.finish(text2Seg("\n".join(reply)))
+
+
+# 解析命令参数
+async def parse_enable_args(state: T_State, args: Annotated[Namespace, ShellCommandArgs()]):
+    print(args)
+    if args.status != 0:
+        raise FinishedException
+    state["args"] = args
+    raise FinishedException
+
+disable.handle()(parse_enable_args)
+enable.handle()(parse_enable_args)
 
 
 async def handle_msg(bot: Bot, event: Event, state: T_State):
@@ -117,14 +128,16 @@ enable.handle()(handle_msg)
 @enable.got('gids', '请输入要开启服务的群ID，用空格间隔')
 @enable.got('services', '请输入服务名称，用空格间隔')
 async def _(bot: Bot, event: Event, state: T_State):
-    await parse_gid(bot, event, state)
-    await parse_service(bot, event, state)
+    if not 'gids' in state:
+        await parse_gid(bot, event, state)
+    if not 'services' in state:
+        await parse_service(bot, event, state)
     if not state['gids'] or not state['services']:
         await bot.send(event, '无效输入')
         raise FinishedException
     action = state['action']
     svs = Service.get_loaded_services()
-    if 'all' in state['args'].__dict__ and state['args'].all:
+    if 'args' in state and 'all' in state['args'].__dict__ and state['args'].all:
         state['services'] = svs.keys()
     allsv = set(svs.keys())
     exclude, succ, notfound, succ_group = set(), set(), set(), set()
