@@ -1,6 +1,5 @@
-from aiocqhttp.message import MessageSegment
+from hoshino import MessageSegment, GroupMessageEvent, Bot
 from hoshino.service import Service
-from hoshino.typing import Bot, GroupMessageEvent
 from hoshino.interact import interact, ActSession
 from random import randint, shuffle
 from itertools import cycle
