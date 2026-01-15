@@ -30,9 +30,10 @@ pausejob.handle()(parse_job)
 resumejob.handle()(parse_job)
 
 
-@resumejob.got('jobs', '请输入要恢复的定时任务id, 按空格分隔', parse_job)
-@pausejob.got('jobs', '请输入要暂停的定时任务id, 按空格分隔', parse_job)
+@resumejob.got('jobs', '请输入要恢复的定时任务id, 按空格分隔')
+@pausejob.got('jobs', '请输入要暂停的定时任务id, 按空格分隔')
 async def _(bot: Bot, event: Event, state: T_State):
+    await parse_job(bot, event, state)
     if not state.get('jobs', None):
         raise FinishedException
     flag = state['action']

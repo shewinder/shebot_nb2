@@ -1,7 +1,7 @@
 import json
 from typing import List, Union
 from hoshino import MessageSegment, Bot, Message
-from hoshino.typing import GroupMessageEvent
+from hoshino.event import GroupMessageEvent
 from hoshino import hsn_config, Bot, get_bot_list
 from pydantic import BaseModel
 

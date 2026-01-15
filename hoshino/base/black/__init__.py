@@ -6,7 +6,7 @@ LastEditTime: 2021-02-15 02:41:13
 Description: 
 Github: http://github.com/AkiraXie/
 '''
-from nonebot.adapters.cqhttp.event import MessageEvent
+from hoshino.event import MessageEvent
 from nonebot.message import event_preprocessor
 from nonebot.exception import FinishedException, IgnoredException
 from nonebot.permission import SUPERUSER
@@ -67,9 +67,10 @@ lahei = sucmd('拉黑', True, aliases={'block', '封禁', 'ban',
 jiefeng = sucmd('解封', True, aliases={'解禁'}, handlers=[parse_qq])
 
 
-@lahei.got('ids', prompt='请输入要拉黑的id,并用空格隔开~\n在群聊中，还支持直接at哦~', args_parser=parse_qq)
+@lahei.got('ids', prompt='请输入要拉黑的id,并用空格隔开~\n在群聊中，还支持直接at哦~')
 @lahei.got('hours', '请输入要拉黑的小时数')
 async def _(bot: Bot, event: Event, state: T_State):
+    await parse_qq(bot, event, state)
     if not state['ids']:
         raise FinishedException
     for uid in state['ids']:
@@ -77,8 +78,9 @@ async def _(bot: Bot, event: Event, state: T_State):
     await lahei.finish(f'已拉黑{len(state["ids"])}人{state["hours"]}小时~，嘿嘿嘿~')
 
 
-@jiefeng.got('ids', prompt='请输入要解封的id,并用空格隔开~\n在群聊中，还支持直接at哦~', args_parser=parse_qq)
+@jiefeng.got('ids', prompt='请输入要解封的id,并用空格隔开~\n在群聊中，还支持直接at哦~')
 async def _(bot: Bot, event: Event, state: T_State):
+    await parse_qq(bot, event, state)
     if not state['ids']:
         raise FinishedException
     for uid in state['ids']:

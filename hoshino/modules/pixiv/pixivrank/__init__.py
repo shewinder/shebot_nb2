@@ -15,7 +15,7 @@ from hoshino import (
 )
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from hoshino.typing import GroupMessageEvent
+from hoshino.event import GroupMessageEvent
 from hoshino.util.sutil import anti_harmony, get_img_from_url, get_service_groups
 from hoshino.util.handle_msg import handle_msg
 from PIL import Image, ImageFont, ImageDraw

@@ -1,8 +1,8 @@
 from typing import Dict, List
-from hoshino.util.persist import Persistent
 from hoshino import userdata_dir
+from pydantic import BaseModel
 
-class ScoreData(Persistent):
+class ScoreData(BaseModel):
     tag_scores: Dict[str, int] = {}
     author_scores: Dict[str, int] = {}
     last_three_days: List[List[int]] = [[]]
@@ -13,6 +13,8 @@ if not d.exists():
 p = d.joinpath('pixiv_score.json')
 if not p.exists():
     p.touch()
+    p.write_text(ScoreData.model_dump_json())
 
-score_data = ScoreData(p)
+
+score_data = ScoreData.model_validate_json(p.read_text())
     

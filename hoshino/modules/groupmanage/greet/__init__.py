@@ -2,7 +2,7 @@ import os
 
 
 from hoshino import MessageSegment, Message, T_State
-from hoshino.typing import GroupIncreaseNoticeEvent, GroupDecreaseNoticeEvent
+from hoshino.event import GroupIncreaseNoticeEvent, GroupDecreaseNoticeEvent
 
 from hoshino import Service, Bot, Event
 from hoshino.util.sutil import load_config, save_config

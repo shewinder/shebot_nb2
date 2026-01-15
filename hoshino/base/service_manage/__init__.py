@@ -35,8 +35,10 @@ async def _(bot: Bot, event: Event, state: T_State):
         state['gids'] = [event.group_id]
 
 
-@lssv.got('gids', prompt='请输入群号，并用空格隔开。', args_parser=parse_gid)
+@lssv.got('gids', prompt='请输入群号，并用空格隔开。')
 async def _(bot: Bot, event: Event, state: T_State):
+    await parse_gid(bot, event, state)
+
     if not 'gids' in state:
         await bot.send(event, '无效输入')
         raise FinishedException
@@ -89,11 +91,13 @@ disable.handle()(handle_msg)
 enable.handle()(handle_msg)
 
 
-@disable.got('gids', '请输入要关闭服务的群ID，用空格间隔', args_parser=parse_gid)
-@disable.got('services', '请输入服务名称，用空格间隔', args_parser=parse_service)
-@enable.got('gids', '请输入要开启服务的群ID，用空格间隔', args_parser=parse_gid)
-@enable.got('services', '请输入服务名称，用空格间隔', args_parser=parse_service)
+@disable.got('gids', '请输入要关闭服务的群ID，用空格间隔')
+@disable.got('services', '请输入服务名称，用空格间隔')
+@enable.got('gids', '请输入要开启服务的群ID，用空格间隔')
+@enable.got('services', '请输入服务名称，用空格间隔')
 async def _(bot: Bot, event: Event, state: T_State):
+    await parse_gid(bot, event, state)
+    await parse_service(bot, event, state)
     if not state['gids'] or not state['services']:
         await bot.send(event, '无效输入')
         raise FinishedException

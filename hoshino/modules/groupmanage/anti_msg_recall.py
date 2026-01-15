@@ -1,5 +1,5 @@
 from hoshino import Service, Bot, Message
-from hoshino.typing import GroupRecallNoticeEvent
+from hoshino.event import GroupRecallNoticeEvent
 
 sv = Service("反撤回", enable_on_default=False)
 

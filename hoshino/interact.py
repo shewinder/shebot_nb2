@@ -1,6 +1,6 @@
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Callable
 from hoshino.log import logger
-from hoshino.typing import GroupMessageEvent
+from hoshino.event import GroupMessageEvent
 from datetime import datetime, timedelta
 from collections import defaultdict
 from hoshino import Bot, get_bot_list

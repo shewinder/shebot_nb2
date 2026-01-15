@@ -2,12 +2,12 @@ from hoshino.service import on_message
 
 from hoshino.interact import interact, ActSession, SessionFinishedException
 from hoshino.log import logger
-from hoshino.typing import Bot, GroupMessageEvent, T_State
+from hoshino.event import Bot, GroupMessageEvent
 
 inter = on_message()
 
 @inter.handle()
-async def handler_interaction(bot: Bot, event: GroupMessageEvent, state: T_State):
+async def handler_interaction(bot: Bot, event: GroupMessageEvent):
     session = interact.find_session_by_event(event)
     if not session:
         return

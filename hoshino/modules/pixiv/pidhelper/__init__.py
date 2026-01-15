@@ -5,7 +5,7 @@ import aiohttp
 from hoshino import MessageSegment, Service
 from hoshino.log import logger
 from hoshino.sres import Res as R
-from hoshino.typing import Bot, GroupMessageEvent
+from hoshino.event import Bot, GroupMessageEvent
 from hoshino.util import aiohttpx
 from hoshino.util.message_util import send_group_forward_msg
 from hoshino.util.sutil import anti_harmony

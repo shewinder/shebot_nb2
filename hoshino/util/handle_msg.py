@@ -2,7 +2,7 @@ from copy import deepcopy
 from typing import Union
 from nonebot.message import handle_event
 from hoshino import Bot, Event, Message, MessageSegment
-from hoshino.typing import MessageEvent
+from hoshino.event import MessageEvent
 
 async def handle_msg(bot: Bot, event: MessageEvent, msg: Union[Message, str]):
     new_event = deepcopy(event)

@@ -12,8 +12,6 @@ from urllib.parse import quote_plus
 
 driver = nonebot.get_driver()
 config = driver.config
-HOST = config.hostip
-port = config.port
 
 sv = Service('搜图找番')
 
@@ -55,8 +53,7 @@ async def _(bot: "Bot", event: "Event", state: T_State):
     # 自动转为ascii2d
     sv.logger.info('ascii2d search')
     try:
-        if HOST:
-            url = f"http://{HOST}:{port}/public/qqimg?url={quote_plus(url)}"
+        # TODO url可能无法直接使用
         results = await get_ascii2d_results(url)
     except Exception as e:
         sv.logger.error(e)

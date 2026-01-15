@@ -1,7 +1,7 @@
 from hoshino.service import Service
 from nonebot import on_command
 
-from hoshino.typing import Bot, GroupMessageEvent, T_State
+from hoshino.event import Bot, GroupMessageEvent
 
 help = on_command('help', aliases={'帮助', '机器人帮助', '使用手册'})
 
@@ -15,7 +15,7 @@ tip = """
 """.strip()
 
 @help.handle()
-async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
+async def _(bot: Bot, event: GroupMessageEvent):
     sv_name = str(event.get_message()).strip()
     if not sv_name:
         await help.finish(tip)
