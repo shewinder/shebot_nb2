@@ -35,6 +35,9 @@ config = driver.config
 #     config.apscheduler_autostart = apscheduler_autostart
 #     config.apscheduler_config = apscheduler_config
 
+# 商店插件
+nonebot.load_plugin("nonebot_plugin_wordle")
+
 nonebot.load_plugins(base)
 if modules := config.modules:
     for module in modules:

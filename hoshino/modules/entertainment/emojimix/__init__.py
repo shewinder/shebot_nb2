@@ -16,7 +16,7 @@ async def _(bot: Bot, event: MessageEvent):
     msg.append(str([ord(i)for i in event.raw_message]))
     await test.send("\n".join(msg))
 
-mix = sv.on_message()
+mix = sv.on_message(block=False)
 
 @mix.handle()
 async def emojimatch(bot: Bot, event: MessageEvent, state: T_State):

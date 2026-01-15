@@ -2,7 +2,7 @@ from io import BytesIO
 from typing import Dict, List
 
 import aiohttp
-from hoshino import MessageSegment, Service
+from hoshino import MessageSegment, Service, CommandArg, Message
 from hoshino.log import logger
 from hoshino.sres import Res as R
 from hoshino.event import Bot, GroupMessageEvent
@@ -24,8 +24,8 @@ pid_helper = sv.on_command("pid")
 
 
 @pid_helper.handle()
-async def _(bot: Bot, event: GroupMessageEvent):
-    p = str(event.message).strip()
+async def _(bot: Bot, event: GroupMessageEvent, p: Message = CommandArg()):
+    p = str(p).strip()
     try:
         int(p)
     except:

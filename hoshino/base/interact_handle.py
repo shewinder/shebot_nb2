@@ -4,7 +4,7 @@ from hoshino.interact import interact, ActSession, SessionFinishedException
 from hoshino.log import logger
 from hoshino.event import Bot, GroupMessageEvent
 
-inter = on_message()
+inter = on_message(block=False)
 
 @inter.handle()
 async def handler_interaction(bot: Bot, event: GroupMessageEvent):
