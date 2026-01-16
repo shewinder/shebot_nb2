@@ -1,24 +1,36 @@
-version: "3.7"
-
 services:
   shebot:
-    image: shewinder/shebot:test
+    image: shebot:latest
     restart: always
     ports:
       - 9000:9000
     working_dir: /app
     volumes:
-      - ./data:/app/data
-    environment:
-      command_start: '["/", ""]' # 配置命令起始字符
-      command_sep: '["."]' # 配置命令分割字符
-      host: 0.0.0.0 # 配置 NoneBot 监听的 IP/主机名
-      port: 9000 # 配置 NoneBot 监听的端口
-      debug: 'false' # 开启 debug 模式 **请勿在生产环境开启**
-      superusers: '[xxxxxxx]' # 配置 NoneBot 超级用户
-      nickname: '["镜华"]' # 配置机器人的昵称
-      modules: '["setu", "groupmanage", "entertainment", "tools", "infopush", "interactive", "pixiv", "web"]'
-      data: data
-      apscheduler_autostart: 'true'
-      apscheduler_config: '{"apscheduler.timezone": "Asia/Shanghai","apscheduler.job_defaults.misfire_grace_time":"60","apscheduler.job_defaults.coalesce": "true"}'
-      TZ: Asia/Shanghai
+      - hinata_data:/app/data
+      - ./.env.prod:/app/.env.prod
+    networks:
+      - app-network
+
+  llonebot:
+    volumes:
+        - ./QQ:/root/.config/QQ # 挂载 QQ 配置目录
+        - ./llonebot:/root/llonebot # 挂载 llonebot 数据目录
+        - hinata_data:/app/data 
+    ports:
+        - 3000:3000 # OneBot HTTP 端口
+        - 3001:3001 # OneBot WebSocket 端口
+        - 5600:5600 # Satori 端口
+        - 3080:3080 # webui
+    restart: always
+    image: initialencounter/llonebot:latest
+    networks:
+      - app-network
+
+volumes:
+  hinata_data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
+    name: app-network

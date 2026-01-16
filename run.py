@@ -22,17 +22,6 @@ driver.register_adapter(Adapter)
 
 config = driver.config
 
-# if not config.modules and not config.data: 
-#     env = os.environ.copy()
-#     modules = parse_raw_as(Set[str], env.get('modules'))
-#     data = env.get('data')
-#     config.hostip = env.get("hostip")
-#     apscheduler_autostart = parse_raw_as(bool, env.get('apscheduler_autostart'))
-#     apscheduler_config = parse_raw_as(Dict, env.get('apscheduler_config'))
-#     config.modules = modules
-#     config.data = data
-#     config.apscheduler_autostart = apscheduler_autostart
-#     config.apscheduler_config = apscheduler_config
 
 # 商店插件
 nonebot.load_plugin("nonebot_plugin_wordle")
