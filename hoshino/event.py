@@ -6,7 +6,7 @@ LastEditTime: 2021-03-03 02:17:34
 Description: 
 Github: http://github.com/AkiraXie/
 '''
-from nonebot.adapters.cqhttp import Event
+
 from nonebot.adapters.onebot.v11 import *
 
 

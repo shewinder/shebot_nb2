@@ -8,7 +8,6 @@ Github: http://github.com/AkiraXie/
 '''
 import nonebot
 import os
-from nonebot.adapters.cqhttp import Bot
 from typing import Dict, Set
 
 from nonebot.adapters.onebot.v11 import Adapter
@@ -38,6 +37,7 @@ config = driver.config
 # 商店插件
 nonebot.load_plugin("nonebot_plugin_wordle")
 nonebot.load_plugin("nonebot_plugin_handle")
+nonebot.load_plugin("nonebot_plugin_parser")
 
 nonebot.load_plugins(base)
 if modules := config.modules:

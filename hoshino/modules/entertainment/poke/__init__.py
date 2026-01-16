@@ -1,7 +1,7 @@
 from random import choice
 from typing import Callable
 
-from nonebot.adapters.cqhttp import PokeNotifyEvent
+from nonebot.adapters.onebot.v11 import PokeNotifyEvent
 
 from hoshino import Bot, Service, MessageSegment
 from hoshino.glob import NR18
