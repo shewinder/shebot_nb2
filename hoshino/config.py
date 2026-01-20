@@ -19,8 +19,8 @@ def configuration(name: str):
         cfg_file = conf_dir / f"{name}.json"
         if not cfg_file.exists():
             cfg_file.touch()
-            instance = cls()
-            cfg_file.write_text(instance.model_dump_json())
+            instance: BaseModel = cls()
+            cfg_file.write_text(instance.model_dump_json(indent=2))
         else:
             instance = cls.model_validate_json(cfg_file.read_text())
         _all_plugin_config[name] = instance

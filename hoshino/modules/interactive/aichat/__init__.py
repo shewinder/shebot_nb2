@@ -2,13 +2,11 @@
 AI Chat插件
 支持以#开头的消息触发AI对话，支持session管理
 """
-import json
 import time
 from typing import Dict, List, Optional
-from pathlib import Path
 from loguru import logger
 
-from hoshino import Service, Bot, Event, userdata_dir
+from hoshino import Service, Bot, Event
 from hoshino.util import aiohttpx
 from .config import Config
 
@@ -39,30 +37,12 @@ class Session:
         if conf.session_timeout <= 0:
             return False
         return time.time() - self.last_active > conf.session_timeout
-    
-    def to_dict(self) -> dict:
-        """转换为字典用于序列化"""
-        return {
-            "session_id": self.session_id,
-            "messages": self.messages,
-            "last_active": self.last_active
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict) -> "Session":
-        """从字典创建Session"""
-        session = cls(data["session_id"])
-        session.messages = data.get("messages", [])
-        session.last_active = data.get("last_active", time.time())
-        return session
 
 # Session管理器
 class SessionManager:
-    """管理所有Session"""
+    """管理所有Session（仅内存，不持久化）"""
     def __init__(self):
         self.sessions: Dict[str, Session] = {}
-        self.data_file = userdata_dir.joinpath('aichat_sessions.json')
-        self.load_sessions()
     
     def get_session_id(self, user_id: int, group_id: Optional[int] = None) -> str:
         """获取session ID"""
@@ -93,39 +73,8 @@ class SessionManager:
         session_id = self.get_session_id(user_id, group_id)
         if session_id in self.sessions:
             del self.sessions[session_id]
-            self.save_sessions()
             return True
         return False
-    
-    def save_sessions(self):
-        """保存sessions到文件"""
-        try:
-            data = {
-                sid: session.to_dict() 
-                for sid, session in self.sessions.items()
-                if not session.is_expired()  # 只保存未过期的
-            }
-            self.data_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"保存sessions失败: {e}")
-    
-    def load_sessions(self):
-        """从文件加载sessions"""
-        try:
-            if not self.data_file.exists():
-                return
-            
-            with open(self.data_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            for sid, session_data in data.items():
-                session = Session.from_dict(session_data)
-                if not session.is_expired():
-                    self.sessions[sid] = session
-        except Exception as e:
-            logger.error(f"加载sessions失败: {e}")
 
 # 全局Session管理器
 session_manager = SessionManager()
@@ -224,9 +173,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     # 添加AI回复
     session.add_message("assistant", response)
-    
-    # 保存sessions
-    session_manager.save_sessions()
     
     # 发送回复
     try:
