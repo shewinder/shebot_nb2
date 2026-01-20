@@ -21,7 +21,7 @@ del_gqa = sv.on_command('删除有人问', aliases={'删除大家问'}, permissi
 del_qa = sv.on_command('不要回答', aliases={'不再回答'}, only_group=False)
 lookqa = sv.on_command('看看我问', aliases={'查看我问'}, only_group=False)
 lookgqa = sv.on_command('看看有人问', aliases={'看看大家问', '查看有人问'})
-ans = sv.on_message(only_group=False, priority=5)
+ans = sv.on_message(only_group=False, priority=5, block=False)
 parser = ArgumentParser()
 parser.add_argument('question', type=str)
 parser.add_argument('user_id', type=int)
