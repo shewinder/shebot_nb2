@@ -26,11 +26,16 @@ dependencies = [
     "nonebot_plugin_wordle>=0.4.5",
     "nonebot_plugin_handle>=0.4.4", 
     "nonebot-plugin-parser>=2.3.7", 
+    # " nonebot_plugin_fortune>=0.4.12",
+    # "nonebot_plugin_today_in_history>=0.1.6",
 ]
 
 [tool.uv]
 override-dependencies = [
-    "pillow>=10.0.0,<11.0.0"
+    "pillow>=10.0.0,<11.0.0",
+    "nonebot-plugin-apscheduler>=0.5.0",
+    "aiofiles>=25.1.0",
+    "httpx>=0.27.2,<1.0.0"
 ]
 
 [tool.setuptools]

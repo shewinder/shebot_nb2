@@ -27,6 +27,8 @@ config = driver.config
 nonebot.load_plugin("nonebot_plugin_wordle")
 nonebot.load_plugin("nonebot_plugin_handle")
 nonebot.load_plugin("nonebot_plugin_parser")
+# nonebot.load_plugin("nonebot_plugin_today_in_history")
+# nonebot.load_plugin("nonebot_plugin_fortune")
 
 nonebot.load_plugins(base)
 if modules := config.modules:

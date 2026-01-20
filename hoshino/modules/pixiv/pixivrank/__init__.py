@@ -1,7 +1,8 @@
 import asyncio
 import datetime
+import re
 from io import BytesIO
-from typing import List
+from typing import List, Optional, Tuple
 
 import aiohttp
 from hoshino import (
@@ -23,6 +24,7 @@ from PIL import Image, ImageFont, ImageDraw
 from .config import Config
 from .data_source import RankPic, filter_rank, get_rank, get_rankpic
 from .score import score_data, save_score_data, load_score_data
+from hoshino.util import _strip_cmd
 
 help_ = """
 启用后会每天固定推送Pixiv日榜
@@ -148,7 +150,7 @@ async def send_rank(sv: Service, pics: List[RankPic], gids: List[int]=None):
         await asyncio.sleep(120)
 
 
-detail = sv.on_command("pr")
+detail = sv.on_command("pr", handlers=[_strip_cmd])
 
 
 @detail.handle()
@@ -172,7 +174,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     await handle_msg(bot, event, f"pid {p.pid}")
 
 
-detail_r18 = sv_r18.on_command("prr")
+detail_r18 = sv_r18.on_command("prr", handlers=[_strip_cmd])
 
 
 @detail_r18.handle()
@@ -207,7 +209,7 @@ async def pixiv_rank():
 
 async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
     today = datetime.date.today()
-    yesterday = today - datetime.timedelta(days=2)
+    yesterday = today - datetime.timedelta(days=1)
     date = f"{yesterday}"
     logger.info("正在下载日榜")
     pics = await get_rank(date)
@@ -267,39 +269,103 @@ def dislike(pic: RankPic):
     add_author_score(str(pic.author_id), -1)
 
 
-fav = sucmd("favor")
+async def resolve_rankpic_from_arg(arg: str) -> Tuple[Optional[RankPic], Optional[str]]:
+    """
+    解析参数为 RankPic 对象
+    
+    支持三种格式：
+    1. 纯数字 PID: "123456"
+    2. 日榜索引: "pr1", "pr2", ... (从 _today_rank 获取)
+    3. R18日榜索引: "prr1", "prr2", ... (从 _today_rank_r18 获取)
+    
+    返回: (RankPic对象, 错误消息)
+    如果成功，返回 (RankPic, None)
+    如果失败，返回 (None, 错误消息)
+    """
+    arg = arg.strip()
+    
+    # 检查是否为纯数字 PID
+    if arg.isdigit():
+        rank_pic = await get_rankpic(arg)
+        if rank_pic is None:
+            return None, "无法获取该Pixiv ID的作品信息"
+        return rank_pic, None
+    
+    # 检查是否为 pr<n> 格式
+    pr_match = re.match(r'^pr(\d+)$', arg, re.IGNORECASE)
+    if pr_match:
+        try:
+            n = int(pr_match.group(1))
+            if n < 1 or n > 15:
+                return None, "数字超限，请输入1-15之间的数字"
+            
+            if len(_today_rank) == 0:
+                return None, "日榜未更新"
+            
+            if n > len(_today_rank):
+                return None, f"索引超出今日日榜范围（当前共{len(_today_rank)}个作品）"
+            
+            idx = n - 1
+            return _today_rank[idx], None
+        except (ValueError, IndexError):
+            return None, "索引格式错误"
+    
+    # 检查是否为 prr<n> 格式
+    prr_match = re.match(r'^prr(\d+)$', arg, re.IGNORECASE)
+    if prr_match:
+        try:
+            n = int(prr_match.group(1))
+            if n < 1 or n > 15:
+                return None, "数字超限，请输入1-15之间的数字"
+            
+            if len(_today_rank_r18) == 0:
+                return None, "R18日榜未更新"
+            
+            if n > len(_today_rank_r18):
+                return None, f"索引超出今日R18日榜范围（当前共{len(_today_rank_r18)}个作品）"
+            
+            idx = n - 1
+            return _today_rank_r18[idx], None
+        except (ValueError, IndexError):
+            return None, "索引格式错误"
+    
+    # 都不匹配
+    return None, "参数错误：请使用 Pixiv ID 或 pr<n>/prr<n>"
+
+
+fav = sucmd("favor", handlers=[_strip_cmd])
 
 
 @fav.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
-    try:
-        int(str(event.get_message()))
-    except ValueError:
-        await bot.send(event, "请输入正确的Pixiv ID")
+    arg = str(event.get_message()).strip()
+    rank_pic, error_msg = await resolve_rankpic_from_arg(arg)
+    
+    if rank_pic is None:
+        await bot.send(event, error_msg or "请输入正确的Pixiv ID或日榜索引")
         return
-    pid = str(event.get_message())
-    rank_pic = await get_rankpic(pid)
+    
     favor(rank_pic)
     await bot.send(event, f"更新tag {rank_pic.tags}\n更新作者 {rank_pic.author}")
 
 
-dis = sucmd("dislike")
+dis = sucmd("dislike", handlers=[_strip_cmd])
 
 
 @dis.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
-    try:
-        int(str(event.get_message()))
-    except ValueError:
-        await bot.send(event, "请输入正确的Pixiv ID")
+    arg = str(event.get_message()).strip()
+    rank_pic, error_msg = await resolve_rankpic_from_arg(arg)
+    
+    if rank_pic is None:
+        await bot.send(event, error_msg or "请输入正确的Pixiv ID或日榜索引")
         return
-    pid = str(event.get_message())
-    rank_pic = await get_rankpic(pid)
+    
     dislike(rank_pic)
     await bot.send(event, f"更新tag {rank_pic.tags}\n更新作者 {rank_pic.author}")
 
 
-add_tag = sucmd("tag", only_to_me=False)
+add_tag = sucmd("tag", only_to_me=False, handlers=[_strip_cmd])
 
 
 @add_tag.handle()
