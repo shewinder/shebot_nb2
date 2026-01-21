@@ -6,58 +6,37 @@ import json
 from typing import Dict, Optional, List
 from loguru import logger
 
+import nonebot
+
 from hoshino.util import aiohttpx
 from .config import Config
+from .collector import CommandInfo
 
 # 加载配置
 conf = Config.get_instance('nlcmd')
 
 
-async def analyze_intent(user_message: str, available_commands: List[Dict]) -> Optional[Dict]:
-    """
-    分析用户消息意图，返回应该触发的命令
-    
-    Args:
-        user_message: 用户消息内容
-        available_commands: 可用命令列表（从collector获取）
-    
-    Returns:
-        {
-            "command_msg": "完整的构造消息，如 '/开启解析' 或 '关键词'",
-            "command": "命令名",
-            "args": "参数（如有）",
-            "confidence": 0.0-1.0 置信度
-        } 或 None（如果分析失败）
-    """
+async def analyze_intent(user_message: str, available_commands: List[CommandInfo]) -> Optional[Dict]:
+    """分析用户消息意图，返回应该触发的命令"""
     if not conf.api_key:
         logger.warning("NLCMD API密钥未配置")
         return None
-    
-    # available_commands 现在是 collector 输出的 matcher schema（normalized_only）
-    # 为了控制 token，这里只给 LLM 发送「可触发口径」+ source 定位信息
-    def _format_matcher(i: int, m: Dict) -> str:
-        src = m.get("source", {}) or {}
-        tri = m.get("triggers", {}) or {}
-        cmds = ", ".join(tri.get("commands", []) or [])
-        scmds = ", ".join(tri.get("shell_commands", []) or [])
-        to_me = "to_me" if tri.get("to_me") else ""
-        return (
-            f"{i+1}. type={m.get('type')}, priority={m.get('priority')}, block={m.get('block')}, "
-            f"plugin={src.get('plugin_id')}, module={src.get('module_name')}, line={src.get('lineno')}, "
-            f"commands=[{cmds}], shell_commands=[{scmds}] {to_me}".strip()
-        )
-
-    commands_text = "\n".join([_format_matcher(i, m) for i, m in enumerate(available_commands[:200])])
-    
+    if not available_commands:
+        logger.warning("没有可用的命令列表")
+        return None
+    commands_text = "\n".join([f"{i+1}. {c.plugin} {c.cmds} {c.shell_command_help}" for i, c in enumerate(available_commands[:200])])
+    driver = nonebot.get_driver()
+    command_prefix = driver.config.command_start
+    sep = list(command_prefix)[0]
     # 构建系统提示词
     system_prompt = """你是一个智能命令助手，负责将用户的自然语言请求转换为精确的机器人“可触发消息”(virtual message)，用于触发 NoneBot 的 matcher。
 
-可用 matcher 列表（已归一化，仅包含未封装 matcher 信息）：
+可用命令列表：
 {commands}
 
-请分析用户的消息，从上述 matcher 中选择最合适的触发方式，并返回 JSON：
+请分析用户的消息，从上述命令列表中选择最合适的触发方式，并返回 JSON：
 {{
-    "command_msg": "你构造出的 virtual message（会被作为 event.message 重新投递）",
+    "command_msg": "你构造出的 command_msg（会被作为 event.message 重新投递）",
     "command": "你选择的命令/触发器名称（若无法给出可留空字符串）",
     "confidence": 0.0-1.0的置信度分数
 }}
@@ -67,13 +46,13 @@ async def analyze_intent(user_message: str, available_commands: List[Dict]) -> O
 
 示例：
 用户: "帮我开启解析功能"
-返回: {{"command_msg": "/开启解析", "command": "开启解析", "confidence": 0.9}}
+返回: {{"command_msg": "{sep}开启解析", "command": "开启解析", "confidence": 0.9}}
 
 用户: "查看群聊"
-返回: {{"command_msg": "/ls group", "command": "ls group", "confidence": 0.95}}
+返回: {{"command_msg": "{sep}ls group", "command": "ls group", "confidence": 0.95}}
 
 用户: "你好"
-返回: {{"command_msg": "你好", "command": "你好", "confidence": 0.3}}""".format(commands=commands_text)
+返回: {{"command_msg": "你好", "command": "你好", "confidence": 0.3}}""".format(commands=commands_text, sep=sep)
     
     # 构建请求
     url = f"{conf.api_base}/chat/completions"
@@ -81,7 +60,6 @@ async def analyze_intent(user_message: str, available_commands: List[Dict]) -> O
         "Authorization": f"Bearer {conf.api_key}",
         "Content-Type": "application/json"
     }
-    
     payload = {
         "model": conf.model,
         "messages": [

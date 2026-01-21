@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Dict, Optional
 from loguru import logger
 
+from nonebot.adapters.onebot.v11 import MessageSegment, Message
 from hoshino import Bot, Event, MessageEvent
 from hoshino.util.handle_msg import handle_msg
 
@@ -13,7 +14,7 @@ from hoshino.util.handle_msg import handle_msg
 NLCMD_MARKER = "__NLCMD_INTERNAL__"
 
 
-def construct_virtual_message(intent: Dict) -> str:
+def construct_virtual_message(intent: Dict, event: MessageEvent) -> Optional[Message]:
     """
     根据LLM返回的意图构造虚拟消息
     
@@ -21,21 +22,14 @@ def construct_virtual_message(intent: Dict) -> str:
         intent: LLM返回的意图字典，包含command_msg等字段
     
     Returns:
-        构造的虚拟消息字符串
+        构造的虚拟消息
     """
     command_msg = intent.get("command_msg", "")
     if not command_msg:
         logger.warning(f"意图中缺少command_msg: {intent}")
-        return ""
+        return None
     
-    # 如果command_msg已经包含命令前缀，直接返回
-    # 否则根据命令类型添加前缀
-    if command_msg.startswith(('/', '！', '!')):
-        return command_msg
-    
-    # 对于command类型，添加/前缀
-    # 对于其他类型，直接返回
-    return command_msg
+    return Message(command_msg)
 
 
 async def trigger_command(bot: Bot, event: MessageEvent, intent: Dict) -> bool:
@@ -52,7 +46,7 @@ async def trigger_command(bot: Bot, event: MessageEvent, intent: Dict) -> bool:
     """
     try:
         # 构造虚拟消息
-        virtual_msg = construct_virtual_message(intent)
+        virtual_msg = construct_virtual_message(intent, event)
         if not virtual_msg:
             logger.warning("无法构造虚拟消息")
             return False
@@ -71,9 +65,8 @@ async def trigger_command(bot: Bot, event: MessageEvent, intent: Dict) -> bool:
         setattr(new_event, NLCMD_MARKER, True)
         
         # 调用handle_msg触发命令
+        logger.info(f"触发命令: {virtual_msg}, 置信度: {intent.get('confidence', 0)}")
         await handle_msg(bot, new_event, virtual_msg)
-        
-        logger.info(f"成功触发命令: {virtual_msg}, 置信度: {intent.get('confidence', 0)}")
         return True
         
     except Exception as e:

@@ -136,7 +136,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
     """处理AI聊天消息"""
     # 获取消息内容
     msg = str(event.message).strip()
-    print(f"ai msg {msg}")
     
     # 检查是否以#开头
     if not msg.startswith('#'):

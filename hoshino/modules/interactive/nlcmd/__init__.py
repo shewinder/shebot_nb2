@@ -7,7 +7,7 @@ from loguru import logger
 
 from hoshino import Service, Bot, Event, MessageEvent
 from .config import Config
-from .collector import collect_all_matchers
+from .collector import collect_all_commands
 from .analyzer import analyze_intent
 from .handler import trigger_command, NLCMD_MARKER
 
@@ -25,8 +25,9 @@ def get_commands() -> list:
     """获取命令列表（带缓存）"""
     global _cached_commands
     if _cached_commands is None:
-        _cached_commands = collect_all_matchers()
+        _cached_commands = collect_all_commands()
         logger.info(f"收集到 {len(_cached_commands)} 个可用命令")
+        logger.debug(f"命令列表: {_cached_commands}")
     return _cached_commands
 
 
@@ -60,6 +61,7 @@ async def handle_nlcmd(bot: Bot, event: MessageEvent):
         
         # 调用LLM分析意图
         intent = await analyze_intent(user_message, commands)
+        logger.info(f"LLM分析意图: {intent}")
         if not intent:
             logger.debug("LLM分析失败，跳过处理")
             return
