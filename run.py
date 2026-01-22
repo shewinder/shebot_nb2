@@ -31,7 +31,6 @@ nonebot.load_plugin("nonebot_plugin_parser")
 # nonebot.load_plugin("nonebot_plugin_fortune")
 
 nonebot.load_plugins(base)
-nonebot.load_plugins('hoshino/nlcmd')
 if modules := config.modules:
     for module in modules:
         module = os.path.join(moduledir, module)

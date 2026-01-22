@@ -3,6 +3,7 @@
 解析LLM返回的命令，构造虚拟消息并触发
 """
 from copy import deepcopy
+from hmac import new
 from typing import Dict, Optional, Union
 from loguru import logger
 
@@ -18,8 +19,7 @@ NLCMD_MARKER = "__NLCMD_INTERNAL__"
 async def handle_msg(bot: Bot, event: Event, msg: Union[Message, str]):
     new_event = deepcopy(event)
     if isinstance(msg, str):
-        msg = MessageSegment.text(msg) + ''
-    new_event.message = msg 
+        new_event.message = new_event.message.__class__(msg)
     # handle_event处理时at信息一已经被剥掉，所以传参的msg不添加at
     await handle_event(bot, new_event)
 
@@ -39,7 +39,7 @@ def construct_virtual_message(intent: Dict, event: Event) -> Optional[Message]:
         logger.warning(f"意图中缺少command_msg: {intent}")
         return None
     
-    return Message(command_msg)
+    return command_msg
 
 
 async def trigger_command(bot: Bot, event: Event, intent: Dict) -> bool:

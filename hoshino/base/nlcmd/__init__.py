@@ -32,7 +32,7 @@ def get_commands() -> list:
     return _cached_commands
 
 
-@on_message(rule=to_me(), block=False, priority=999)
+@on_message(rule=to_me(), block=False, priority=999).handle()
 async def handle_nlcmd(bot: Bot, event: Event):
     """处理自然语言命令"""
     # 检查是否已经有NLCMD标记（避免递归）
