@@ -52,7 +52,21 @@ async def get_rank(date: str, mode: str = "day") -> List[RankPic]:
                 raise Exception(f'status {resp.status}')
 
 
-def filter_rank(pics: List[RankPic]) -> List[RankPic]:
+async def get_selected_images() -> List[int]:
+    """获取手动选择的图片ID列表"""
+    url = "https://rsshub.shewinder.win/api/get-selected-images"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("selected_images", [])
+    except Exception:
+        pass
+    return []
+
+
+async def filter_rank(pics: List[RankPic]) -> List[RankPic]:
     def sum_score(pic: RankPic):
         return sum(
             score_data.tag_scores.get(tag, 0) for tag in pic.tags
@@ -64,13 +78,49 @@ def filter_rank(pics: List[RankPic]) -> List[RankPic]:
                 return False
         return True
 
+    # 获取手动选择的图片ID列表
+    selected_pids = await get_selected_images()
+    selected_pics = []
+    pics_dict = {pic.pid: pic for pic in pics}
+    
+    # 优先添加手动选择的图片
+    for pid in selected_pids:
+        if pid in pics_dict:
+            # 从排行榜中找到的图片
+            pic = pics_dict[pid]
+            if not_sent_in_3_days(pic):
+                pic.score = sum_score(pic)
+                if pic.score >= 0:
+                    selected_pics.append(pic)
+                    # 从pics中移除，避免重复选择
+                    pics = [p for p in pics if p.pid != pid]
+        else:
+            # 不在排行榜中，尝试通过API获取
+            try:
+                pic = await get_rankpic(str(pid))
+                if pic and not_sent_in_3_days(pic):
+                    pic.score = sum_score(pic)
+                    if pic.score >= 0:
+                        selected_pics.append(pic)
+            except Exception:
+                pass
+    
+    # 如果未满15张，继续自动挑选流程
     pics = list(filter(not_sent_in_3_days, pics))
     for pic in pics:
         pic.score = sum_score(pic)
     pics = list(filter(lambda x: x.score >= 0, pics))
-    selected_pics = []
-    for _ in range(15):
+    
+    # 从pics中移除已经选择的图片（避免重复）
+    selected_pids_set = {p.pid for p in selected_pics}
+    pics = [p for p in pics if p.pid not in selected_pids_set]
+    
+    # 继续选择直到15张
+    remaining = 15 - len(selected_pics)
+    for _ in range(remaining):
         try:
+            if len(pics) == 0:
+                break
             sidx = choices(range(len(pics)), weights=[x.score + 1 for x in pics], k=1)[0]
             selected_pics.append(pics.pop(sidx))
         except:
