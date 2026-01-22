@@ -63,7 +63,7 @@ qu_sixiu.handle()(ques)
 
 async def revise(bot: Bot, event: GroupMessageEvent, state: T_State):
     qus: Quest = state['qus']
-    ans = state['ans'].upper()
+    ans = str(state.get('ans', '')).upper()
     if judge(qus.Answer, ans):
         await bot.send(event, '恭喜你，答对了！')
     else:
