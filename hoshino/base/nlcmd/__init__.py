@@ -69,6 +69,11 @@ async def handle_nlcmd(bot: Bot, event: Event):
             logger.debug(f"置信度 {confidence} 低于阈值 {conf.min_confidence}，跳过处理")
             return
         
+        # 检查是否精确匹配了某个命令
+        if intent.get("confidence", 0.0) == 1.0:
+            logger.debug(f"用户输入精确匹配了某个命令: {user_message} -> {intent.get('command_msg', '')}")
+            return
+        
         # 触发命令
         success = await trigger_command(bot, event, intent)
         if success:
