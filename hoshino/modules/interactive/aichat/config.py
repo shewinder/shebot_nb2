@@ -15,3 +15,6 @@ class Config(BaseConfig):
     # 其他配置
     max_tokens: int = 1000  # 最大生成token数
     temperature: float = 0.7  # 温度参数
+    
+    # 人格配置
+    default_persona: str = ""  # 全局默认人格文本

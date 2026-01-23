@@ -2,11 +2,13 @@
 AI Chat插件
 支持以#开头的消息触发AI对话，支持session管理
 """
+import json
 import time
 from typing import Dict, List, Optional
 from loguru import logger
 
-from hoshino import Service, Bot, Event
+from hoshino import Service, Bot, Event, userdata_dir
+from hoshino.permission import ADMIN, SUPERUSER
 from hoshino.util import aiohttpx
 from .config import Config
 
@@ -19,17 +21,33 @@ sv = Service('aichat', help_='AI聊天插件，使用#开头触发对话')
 # Session数据结构
 class Session:
     """对话Session"""
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, persona: Optional[str] = None):
         self.session_id = session_id
         self.messages: List[Dict[str, str]] = []  # 对话历史
         self.last_active = time.time()  # 最后活跃时间
+        # 如果有人格，在初始化时添加system message
+        if persona:
+            self.messages.append({"role": "system", "content": persona})
     
     def add_message(self, role: str, content: str):
         """添加消息到历史"""
         self.messages.append({"role": role, "content": content})
-        # 限制历史消息数量
-        if len(self.messages) > conf.max_history * 2:  # *2因为包含user和assistant
-            self.messages = self.messages[-conf.max_history * 2:]
+        # 限制历史消息数量（保留system message）
+        system_msg = None
+        if self.messages and self.messages[0].get("role") == "system":
+            system_msg = self.messages[0]
+            other_messages = self.messages[1:]
+        else:
+            other_messages = self.messages
+        
+        if len(other_messages) > conf.max_history * 2:  # *2因为包含user和assistant
+            other_messages = other_messages[-conf.max_history * 2:]
+        
+        if system_msg:
+            self.messages = [system_msg] + other_messages
+        else:
+            self.messages = other_messages
+        
         self.last_active = time.time()
     
     def is_expired(self) -> bool:
@@ -50,7 +68,7 @@ class SessionManager:
             return f"group_{group_id}_user_{user_id}"
         return f"private_{user_id}"
     
-    def get_session(self, user_id: int, group_id: Optional[int] = None) -> Session:
+    def get_session(self, user_id: int, group_id: Optional[int] = None, persona: Optional[str] = None) -> Session:
         """获取或创建session"""
         session_id = self.get_session_id(user_id, group_id)
         
@@ -63,8 +81,8 @@ class SessionManager:
                 # 过期则删除
                 del self.sessions[session_id]
         
-        # 创建新session
-        session = Session(session_id)
+        # 创建新session，应用人格
+        session = Session(session_id, persona)
         self.sessions[session_id] = session
         return session
     
@@ -78,6 +96,135 @@ class SessionManager:
 
 # 全局Session管理器
 session_manager = SessionManager()
+
+# Persona管理器
+class PersonaManager:
+    """管理AI人格设置（持久化存储）"""
+    def __init__(self):
+        self.personas: Dict[str, str] = {}  # key: persona_id, value: persona_text
+        self.data_file = userdata_dir.joinpath('aichat_personas.json')
+        self.load_personas()
+    
+    def _get_user_persona_id(self, user_id: int, group_id: Optional[int] = None) -> str:
+        """获取用户人格ID"""
+        if group_id:
+            return f"{user_id}_{group_id}"
+        return f"private_{user_id}"
+    
+    def _get_group_persona_id(self, group_id: int) -> str:
+        """获取群组默认人格ID"""
+        return f"group_{group_id}"
+    
+    def _get_global_persona_id(self) -> str:
+        """获取全局默认人格ID"""
+        return "global_default"
+    
+    def get_persona(self, user_id: int, group_id: Optional[int] = None) -> Optional[str]:
+        """获取当前用户的人格（按优先级：用户 > 群组 > 全局）"""
+        # 1. 检查用户人格
+        user_persona_id = self._get_user_persona_id(user_id, group_id)
+        if user_persona_id in self.personas:
+            persona = self.personas[user_persona_id]
+            if persona and persona.strip():
+                return persona.strip()
+        
+        # 2. 检查群组默认人格（仅群聊）
+        if group_id:
+            group_persona_id = self._get_group_persona_id(group_id)
+            if group_persona_id in self.personas:
+                persona = self.personas[group_persona_id]
+                if persona and persona.strip():
+                    return persona.strip()
+        
+        # 3. 检查全局默认人格
+        global_persona_id = self._get_global_persona_id()
+        if global_persona_id in self.personas:
+            persona = self.personas[global_persona_id]
+            if persona and persona.strip():
+                return persona.strip()
+        
+        # 4. 检查配置文件中的默认人格
+        if conf.default_persona and conf.default_persona.strip():
+            return conf.default_persona.strip()
+        
+        return None
+    
+    def set_user_persona(self, user_id: int, group_id: Optional[int], persona: str) -> bool:
+        """设置用户人格"""
+        user_persona_id = self._get_user_persona_id(user_id, group_id)
+        self.personas[user_persona_id] = persona.strip()
+        self.save_personas()
+        return True
+    
+    def set_group_default_persona(self, group_id: int, persona: str) -> bool:
+        """设置群组默认人格"""
+        group_persona_id = self._get_group_persona_id(group_id)
+        self.personas[group_persona_id] = persona.strip()
+        self.save_personas()
+        return True
+    
+    def set_global_default_persona(self, persona: str) -> bool:
+        """设置全局默认人格"""
+        global_persona_id = self._get_global_persona_id()
+        self.personas[global_persona_id] = persona.strip()
+        self.save_personas()
+        return True
+    
+    def clear_user_persona(self, user_id: int, group_id: Optional[int] = None) -> bool:
+        """清除用户人格（使用默认）"""
+        user_persona_id = self._get_user_persona_id(user_id, group_id)
+        if user_persona_id in self.personas:
+            del self.personas[user_persona_id]
+            self.save_personas()
+            return True
+        return False
+    
+    def get_user_persona_info(self, user_id: int, group_id: Optional[int] = None) -> Dict[str, Optional[str]]:
+        """获取用户人格信息（包括所有层级）"""
+        user_persona_id = self._get_user_persona_id(user_id, group_id)
+        user_persona = self.personas.get(user_persona_id)
+        
+        group_persona = None
+        if group_id:
+            group_persona_id = self._get_group_persona_id(group_id)
+            group_persona = self.personas.get(group_persona_id)
+        
+        global_persona_id = self._get_global_persona_id()
+        global_persona = self.personas.get(global_persona_id)
+        
+        config_persona = conf.default_persona if conf.default_persona else None
+        
+        return {
+            "user": user_persona,
+            "group": group_persona,
+            "global": global_persona,
+            "config": config_persona,
+            "effective": self.get_persona(user_id, group_id)
+        }
+    
+    def save_personas(self):
+        """保存人格设置到文件"""
+        try:
+            self.data_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(self.personas, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存人格设置失败: {e}")
+    
+    def load_personas(self):
+        """从文件加载人格设置"""
+        try:
+            if not self.data_file.exists():
+                return
+            
+            with open(self.data_file, 'r', encoding='utf-8') as f:
+                self.personas = json.load(f)
+        except Exception as e:
+            logger.error(f"加载人格设置失败: {e}")
+            self.personas = {}
+
+# 全局Persona管理器
+persona_manager = PersonaManager()
 
 async def call_ai_api(messages: List[Dict[str, str]]) -> Optional[str]:
     """调用AI API"""
@@ -152,15 +299,20 @@ async def handle_ai_chat(bot: Bot, event: Event):
         await bot.send(event, "AI服务未配置，请联系管理员设置API密钥")
         return
     
-    # 获取session
+    # 获取用户ID和群组ID
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
-    session = session_manager.get_session(user_id, group_id)
+    
+    # 获取用户人格
+    persona = persona_manager.get_persona(user_id, group_id)
+    
+    # 获取或创建session（如果是新session会自动应用人格）
+    session = session_manager.get_session(user_id, group_id, persona)
     
     # 添加用户消息
     session.add_message("user", user_input)
     
-    # 调用AI API
+    # 调用AI API（直接使用session.messages，因为人格已经在session中）
     response = await call_ai_api(session.messages)
     
     if response is None:
@@ -195,3 +347,115 @@ async def clear_session(bot: Bot, event: Event):
         await bot.send(event, "对话历史已清除")
     else:
         await bot.send(event, "没有找到对话历史")
+
+# 设置用户人格命令
+set_persona_cmd = sv.on_command('设置人格', aliases=('设置AI人格',), only_group=False)
+
+@set_persona_cmd.handle()
+async def set_persona(bot: Bot, event: Event):
+    """设置用户人格"""
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await set_persona_cmd.finish("请提供人格描述，例如：设置人格 你是一个友好的助手")
+        return
+    
+    persona_text = args[1].strip()
+    if not persona_text:
+        await set_persona_cmd.finish("人格描述不能为空")
+        return
+    
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    persona_manager.set_user_persona(user_id, group_id, persona_text)
+    
+    # 清除当前session，以便新人格生效
+    session_manager.clear_session(user_id, group_id)
+    
+    await set_persona_cmd.finish(f"人格设置成功！\n当前人格：{persona_text}")
+
+# 设置群组默认人格命令（需要管理员权限）
+set_group_persona_cmd = sv.on_command('设置群默认人格', aliases=('设置群组默认人格',), permission=ADMIN, only_group=True)
+
+@set_group_persona_cmd.handle()
+async def set_group_persona(bot: Bot, event: Event):
+    """设置群组默认人格"""
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await set_group_persona_cmd.finish("请提供人格描述，例如：设置群默认人格 你是一个友好的助手")
+        return
+    
+    persona_text = args[1].strip()
+    if not persona_text:
+        await set_group_persona_cmd.finish("人格描述不能为空")
+        return
+    
+    group_id = event.group_id
+    persona_manager.set_group_default_persona(group_id, persona_text)
+    
+    await set_group_persona_cmd.finish(f"群组默认人格设置成功！\n当前人格：{persona_text}")
+
+# 设置全局默认人格命令（需要超级用户权限）
+set_global_persona_cmd = sv.on_command('设置全局默认人格', aliases=('设置全局人格',), permission=SUPERUSER, only_group=False)
+
+@set_global_persona_cmd.handle()
+async def set_global_persona(bot: Bot, event: Event):
+    """设置全局默认人格"""
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await set_global_persona_cmd.finish("请提供人格描述，例如：设置全局默认人格 你是一个友好的助手")
+        return
+    
+    persona_text = args[1].strip()
+    if not persona_text:
+        await set_global_persona_cmd.finish("人格描述不能为空")
+        return
+    
+    persona_manager.set_global_default_persona(persona_text)
+    
+    await set_global_persona_cmd.finish(f"全局默认人格设置成功！\n当前人格：{persona_text}")
+
+# 查看人格命令
+view_persona_cmd = sv.on_command('查看人格', aliases=('查看AI人格', '当前人格'), only_group=False)
+
+@view_persona_cmd.handle()
+async def view_persona(bot: Bot, event: Event):
+    """查看当前人格设置"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    info = persona_manager.get_user_persona_info(user_id, group_id)
+    
+    lines = ["当前人格设置："]
+    
+    if info["user"]:
+        lines.append(f"用户人格：{info['user']}")
+    if group_id and info["group"]:
+        lines.append(f"群组默认人格：{info['group']}")
+    if info["global"]:
+        lines.append(f"全局默认人格：{info['global']}")
+    if info["config"]:
+        lines.append(f"配置默认人格：{info['config']}")
+    
+    if info["effective"]:
+        lines.append(f"\n生效的人格：{info['effective']}")
+    else:
+        lines.append("\n未设置人格，使用默认行为")
+    
+    await view_persona_cmd.finish("\n".join(lines))
+
+# 清除人格命令
+clear_persona_cmd = sv.on_command('清除人格', aliases=('清除AI人格',), only_group=False)
+
+@clear_persona_cmd.handle()
+async def clear_persona(bot: Bot, event: Event):
+    """清除用户人格设置"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    if persona_manager.clear_user_persona(user_id, group_id):
+        # 清除当前session，以便使用默认人格
+        session_manager.clear_session(user_id, group_id)
+        await clear_persona_cmd.finish("人格已清除，将使用默认人格")
+    else:
+        await clear_persona_cmd.finish("未设置用户人格，无需清除")
