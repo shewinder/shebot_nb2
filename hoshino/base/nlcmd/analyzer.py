@@ -43,7 +43,7 @@ async def analyze_intent(user_message: str, available_commands: List[CommandInfo
 }}
 
 规则：
-1. 你的输出将被直接写入 event.message 并重新投递，所以 command_msg 必须是“用户实际会发的那句话/那条命令”。\n+2. 若 matcher 的 triggers.commands 非空，优先用命令触发：command_msg 建议形如 “/命令 参数…”。\n+3. 若 triggers.shell_commands 非空，可用 shell 命令触发：command_msg 形如 “/命令 参数…”（具体取决于该 bot 的命令前缀）。\n+4. 若无法确定，请将 confidence 设为 < 0.5。\n+5. 只返回 JSON，不要夹带任何解释文字。\n+6. 如果用户输入精确匹配了某个命令，请将 confidence设置为1.0。
+1. 你的输出将被直接写入 event.message 并重新投递，所以 command_msg 必须是“用户实际会发的那句话/那条命令”。\n+2. 若 matcher 的 triggers.commands 非空，优先用命令触发：command_msg 建议形如 “/命令 参数…”。\n+3. 若 triggers.shell_commands 非空，可用 shell 命令触发：command_msg 形如 “/命令 参数…”（具体取决于该 bot 的命令前缀）。\n+4. 若无法确定，请将 confidence 设为 < 0.5。\n+5. 只返回 JSON，不要夹带任何解释文字。\n+6. **重要：如果用户输入的消息已经精确匹配了可用命令列表中的某个命令（包括命令前缀和命令名完全一致），请返回 {{"skip": true}}，表示该消息已经精确匹配命令，不需要 nlcmd 处理。**
 
 示例：
 用户: "帮我开启解析功能"

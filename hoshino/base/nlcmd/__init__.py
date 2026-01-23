@@ -56,6 +56,13 @@ async def handle_nlcmd(bot: Bot, event: Event):
             logger.warning("没有可用的命令列表")
             return
         
+        # 检查是否精确匹配了某个命令
+        for command in commands:
+            for cmd in command.cmds:
+                if cmd in user_message:
+                    logger.debug(f"用户输入很可能精确匹配了命令: {user_message} -> {cmd}, 跳过 nlcmd 处理")
+                    return
+        
         # 调用LLM分析意图
         intent = await analyze_intent(user_message, commands)
         logger.info(f"LLM分析意图: {intent}")
@@ -70,8 +77,8 @@ async def handle_nlcmd(bot: Bot, event: Event):
             return
         
         # 检查是否精确匹配了某个命令
-        if intent.get("confidence", 0.0) == 1.0:
-            logger.debug(f"用户输入精确匹配了某个命令: {user_message} -> {intent.get('command_msg', '')}")
+        if intent and intent.get("skip") == True:
+            logger.debug("LLM判断消息精确匹配了命令，跳过 nlcmd 处理")
             return
         
         # 触发命令
