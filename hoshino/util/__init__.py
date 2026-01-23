@@ -92,8 +92,11 @@ def get_text_size(text: str, font: ImageFont.ImageFont = DEFAULTFONT, padding: T
     '''
     with Image.new('RGBA', (1, 1), (255, 255, 255, 255)) as base:
         dr = ImageDraw.ImageDraw(base)
-    ret = dr.textsize(text, font=font, spacing=spacing)
-    return ret[0]+padding[0]+padding[1], ret[1]+padding[2]+padding[3]
+    # Pillow 10.0.0+ 使用 textbbox 替代已移除的 textsize
+    bbox = dr.textbbox((0, 0), text, font=font, spacing=spacing)
+    width = bbox[2] - bbox[0]  # right - left
+    height = bbox[3] - bbox[1]  # bottom - top
+    return width+padding[0]+padding[1], height+padding[2]+padding[3]
 
 
 def text2pic(text: str, font: ImageFont.ImageFont = DEFAULTFONT, padding: Tuple[int, int, int, int] = (20, 20, 20, 20), spacing: int = 5) -> Image.Image:

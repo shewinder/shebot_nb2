@@ -9,6 +9,12 @@ from pydantic import BaseModel
 from nonebot.rule import CommandRule, ShellCommandRule
 import nonebot
 
+try:
+    from arclet.alconna import command_manager
+    ALC = True
+except ImportError:
+    ALC = False
+
 
 class CommandInfo(BaseModel):
     plugin: str
@@ -30,7 +36,7 @@ def collect_all_commands() -> List[CommandInfo]:
             for checker in rule.checkers:
                 ca = checker.call
                 if isinstance(ca, CommandRule):
-                    cmds = [" ".join(cmd) for cmd in ca.cmds]
+                    cmds = [".".join(cmd) for cmd in ca.cmds]
                     all_commands.append(CommandInfo(
                         plugin=plugin.name,
                         cmds=cmds,
@@ -46,6 +52,17 @@ def collect_all_commands() -> List[CommandInfo]:
                     ))
                 else:
                     continue # TODO 后续支持AlconnaRule
+    if ALC:
+        for cmd in command_manager.get_commands():
+            ns = cmd.namespace
+            _cmds = [cmd.name]
+            _cmds.extend(command_manager.get_shortcut(cmd).keys())
+            all_commands.append(CommandInfo(
+                plugin=ns,
+                cmds=_cmds,
+                shell_command_help="",
+            ))
+
     return all_commands
 
                 

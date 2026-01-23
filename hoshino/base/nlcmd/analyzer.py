@@ -49,8 +49,6 @@ async def analyze_intent(user_message: str, available_commands: List[CommandInfo
 用户: "帮我开启解析功能"
 返回: {{"command_msg": "{sep}开启解析", "command": "开启解析", "confidence": 0.9}}
 
-用户: "查看群聊"
-返回: {{"command_msg": "{sep}ls group", "command": "ls group", "confidence": 0.95}}
 
 用户: "你好"
 返回: {{"command_msg": "你好", "command": "你好", "confidence": 0.3}}""".format(commands=commands_text, sep=sep)

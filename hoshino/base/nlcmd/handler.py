@@ -20,6 +20,12 @@ async def handle_msg(bot: Bot, event: Event, msg: Union[Message, str]):
     new_event = deepcopy(event)
     if isinstance(msg, str):
         new_event.message = new_event.message.__class__(msg)
+        new_event.message_id = new_event.message_id + 1 # 更新message_id
+        
+        # 删除__uniseg_message_id__字段
+        if hasattr(new_event, "__uniseg_message_id__"):
+            del new_event.__dict__["__uniseg_message_id__"]
+
     # handle_event处理时at信息一已经被剥掉，所以传参的msg不添加at
     await handle_event(bot, new_event)
 
