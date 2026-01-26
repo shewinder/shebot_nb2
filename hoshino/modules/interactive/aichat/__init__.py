@@ -332,7 +332,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
         logger.error(f"发送AI回复失败: {e}")
 
 # 注册消息处理器
-sv.on_message(priority=10, block=False).handle()(handle_ai_chat)
+sv.on_message(priority=10, block=False, only_group=False).handle()(handle_ai_chat)
 
 # 清除session命令
 clear_cmd = sv.on_command('清除对话', aliases=('清空对话', '重置对话'), only_group=False)

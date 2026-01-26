@@ -9,11 +9,11 @@ class Config(BaseConfig):
     model: str = "deepseek-chat"  # 使用的模型
     
     # Session配置
-    max_history: int = 20  # 每个session保存的最大历史消息数
+    max_history: int = 100  # 每个session保存的最大历史消息数
     session_timeout: int = 3600  # Session超时时间（秒），0表示永不过期
     
     # 其他配置
-    max_tokens: int = 1000  # 最大生成token数
+    max_tokens: int = 8192  # 最大生成token数
     temperature: float = 0.7  # 温度参数
     
     # 人格配置
