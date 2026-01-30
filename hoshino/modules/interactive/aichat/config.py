@@ -18,3 +18,4 @@ class Config(BaseConfig):
     
     # 人格配置
     default_persona: str = ""  # 全局默认人格文本
+    max_saved_personas: int = 5  # 每个用户最多保存的人格数量
