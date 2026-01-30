@@ -4,7 +4,7 @@ AI Chat插件
 """
 import json
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from hoshino import Service, Bot, Event, userdata_dir
@@ -321,57 +321,123 @@ class PersonaManager:
 # 全局Persona管理器
 persona_manager = PersonaManager()
 
-async def call_ai_api(messages: List[Dict[str, str]]) -> Optional[str]:
-    """调用AI API"""
-    if not conf.api_key:
-        logger.warning("AI API密钥未配置")
+
+def _build_api_config_dict(api_entry) -> Dict[str, Any]:
+    """从 ApiEntry 构建完整 API 调用参数字典（补全默认值）"""
+    max_tokens = api_entry.max_tokens if api_entry.max_tokens is not None else conf.max_tokens
+    temperature = api_entry.temperature if api_entry.temperature is not None else conf.temperature
+    return {
+        "api_base": api_entry.api_base,
+        "api_key": api_entry.api_key,
+        "model": api_entry.model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+
+
+# API 选择管理器（全局唯一，仅超级用户可切换）
+class ApiManager:
+    """管理当前使用的大模型 API（全局唯一）"""
+    def __init__(self):
+        self._current_api_id: str = ""
+        self.data_file = userdata_dir.joinpath('aichat_api_selection.json')
+        self.load()
+
+    def load(self):
+        try:
+            if self.data_file.exists():
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # 新格式：{"current_api": "kimi"}；旧格式（按用户）取第一个有效值或忽略
+                if isinstance(data, dict) and "current_api" in data:
+                    self._current_api_id = data.get("current_api", "") or ""
+                else:
+                    self._current_api_id = ""
+        except Exception as e:
+            logger.error(f"加载 API 选择失败: {e}")
+            self._current_api_id = ""
+
+    def save(self):
+        try:
+            self.data_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump({"current_api": self._current_api_id}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存 API 选择失败: {e}")
+
+    def get_current_api_id(self) -> str:
+        """获取当前全局使用的 API id"""
+        if self._current_api_id and conf.get_api_by_id(self._current_api_id):
+            return self._current_api_id
+        return conf.get_default_api_id()
+
+    def set_current_api_id(self, api_id: str) -> bool:
+        """设置全局当前使用的 API id（仅超级用户应调用）"""
+        if not conf.get_api_by_id(api_id):
+            return False
+        self._current_api_id = api_id
+        self.save()
+        return True
+
+    def get_api_config(self) -> Optional[Dict[str, Any]]:
+        """获取当前应使用的 API 配置（完整 dict）"""
+        api_id = self.get_current_api_id()
+        entry = conf.get_api_by_id(api_id)
+        if not entry:
+            return None
+        return _build_api_config_dict(entry)
+
+
+api_manager = ApiManager()
+
+
+async def call_ai_api(messages: List[Dict[str, str]], api_config: Dict[str, Any]) -> Optional[str]:
+    """调用 AI API，使用指定的 api_config"""
+    if not api_config or not api_config.get("api_key"):
+        logger.warning("AI API 未配置或密钥为空")
         return None
-    
-    # 确保messages不为空
+
     if not messages:
         logger.error("消息列表为空")
         return None
-    
-    url = f"{conf.api_base}/chat/completions"
+
+    url = f"{api_config['api_base'].rstrip('/')}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {conf.api_key}",
+        "Authorization": f"Bearer {api_config['api_key']}",
         "Content-Type": "application/json"
     }
-    
     payload = {
-        "model": conf.model,
+        "model": api_config["model"],
         "messages": messages,
-        "max_tokens": conf.max_tokens,
-        "temperature": conf.temperature
+        "max_tokens": api_config.get("max_tokens", conf.max_tokens),
+        "temperature": api_config.get("temperature", conf.temperature)
     }
-    
+
     try:
         resp = await aiohttpx.post(url, headers=headers, json=payload)
         if not resp.ok:
-            logger.error(f"AI API调用失败: {resp.status_code}, 响应: {resp.text}")
+            logger.error(f"AI API 调用失败: {resp.status_code}, 响应: {resp.text}")
             return None
-        
+
         result = resp.json
         if not result:
-            logger.error("AI API返回空结果")
+            logger.error("AI API 返回空结果")
             return None
-        
+
         sv.logger.debug(str(result))
-            
+
         if "choices" in result and len(result["choices"]) > 0:
             message = result["choices"][0].get("message", {})
             if "content" in message:
                 return message["content"]
-            else:
-                logger.error(f"AI API返回格式错误，缺少content字段: {result}")
-                return None
-        else:
-            error_info = result.get("error", {})
-            error_msg = error_info.get("message", "未知错误") if error_info else "返回格式错误"
-            logger.error(f"AI API返回错误: {error_msg}, 完整响应: {result}")
+            logger.error(f"AI API 返回格式错误，缺少 content 字段: {result}")
             return None
+        error_info = result.get("error", {})
+        error_msg = error_info.get("message", "未知错误") if error_info else "返回格式错误"
+        logger.error(f"AI API 返回错误: {error_msg}, 完整响应: {result}")
+        return None
     except Exception as e:
-        logger.exception(f"调用AI API异常: {e}")
+        logger.exception(f"调用 AI API 异常: {e}")
         return None
 
 async def handle_ai_chat(bot: Bot, event: Event):
@@ -389,26 +455,19 @@ async def handle_ai_chat(bot: Bot, event: Event):
         await bot.send(event, "请输入要询问的内容（#后面）")
         return
     
-    # 检查API配置
-    if not conf.api_key:
-        await bot.send(event, "AI服务未配置，请联系管理员设置API密钥")
-        return
-    
-    # 获取用户ID和群组ID
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
-    
-    # 获取用户人格
+
+    api_config = api_manager.get_api_config()
+    if not api_config or not api_config.get("api_key"):
+        await bot.send(event, "AI 服务未配置或当前模型不可用，请联系超级用户配置或切换模型")
+        return
+
     persona = persona_manager.get_persona(user_id, group_id)
-    
-    # 获取或创建session（如果是新session会自动应用人格）
     session = session_manager.get_session(user_id, group_id, persona)
-    
-    # 添加用户消息
     session.add_message("user", user_input)
-    
-    # 调用AI API（直接使用session.messages，因为人格已经在session中）
-    response = await call_ai_api(session.messages)
+
+    response = await call_ai_api(session.messages, api_config)
     
     if response is None:
         await bot.send(event, "AI服务暂时不可用，请稍后再试")
@@ -662,3 +721,58 @@ async def delete_persona(bot: Bot, event: Event):
     
     success, msg = persona_manager.delete_saved_persona(user_id, group_id, name)
     await delete_persona_cmd.finish(msg)
+
+# 列出模型命令
+list_models_cmd = sv.on_command('列出模型', aliases=('模型列表', '可用模型'), only_group=False)
+
+@list_models_cmd.handle()
+async def list_models(bot: Bot, event: Event):
+    """列出已配置的大模型 API"""
+    apis = conf.get_api_list()
+    if not apis:
+        await list_models_cmd.finish("未配置任何大模型 API，请联系管理员在 aichat.json 中配置 apis")
+        return
+    default_id = conf.get_default_api_id()
+    current_id = api_manager.get_current_api_id()
+    lines = ["已配置的大模型："]
+    for i, a in enumerate(apis, 1):
+        mark = " (当前)" if a.id == current_id else (" (默认)" if a.id == default_id else "")
+        lines.append(f"{i}. {a.name}（id: {a.id}）{mark} - {a.model}")
+    lines.append("\n超级用户可使用「切换模型 id」或「切换模型 名称」切换全局使用的模型")
+    await list_models_cmd.finish("\n".join(lines))
+
+# 切换模型命令（仅超级用户）
+switch_model_cmd = sv.on_command('切换模型', aliases=('选择模型', '切换大模型'), permission=SUPERUSER, only_group=False)
+
+@switch_model_cmd.handle()
+async def switch_model(bot: Bot, event: Event):
+    """切换全局使用的大模型（仅超级用户）"""
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await switch_model_cmd.finish("请指定模型 id 或名称，例如：切换模型 kimi\n使用「列出模型」查看可用模型")
+        return
+    key = args[1].strip()
+    apis = conf.get_api_list()
+    target = None
+    for a in apis:
+        if a.id == key or a.name == key:
+            target = a
+            break
+    if not target:
+        await switch_model_cmd.finish(f"未找到模型「{key}」，使用「列出模型」查看可用模型")
+        return
+    api_manager.set_current_api_id(target.id)
+    await switch_model_cmd.finish(f"已切换全局模型为：{target.name}（{target.model}）")
+
+# 当前模型命令
+current_model_cmd = sv.on_command('当前模型', aliases=('查看模型', '当前大模型'), only_group=False)
+
+@current_model_cmd.handle()
+async def current_model(bot: Bot, event: Event):
+    """查看当前全局使用的大模型"""
+    api_id = api_manager.get_current_api_id()
+    entry = conf.get_api_by_id(api_id)
+    if not entry:
+        await current_model_cmd.finish("当前未选择有效模型，超级用户可使用「切换模型」进行设置")
+        return
+    await current_model_cmd.finish(f"当前全局使用：{entry.name}（id: {entry.id}）\n模型：{entry.model}")
