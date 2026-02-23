@@ -13,6 +13,7 @@ class ApiEntry(BaseModel):
     model: str = "deepseek-chat"
     max_tokens: Optional[int] = None  # 不填则用全局默认
     temperature: Optional[float] = None  # 不填则用全局默认
+    supports_multimodal: Optional[bool] = None  # 是否支持多模态（图片），None 表示未配置，默认 False
 
 
 @configuration('aichat')

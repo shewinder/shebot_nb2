@@ -339,6 +339,8 @@ def _build_api_config_dict(api_entry) -> Dict[str, Any]:
         config_dict["max_tokens"] = api_entry.max_tokens
     if api_entry.temperature is not None:
         config_dict["temperature"] = api_entry.temperature
+    # 多模态支持标志（None 表示未配置，默认为 False）
+    config_dict["supports_multimodal"] = api_entry.supports_multimodal if api_entry.supports_multimodal is not None else False
     return config_dict
 
 
@@ -514,11 +516,23 @@ async def handle_ai_chat(bot: Bot, event: Event):
     # 引用消息里的图片
     image_urls.extend(get_reply_imageurl(event))
     
+    # 检查模型是否支持多模态
+    supports_multimodal = api_config.get("supports_multimodal", False)
     
     # 构建消息内容（支持多模态）
     message_content: Union[str, List[Dict[str, Any]]]
     
-    if image_urls:
+    # 如果模型不支持多模态，但有图片，则只发送文本并提示
+    if image_urls and not supports_multimodal:
+        if user_input:
+            # 有文本内容，只发送文本，忽略图片
+            logger.info(f"模型 {api_config.get('model')} 不支持多模态，忽略图片，只发送文本")
+            message_content = user_input
+        else:
+            # 只有图片没有文本，提示用户
+            await bot.send(event, f"当前模型 {api_config.get('model')} 不支持图片识别，请发送文本内容")
+            return
+    elif image_urls and supports_multimodal:
         # 有多模态内容：图片 + 文本
         content_parts: List[Dict[str, Any]] = []
         

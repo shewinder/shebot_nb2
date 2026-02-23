@@ -6,6 +6,7 @@ LastEditTime: 2021-03-04 22:23:41
 Description: 
 Github: http://github.com/AkiraXie/
 '''
+from pathlib import Path
 from nonebot.log import logger
 import os
 import sys
@@ -65,7 +66,7 @@ class Filter:
         return record["level"].no >= levelno and nologflag
 
 
-log_root = data_dir / 'logs'
+log_root = Path("logs")
 os.makedirs(log_root, exist_ok=True)
 logger.remove()
 hoshino_filter = Filter()
