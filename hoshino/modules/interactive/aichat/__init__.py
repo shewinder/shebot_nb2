@@ -11,7 +11,7 @@ from loguru import logger
 
 from hoshino import Service, Bot, Event, userdata_dir
 from hoshino.permission import ADMIN, SUPERUSER
-from hoshino.util import aiohttpx, get_event_imageurl
+from hoshino.util import aiohttpx, get_event_imageurl, get_reply_imageurl
 from .config import Config
 
 # 加载配置
@@ -328,16 +328,18 @@ persona_manager = PersonaManager()
 
 
 def _build_api_config_dict(api_entry) -> Dict[str, Any]:
-    """从 ApiEntry 构建完整 API 调用参数字典（补全默认值）"""
-    max_tokens = api_entry.max_tokens if api_entry.max_tokens is not None else conf.max_tokens
-    temperature = api_entry.temperature if api_entry.temperature is not None else conf.temperature
-    return {
+    """从 ApiEntry 构建完整 API 调用参数字典（只包含配置的参数）"""
+    config_dict = {
         "api_base": api_entry.api_base,
         "api_key": api_entry.api_key,
         "model": api_entry.model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
     }
+    # 只在配置了参数时才添加（不强制使用默认值）
+    if api_entry.max_tokens is not None:
+        config_dict["max_tokens"] = api_entry.max_tokens
+    if api_entry.temperature is not None:
+        config_dict["temperature"] = api_entry.temperature
+    return config_dict
 
 
 # API 选择管理器（全局唯一，仅超级用户可切换）
@@ -452,9 +454,12 @@ async def call_ai_api(messages: List[Dict[str, Any]], api_config: Dict[str, Any]
     payload = {
         "model": api_config["model"],
         "messages": messages,
-        "max_tokens": api_config.get("max_tokens", conf.max_tokens),
-        "temperature": api_config.get("temperature", conf.temperature)
     }
+    # 只在配置了参数时才添加到 payload（避免某些模型不支持这些参数）
+    if "max_tokens" in api_config:
+        payload["max_tokens"] = api_config["max_tokens"]
+    if "temperature" in api_config:
+        payload["temperature"] = api_config["temperature"]
 
     try:
         resp = await aiohttpx.post(url, headers=headers, json=payload)
@@ -505,6 +510,10 @@ async def handle_ai_chat(bot: Bot, event: Event):
 
     # 检测消息中的图片
     image_urls = get_event_imageurl(event)
+    
+    # 引用消息里的图片
+    image_urls.extend(get_reply_imageurl(event))
+    
     
     # 构建消息内容（支持多模态）
     message_content: Union[str, List[Dict[str, Any]]]

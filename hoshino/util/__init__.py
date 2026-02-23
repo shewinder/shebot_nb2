@@ -8,6 +8,7 @@ import json
 import unicodedata
 import time
 from nonebot.adapters.onebot.v11 import Event, GroupMessageEvent, PrivateMessageEvent
+from nonebot.adapters.onebot.v11.event import Reply
 from nonebot.typing import T_State
 import pytz
 import base64
@@ -182,6 +183,22 @@ def get_event_imageurl(event: Event) -> List[str]:
         if s.type == 'image' and 'url' in s.data
     ]
     return imglist
+
+def get_reply_imageurl(event: Event) -> List[str]:
+    if not hasattr(event, "reply"):
+        return []
+    
+    if not event.reply:
+        return []
+    
+    reply: Reply = event.reply
+    imglist=[
+        s.data['url']
+        for s in reply.message
+        if s.type == 'image' and 'url' in s.data
+    ]
+    return imglist
+
 
 async def _strip_cmd(bot: "Bot", event: "Event", state: T_State):
     message = event.get_message()
