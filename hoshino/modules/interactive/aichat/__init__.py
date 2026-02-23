@@ -4,16 +4,21 @@ AI Chat插件
 """
 import json
 import time
-from typing import Any, Dict, List, Optional, Tuple
+import base64
+import os
+from typing import Any, Dict, List, Optional, Tuple, Union
 from loguru import logger
 
 from hoshino import Service, Bot, Event, userdata_dir
 from hoshino.permission import ADMIN, SUPERUSER
-from hoshino.util import aiohttpx
+from hoshino.util import aiohttpx, get_event_imageurl
 from .config import Config
 
 # 加载配置
 conf = Config.get_instance('aichat')
+
+# 运行时数据目录（data/aichat）
+aichat_data_dir = userdata_dir.joinpath('aichat')
 
 # 创建Service
 sv = Service('aichat', help_='AI聊天插件，使用#开头触发对话')
@@ -23,14 +28,14 @@ class Session:
     """对话Session"""
     def __init__(self, session_id: str, persona: Optional[str] = None):
         self.session_id = session_id
-        self.messages: List[Dict[str, str]] = []  # 对话历史
+        self.messages: List[Dict[str, Any]] = []  # 对话历史（支持文本和多模态）
         self.last_active = time.time()  # 最后活跃时间
         # 如果有人格，在初始化时添加system message
         if persona:
             self.messages.append({"role": "system", "content": persona})
     
-    def add_message(self, role: str, content: str):
-        """添加消息到历史"""
+    def add_message(self, role: str, content: Union[str, List[Dict[str, Any]]]):
+        """添加消息到历史（支持文本或多模态内容）"""
         self.messages.append({"role": role, "content": content})
         # 限制历史消息数量（保留system message）
         system_msg = None
@@ -103,8 +108,8 @@ class PersonaManager:
     def __init__(self):
         self.personas: Dict[str, str] = {}  # key: persona_id, value: persona_text
         self.saved_personas: Dict[str, Dict[str, str]] = {}  # key: user_id, value: {name: persona_text}
-        self.data_file = userdata_dir.joinpath('aichat_personas.json')
-        self.saved_personas_file = userdata_dir.joinpath('aichat_saved_personas.json')
+        self.data_file = aichat_data_dir.joinpath('aichat_personas.json')
+        self.saved_personas_file = aichat_data_dir.joinpath('aichat_saved_personas.json')
         self.load_personas()
         self.load_saved_personas()
     
@@ -340,7 +345,7 @@ class ApiManager:
     """管理当前使用的大模型 API（全局唯一）"""
     def __init__(self):
         self._current_api_id: str = ""
-        self.data_file = userdata_dir.joinpath('aichat_api_selection.json')
+        self.data_file = aichat_data_dir.joinpath('aichat_api_selection.json')
         self.load()
 
     def load(self):
@@ -391,8 +396,46 @@ class ApiManager:
 api_manager = ApiManager()
 
 
-async def call_ai_api(messages: List[Dict[str, str]], api_config: Dict[str, Any]) -> Optional[str]:
-    """调用 AI API，使用指定的 api_config"""
+async def download_image_to_base64(image_url: str) -> Optional[str]:
+    """下载图片并转换为 base64 格式的 data URL"""
+    try:
+        resp = await aiohttpx.get(image_url)
+        if not resp.ok:
+            logger.error(f"下载图片失败: {resp.status_code}, URL: {image_url}")
+            return None
+        
+        image_data = resp.content
+        if not image_data:
+            logger.error(f"图片数据为空: {image_url}")
+            return None
+        
+        # 尝试从 Content-Type 响应头获取图片格式
+        ext = "png"  # 默认格式
+        content_type = resp.headers.get("Content-Type", "")
+        if content_type and content_type.startswith("image/"):
+            # 从 Content-Type 提取格式，如 "image/jpeg" -> "jpeg"
+            ext = content_type.split("/")[1].split(";")[0].strip()
+            # 标准化格式名称
+            if ext == "jpeg":
+                ext = "jpg"
+        else:
+            # 如果响应头没有，尝试从 URL 推断
+            if "." in image_url:
+                url_ext = os.path.splitext(image_url.split("?")[0])[1].lower()
+                if url_ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+                    ext = url_ext.lstrip(".")
+        
+        # 编码为 base64
+        base64_data = base64.b64encode(image_data).decode('utf-8')
+        image_url_data = f"data:image/{ext};base64,{base64_data}"
+        return image_url_data
+    except Exception as e:
+        logger.exception(f"处理图片失败: {e}, URL: {image_url}")
+        return None
+
+
+async def call_ai_api(messages: List[Dict[str, Any]], api_config: Dict[str, Any]) -> Optional[str]:
+    """调用 AI API，使用指定的 api_config（支持文本和多模态消息）"""
     if not api_config or not api_config.get("api_key"):
         logger.warning("AI API 未配置或密钥为空")
         return None
@@ -441,7 +484,7 @@ async def call_ai_api(messages: List[Dict[str, str]], api_config: Dict[str, Any]
         return None
 
 async def handle_ai_chat(bot: Bot, event: Event):
-    """处理AI聊天消息"""
+    """处理AI聊天消息（支持图片多模态）"""
     # 获取消息内容
     msg = str(event.message).strip()
     
@@ -451,9 +494,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     # 移除#前缀
     user_input = msg[1:].strip()
-    if not user_input:
-        await bot.send(event, "请输入要询问的内容（#后面）")
-        return
     
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
@@ -463,9 +503,59 @@ async def handle_ai_chat(bot: Bot, event: Event):
         await bot.send(event, "AI 服务未配置或当前模型不可用，请联系超级用户配置或切换模型")
         return
 
+    # 检测消息中的图片
+    image_urls = get_event_imageurl(event)
+    
+    # 构建消息内容（支持多模态）
+    message_content: Union[str, List[Dict[str, Any]]]
+    
+    if image_urls:
+        # 有多模态内容：图片 + 文本
+        content_parts: List[Dict[str, Any]] = []
+        
+        # 处理所有图片
+        for img_url in image_urls:
+            base64_image = await download_image_to_base64(img_url)
+            if base64_image:
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": base64_image,
+                    },
+                })
+            else:
+                logger.warning(f"图片处理失败，跳过: {img_url}")
+        
+        # 如果所有图片都处理失败，且没有文本，则返回错误
+        if not content_parts and not user_input:
+            await bot.send(event, "图片处理失败，请重试或提供文本内容")
+            return
+        
+        # 如果有文本内容，添加文本部分
+        if user_input:
+            content_parts.append({
+                "type": "text",
+                "text": user_input,
+            })
+        
+        # 如果只有图片没有文本，添加一个默认提示
+        if not user_input and content_parts:
+            content_parts.append({
+                "type": "text",
+                "text": "请描述图片的内容。",
+            })
+        
+        message_content = content_parts if content_parts else user_input
+    else:
+        # 纯文本消息，检查是否有内容
+        if not user_input:
+            await bot.send(event, "请输入要询问的内容（#后面）")
+            return
+        message_content = user_input
+
     persona = persona_manager.get_persona(user_id, group_id)
     session = session_manager.get_session(user_id, group_id, persona)
-    session.add_message("user", user_input)
+    session.add_message("user", message_content)
 
     response = await call_ai_api(session.messages, api_config)
     
@@ -483,6 +573,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
     try:
         await bot.send(event, response)
     except Exception as e:
+        logger.error(str(response))
         logger.error(f"发送AI回复失败: {e}")
 
 # 注册消息处理器
