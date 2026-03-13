@@ -42,30 +42,31 @@ def init_web():
     async def _(req: Request, call_next: Callable):
         path: str = req.scope["path"]
         
-        # 静态文件和页面请求不检查 token
+        # API 请求、静态文件、WebSocket 不检查 token，直接处理
         for p in _whitelist:
             if path.startswith(p):
                 resp = await call_next(req)
                 return resp
         
-        # 根路径返回 index.html
-        if path == "/" or path == "/index.html":
+        # WebSocket 协议不处理
+        if req.scope["type"] == "websocket":
+            return await call_next(req)
+        
+        # 尝试处理请求，如果 404 则返回前端页面（SPA fallback）
+        resp = await call_next(req)
+        
+        # 如果是 404，尝试返回 index.html（前端路由接管）
+        if resp.status_code == 404:
+            # 排除明确的后端路由
+            if path.startswith("/api/") or path.startswith("/ws/"):
+                return resp
+            
             index_path = os.path.join(_static_dir, "index.html")
             if os.path.exists(index_path):
                 return FileResponse(index_path)
             else:
                 return Response("Web UI not built. Run: cd web && npm run build", status_code=404)
         
-        # API 请求检查 token（暂时注释掉，按需启用）
-        # headers = req.headers
-        # if not 'token' in headers:
-        #     logger.info('request api without access token')
-        #     return Response(status_code=401, content='no token')
-        # token = headers['token']
-        # if not check_auth(token):
-        #     return Response(status_code=401, content='wrong token or token expired')
-        
-        resp = await call_next(req)
         return resp
 
 
