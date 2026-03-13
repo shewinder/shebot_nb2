@@ -27,16 +27,14 @@ def refresh_subdata():
     _dict: Dict[str, Subscribe] = {}
     for sub in subs:
         if sub.url in _dict:
-            _dict[sub.url].creator[sub.group].append(sub.creator)
+            _dict[sub.url].creator.setdefault(sub.group, []).append(sub.creator)
         else:
-            x = defaultdict(list)
-            x.update({sub.group: [sub.creator]})
             _dict[sub.url] = Subscribe(
                 url=sub.url,
                 checker=sub.checker,
                 remark=sub.remark,
                 date=sub.date,
-                creator=x,
+                creator={sub.group: [sub.creator]},
             )
     for sub_item in _dict.values():
         _sub_data[sub_item.checker].append(sub_item)
@@ -46,7 +44,7 @@ class Subscribe(BaseModel):
     remark: str
     url: str
     date: str
-    creator: defaultdict  # {group_id: [user_id, ...]}
+    creator: Dict[str, List[str]]  # {group_id: [user_id, ...]}
 
     def delete(self):
         SubscribeRecord.delete().where(SubscribeRecord.url == self.url).execute()
