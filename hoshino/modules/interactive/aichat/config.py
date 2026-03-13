@@ -19,14 +19,17 @@ class ApiEntry(BaseModel):
 @configuration('aichat')
 class Config(BaseConfig):
     """AI Chat插件配置"""
-    # 多 API 配置（优先使用；为空时使用下方单 API 配置）
-    apis: List[ApiEntry] = []
-    default_api: str = ""  # 默认使用的 API id，为空则取 apis[0] 或单 API
-
-    # 单 API 配置（兼容旧版；当 apis 为空时生效）
-    api_base: str = "https://api.deepseek.com"
-    api_key: str = ""
-    model: str = "deepseek-chat"
+    # 多 API 配置（默认提供一个示例模板）
+    apis: List[ApiEntry] = [
+        ApiEntry(
+            id="deepseek",
+            name="DeepSeek",
+            api_base="https://api.deepseek.com",
+            api_key="your-api-key-here",
+            model="deepseek-chat",
+        )
+    ]
+    default_api: str = "deepseek"  # 默认使用的 API id，为空则取 apis[0]
 
     # Session 配置
     max_history: int = 100
@@ -41,19 +44,8 @@ class Config(BaseConfig):
     max_saved_personas: int = 5
 
     def get_api_list(self) -> List[ApiEntry]:
-        """获取有效的 API 列表（多 API 或从单 API 构造一个）"""
-        if self.apis:
-            return self.apis
-        # 兼容：从单 API 构造
-        return [
-            ApiEntry(
-                id="default",
-                name="默认",
-                api_base=self.api_base,
-                api_key=self.api_key,
-                model=self.model,
-            )
-        ]
+        """获取 API 列表"""
+        return self.apis
 
     def get_default_api_id(self) -> str:
         """获取默认 API 的 id"""

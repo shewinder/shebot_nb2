@@ -474,7 +474,7 @@ async def call_ai_api(messages: List[Dict[str, Any]], api_config: Dict[str, Any]
             logger.error("AI API 返回空结果")
             return None
 
-        sv.logger.debug(str(result))
+        logger.info(str(result))
 
         if "choices" in result and len(result["choices"]) > 0:
             message = result["choices"][0].get("message", {})
@@ -844,7 +844,7 @@ async def list_models(bot: Bot, event: Event):
     """列出已配置的大模型 API"""
     apis = conf.get_api_list()
     if not apis:
-        await list_models_cmd.finish("未配置任何大模型 API，请联系管理员在 aichat.json 中配置 apis")
+        await list_models_cmd.finish("未配置任何大模型 API，请联系管理员在 config/aichat.json 中配置 apis")
         return
     default_id = conf.get_default_api_id()
     current_id = api_manager.get_current_api_id()
@@ -867,6 +867,9 @@ async def switch_model(bot: Bot, event: Event):
         return
     key = args[1].strip()
     apis = conf.get_api_list()
+    if not apis:
+        await switch_model_cmd.finish("未配置任何大模型 API，请联系管理员在 config/aichat.json 中配置 apis")
+        return
     target = None
     for a in apis:
         if a.id == key or a.name == key:
