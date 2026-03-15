@@ -13,7 +13,7 @@ function PrivateRoute({ children }) {
   return token ? children : <Navigate to="/login" replace />
 }
 
-function App() {
+function App({ isDark, toggleTheme }) {
   return (
     <AuthProvider>
       <BrowserRouter>
@@ -23,7 +23,7 @@ function App() {
             path="/"
             element={
               <PrivateRoute>
-                <Layout />
+                <Layout isDark={isDark} toggleTheme={toggleTheme} />
               </PrivateRoute>
             }
           >
