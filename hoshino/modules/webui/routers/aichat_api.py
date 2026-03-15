@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Set
 from fastapi import APIRouter
 from pydantic import BaseModel
 from nonebot import get_driver
+from loguru import logger
 
 import nonebot
 from hoshino import Bot
@@ -167,8 +168,15 @@ async def set_global_persona(req: SetPersonaRequest):
     if req.type != "global":
         return {"status": 400, "data": "类型必须是 global"}
     
-    persona_manager.set_global_default_persona(req.content)
-    return {"status": 200, "data": "全局默认人格设置成功"}
+    if not req.content or not req.content.strip():
+        return {"status": 400, "data": "人格内容不能为空"}
+    
+    try:
+        persona_manager.set_global_default_persona(req.content)
+        return {"status": 200, "data": "全局默认人格设置成功"}
+    except Exception as e:
+        logger.exception(f"设置全局人格失败: {e}")
+        return {"status": 500, "data": f"保存失败: {str(e)}"}
 
 
 @router.post("/set-group-persona")

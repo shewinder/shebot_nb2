@@ -218,7 +218,7 @@ class PersonaManager:
             with open(self.data_file, 'w', encoding='utf-8') as f:
                 json.dump(self.personas, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"保存人格设置失败: {e}")
+            logger.exception(f"保存人格设置失败: {e}")
     
     def load_personas(self):
         """从文件加载人格设置"""

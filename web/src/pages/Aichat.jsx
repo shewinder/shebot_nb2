@@ -29,21 +29,7 @@ import {
   PlusOutlined,
   EyeOutlined
 } from '@ant-design/icons'
-import {
-  getAichatModels,
-  getCurrentModel,
-  switchModel,
-  getAichatPersonas,
-  setGlobalPersona,
-  setGroupPersona,
-  clearPersona,
-  getSavedPersonas,
-  savePersona,
-  deleteSavedPersona,
-  getAichatConfig,
-  getSuperusers,
-  getAichatGroups
-} from '../api'
+import * as aichatApi from '../api'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -100,8 +86,8 @@ function Aichat() {
   const fetchModels = async () => {
     try {
       const [modelsData, currentData] = await Promise.all([
-        getAichatModels(),
-        getCurrentModel()
+        aichatApi.getAichatModels(),
+        aichatApi.getCurrentModel()
       ])
       setModels(modelsData || [])
       setCurrentModel(currentData)
@@ -115,7 +101,7 @@ function Aichat() {
 
   const fetchPersonas = async () => {
     try {
-      const data = await getAichatPersonas()
+      const data = await aichatApi.getAichatPersonas()
       setPersonas(data || {})
       // 始终更新 globalPersona，即使没有设置（为空）
       setGlobalPersona(data?.global || '')
@@ -126,7 +112,7 @@ function Aichat() {
 
   const fetchConfig = async () => {
     try {
-      const data = await getAichatConfig()
+      const data = await aichatApi.getAichatConfig()
       setConfig(data)
     } catch (error) {
       // 配置文件可能不存在，不显示错误
@@ -135,7 +121,7 @@ function Aichat() {
 
   const fetchGroups = async () => {
     try {
-      const data = await getAichatGroups()
+      const data = await aichatApi.getAichatGroups()
       setGroups(data || [])
     } catch (error) {
       // 不显示错误
@@ -144,7 +130,7 @@ function Aichat() {
 
   const fetchSuperusers = async () => {
     try {
-      const data = await getSuperusers()
+      const data = await aichatApi.getSuperusers()
       const firstSu = data?.first_superuser
       // 将第一个超级用户填入用户ID输入框作为默认值
       if (firstSu) {
@@ -166,7 +152,7 @@ function Aichat() {
       return
     }
     try {
-      const result = await switchModel(selectedModel)
+      const result = await aichatApi.switchModel(selectedModel)
       message.success(result)
       await fetchModels()
     } catch (error) {
@@ -175,18 +161,24 @@ function Aichat() {
   }
 
   const handleSetGlobalPersona = async () => {
+    console.log('[handleSetGlobalPersona] 开始设置全局人格')
     try {
-      const result = await setGlobalPersona(globalPersona)
+      const result = await aichatApi.setGlobalPersona(globalPersona)
+      console.log('[handleSetGlobalPersona] 设置成功:', result)
+      console.log('[handleSetGlobalPersona] 设置成功:', result)
       message.success(result)
+      console.log('[handleSetGlobalPersona] 开始刷新personas')
       await fetchPersonas()
+      console.log('[handleSetGlobalPersona] 刷新完成')
     } catch (error) {
+      console.error('[handleSetGlobalPersona] 设置失败:', error.message)
       message.error('设置全局人格失败: ' + error.message)
     }
   }
 
   const handleClearGlobalPersona = async () => {
     try {
-      const result = await clearPersona('global')
+      const result = await aichatApi.clearPersona('global')
       message.success(result)
       setGlobalPersona('')
       await fetchPersonas()
@@ -201,7 +193,7 @@ function Aichat() {
       return
     }
     try {
-      const result = await setGroupPersona(
+      const result = await aichatApi.setGroupPersona(
         parseInt(groupPersonaInput.group_id),
         groupPersonaInput.content
       )
@@ -218,7 +210,7 @@ function Aichat() {
       return
     }
     try {
-      const data = await getAichatPersonas(null, parseInt(userIdInput))
+      const data = await aichatApi.getAichatPersonas(null, parseInt(userIdInput))
       setUserPersonaInfo(data)
     } catch (error) {
       message.error('查询用户人格失败: ' + error.message)
@@ -231,7 +223,7 @@ function Aichat() {
       return
     }
     try {
-      const data = await getSavedPersonas(parseInt(savedPersonaUserId))
+      const data = await aichatApi.getSavedPersonas(parseInt(savedPersonaUserId))
       setSavedPersonas(data || [])
     } catch (error) {
       message.error('获取已保存人格失败: ' + error.message)
@@ -244,7 +236,7 @@ function Aichat() {
       return
     }
     try {
-      const result = await savePersona(
+      const result = await aichatApi.savePersona(
         parseInt(savedPersonaUserId),
         newPersonaName,
         newPersonaContent
@@ -260,7 +252,7 @@ function Aichat() {
 
   const handleDeleteSavedPersona = async (name) => {
     try {
-      const result = await deleteSavedPersona(parseInt(savedPersonaUserId), name)
+      const result = await aichatApi.deleteSavedPersona(parseInt(savedPersonaUserId), name)
       message.success(result)
       await handleFetchSavedPersonas()
     } catch (error) {
@@ -543,7 +535,7 @@ function Aichat() {
                         title="确定要清除该群组的人格吗？"
                         onConfirm={async () => {
                           try {
-                            await clearPersona('group', item.group_id)
+                            await aichatApi.clearPersona('group', item.group_id)
                             message.success('群组人格已清除')
                             await fetchGroups()
                           } catch (error) {
