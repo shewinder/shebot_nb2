@@ -11,7 +11,8 @@ from loguru import logger
 
 from hoshino import Service, Bot, Event, userdata_dir
 from hoshino.permission import ADMIN, SUPERUSER
-from hoshino.util import aiohttpx, get_event_imageurl, get_reply_imageurl
+from hoshino.util import aiohttpx, get_event_imageurl
+from hoshino.util.message_util import extract_images_from_reply
 from .config import Config
 
 # 加载配置
@@ -513,8 +514,9 @@ async def handle_ai_chat(bot: Bot, event: Event):
     # 检测消息中的图片
     image_urls = get_event_imageurl(event)
     
-    # 引用消息里的图片
-    image_urls.extend(get_reply_imageurl(event))
+    # 引用消息里的图片（支持转发消息中的图片）
+    image_urls.extend(await extract_images_from_reply(event, bot))
+    logger.info(f"检测到图片URL: {image_urls}")
     
     # 检查模型是否支持多模态
     supports_multimodal = api_config.get("supports_multimodal", False)

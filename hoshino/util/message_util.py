@@ -1,9 +1,96 @@
 import json
-from typing import List, Union
+from typing import List, Union, Optional, Dict, Any
 from hoshino import MessageSegment, Bot, Message
 from hoshino.event import GroupMessageEvent
 from hoshino import hsn_config, Bot, get_bot_list
 from pydantic import BaseModel
+from nonebot.adapters.onebot.v11.event import Reply
+from nonebot.adapters.onebot.v11 import Event
+
+
+async def get_forward_msg_images(bot: Bot, forward_id: str) -> List[str]:
+    """
+    获取转发消息中的所有图片 URL
+    
+    Args:
+        bot: Bot 实例
+        forward_id: 转发消息的 ID
+        
+    Returns:
+        图片 URL 列表
+    """
+    imglist: List[str] = []
+    
+    try:
+        # 调用 OneBot API 获取转发消息内容
+        forward_data = await bot.call_api("get_forward_msg", id=forward_id)
+        
+        if forward_data and 'messages' in forward_data:
+            # 遍历转发消息中的每条消息
+            for msg_item in forward_data['messages']:
+                if 'content' in msg_item:
+                    msg_content = msg_item['content']
+                    # message 可能是列表或 Message 对象
+                    if isinstance(msg_content, list):
+                        for seg in msg_content:
+                            if isinstance(seg, dict) and seg.get('type') == 'image':
+                                seg_data = seg.get('data', {})
+                                if 'url' in seg_data:
+                                    imglist.append(seg_data['url'])
+                    elif hasattr(msg_content, '__iter__'):
+                        # Message 对象
+                        for seg in msg_content:
+                            if hasattr(seg, 'type') and seg.type == 'image' and hasattr(seg, 'data') and 'url' in seg.data:
+                                imglist.append(seg.data['url'])
+    except Exception as e:
+        # 获取转发消息失败时，记录错误但返回空列表
+        import logging
+        logging.getLogger(__name__).warning(f"获取转发消息失败: {e}")
+    
+    return imglist
+
+
+async def extract_images_from_reply(event: Event, bot: Optional[Bot] = None) -> List[str]:
+    """
+    从引用消息中提取图片 URL
+    
+    支持普通消息和转发消息（当提供 bot 参数时）
+    
+    Args:
+        event: 消息事件
+        bot: Bot 实例，用于获取转发消息内容。如果为 None，则无法处理转发消息
+        
+    Returns:
+        图片 URL 列表
+    """
+    if not hasattr(event, "reply"):
+        return []
+    
+    if not event.reply:
+        return []
+    
+    reply: Reply = event.reply
+    imglist: List[str] = []
+    
+    # 从普通消息中提取图片
+    for s in reply.message:
+        if s.type == 'image' and 'url' in s.data:
+            imglist.append(s.data['url'])
+    
+    # 检查是否是转发消息
+    forward_seg = None
+    for s in reply.message:
+        if s.type == 'forward':
+            forward_seg = s
+            break
+    
+    # 如果是转发消息且提供了 bot，获取转发消息内容
+    if forward_seg and bot and 'id' in forward_seg.data:
+        forward_id = forward_seg.data['id']
+        forward_images = await get_forward_msg_images(bot, forward_id)
+        imglist.extend(forward_images)
+    
+    return imglist
 
 
 async def send_group_forward_msg(bot: Bot, group_id: int, msgs: List[Union[Message, List]]) -> int:

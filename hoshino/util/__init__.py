@@ -184,20 +184,7 @@ def get_event_imageurl(event: Event) -> List[str]:
     ]
     return imglist
 
-def get_reply_imageurl(event: Event) -> List[str]:
-    if not hasattr(event, "reply"):
-        return []
-    
-    if not event.reply:
-        return []
-    
-    reply: Reply = event.reply
-    imglist=[
-        s.data['url']
-        for s in reply.message
-        if s.type == 'image' and 'url' in s.data
-    ]
-    return imglist
+
 
 
 async def _strip_cmd(bot: "Bot", event: "Event", state: T_State):
