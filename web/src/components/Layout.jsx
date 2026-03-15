@@ -12,6 +12,7 @@ import {
   MenuUnfoldOutlined,
   FullscreenOutlined,
   FullscreenExitOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
@@ -24,6 +25,7 @@ const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
   { key: '/services', icon: <AppstoreOutlined />, label: '服务管理' },
   { key: '/configs', icon: <SettingOutlined />, label: '配置管理' },
+  { key: '/aichat', icon: <RobotOutlined />, label: 'AI 聊天' },
   { key: '/logs', icon: <FileTextOutlined />, label: '日志监控' },
 ]
 

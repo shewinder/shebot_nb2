@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Services from './pages/Services'
 import Configs from './pages/Configs'
 import Logs from './pages/Logs'
+import Aichat from './pages/Aichat'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 
 function PrivateRoute({ children }) {
@@ -31,6 +32,7 @@ function App({ isDark, toggleTheme }) {
             <Route path="services" element={<Services />} />
             <Route path="configs" element={<Configs />} />
             <Route path="logs" element={<Logs />} />
+            <Route path="aichat" element={<Aichat />} />
           </Route>
         </Routes>
       </BrowserRouter>

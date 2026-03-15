@@ -32,3 +32,72 @@ export const getProjectInfo = () => request.get('/get_project_info')
 
 // 获取 Bot 配置
 export const getConfig = () => request.get('/get_config')
+
+// ===== AI Chat API =====
+// 获取所有模型
+export const getAichatModels = () => request.get('/aichat/models')
+
+// 获取当前模型
+export const getCurrentModel = () => request.get('/aichat/current-model')
+
+// 切换模型
+export const switchModel = (api_id) => request.post('/aichat/switch-model', { api_id })
+
+// 获取人格设置
+export const getAichatPersonas = (group_id, user_id) => {
+  let url = '/aichat/personas'
+  const params = []
+  if (group_id) params.push(`group_id=${group_id}`)
+  if (user_id) params.push(`user_id=${user_id}`)
+  if (params.length > 0) url += '?' + params.join('&')
+  return request.get(url)
+}
+
+// 设置全局人格
+export const setGlobalPersona = (content) => request.post('/aichat/set-global-persona', {
+  type: 'global',
+  content
+})
+
+// 设置群组人格
+export const setGroupPersona = (group_id, content) => request.post('/aichat/set-group-persona', {
+  type: 'group',
+  group_id,
+  content
+})
+
+// 清除人格
+export const clearPersona = (type, group_id, user_id) => {
+  let url = `/aichat/clear-persona?type=${type}`
+  if (group_id) url += `&group_id=${group_id}`
+  if (user_id) url += `&user_id=${user_id}`
+  return request.post(url)
+}
+
+// 获取用户已保存的人格
+export const getSavedPersonas = (user_id) => request.get(`/aichat/saved-personas?user_id=${user_id}`)
+
+// 保存人格
+export const savePersona = (user_id, name, content) => request.post('/aichat/save-persona', {
+  user_id,
+  name,
+  content
+})
+
+// 删除保存的人格
+export const deleteSavedPersona = (user_id, name) => request.post('/aichat/delete-saved-persona', {
+  user_id,
+  name
+})
+
+// 获取 AI Chat 配置
+export const getAichatConfig = () => request.get('/aichat/config')
+
+// 获取群组列表（带人格信息）
+export const getAichatGroups = () => request.get('/aichat/groups')
+
+// 更新 AI Chat 配置
+export const updateAichatConfig = (config) => request.post('/aichat/update-config', config)
+
+// 获取超级用户列表
+export const getSuperusers = () => request.get('/aichat/superusers')

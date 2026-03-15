@@ -14,6 +14,7 @@ from .routers.bot_manage import router as bot_manage_router
 from .routers.login import router as login_router
 from .routers.public import router as public_router
 from .routers.websocket import router as ws_router
+from .routers.aichat_api import router as aichat_router
 
 # 静态文件目录（插件目录下的 static/）
 _plugin_dir = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +30,7 @@ def init_web():
     app.include_router(infopush_router, prefix="/api")
     app.include_router(public_router, prefix="/api")
     app.include_router(ws_router, prefix="/api")
+    app.include_router(aichat_router, prefix="/api")
 
     # 挂载静态文件（如果存在）
     if os.path.exists(_static_dir):
