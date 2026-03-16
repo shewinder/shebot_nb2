@@ -101,3 +101,15 @@ export const updateAichatConfig = (config) => request.post('/aichat/update-confi
 
 // 获取超级用户列表
 export const getSuperusers = () => request.get('/aichat/superusers')
+
+// 添加新模型
+export const addAichatModel = (data) => request.post('/aichat/add-model', data)
+
+// 更新模型
+export const updateAichatModel = (modelId, data) => request.post(`/aichat/update-model/${modelId}`, data)
+
+// 删除模型
+export const deleteAichatModel = (modelId) => request.post(`/aichat/delete-model/${modelId}`)
+
+// 设置默认模型
+export const setDefaultAichatModel = (modelId) => request.post(`/aichat/set-default-model/${modelId}`)

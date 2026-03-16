@@ -337,3 +337,135 @@ async def get_groups():
         return {"status": 200, "data": result}
     except Exception as e:
         return {"status": 500, "data": str(e)}
+
+
+class AddModelRequest(BaseModel):
+    """添加模型请求"""
+    id: str
+    name: str
+    api_base: str
+    api_key: str
+    model: str
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    supports_multimodal: Optional[bool] = None
+
+
+class UpdateModelRequest(BaseModel):
+    """更新模型请求"""
+    name: Optional[str] = None
+    api_base: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    supports_multimodal: Optional[bool] = None
+
+
+@router.post("/add-model")
+async def add_model(req: AddModelRequest):
+    """添加新模型"""
+    # 检查 ID 是否已存在
+    if conf.get_api_by_id(req.id):
+        return {"status": 400, "data": f"模型 ID '{req.id}' 已存在"}
+    
+    # 创建新的 API Entry
+    new_api = ApiEntry(
+        id=req.id,
+        name=req.name,
+        api_base=req.api_base,
+        api_key=req.api_key,
+        model=req.model,
+        max_tokens=req.max_tokens,
+        temperature=req.temperature,
+        supports_multimodal=req.supports_multimodal
+    )
+    
+    # 添加到配置
+    conf.apis.append(new_api)
+    
+    try:
+        # 保存配置
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        return {"status": 200, "data": f"模型 '{req.name}' 添加成功"}
+    except Exception as e:
+        logger.exception(f"添加模型失败: {e}")
+        return {"status": 500, "data": f"保存配置失败: {str(e)}"}
+
+
+@router.post("/update-model/{model_id}")
+async def update_model(model_id: str, req: UpdateModelRequest):
+    """更新模型配置"""
+    api_entry = conf.get_api_by_id(model_id)
+    if not api_entry:
+        return {"status": 404, "data": f"未找到模型: {model_id}"}
+    
+    # 更新字段
+    if req.name is not None:
+        api_entry.name = req.name
+    if req.api_base is not None:
+        api_entry.api_base = req.api_base
+    if req.api_key is not None:
+        api_entry.api_key = req.api_key
+    if req.model is not None:
+        api_entry.model = req.model
+    if req.max_tokens is not None:
+        api_entry.max_tokens = req.max_tokens
+    if req.temperature is not None:
+        api_entry.temperature = req.temperature
+    if req.supports_multimodal is not None:
+        api_entry.supports_multimodal = req.supports_multimodal
+    
+    try:
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        return {"status": 200, "data": f"模型 '{api_entry.name}' 更新成功"}
+    except Exception as e:
+        logger.exception(f"更新模型失败: {e}")
+        return {"status": 500, "data": f"保存配置失败: {str(e)}"}
+
+
+@router.post("/delete-model/{model_id}")
+async def delete_model(model_id: str):
+    """删除模型"""
+    api_entry = conf.get_api_by_id(model_id)
+    if not api_entry:
+        return {"status": 404, "data": f"未找到模型: {model_id}"}
+    
+    # 不能删除当前正在使用的模型
+    current_id = api_manager.get_current_api_id()
+    if model_id == current_id:
+        return {"status": 400, "data": "不能删除当前正在使用的模型，请先切换到其他模型"}
+    
+    # 不能删除默认模型
+    if model_id == conf.get_default_api_id():
+        return {"status": 400, "data": "不能删除默认模型，请先将其他模型设为默认"}
+    
+    # 从列表中移除
+    conf.apis = [a for a in conf.apis if a.id != model_id]
+    
+    try:
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        return {"status": 200, "data": f"模型 '{api_entry.name}' 删除成功"}
+    except Exception as e:
+        logger.exception(f"删除模型失败: {e}")
+        return {"status": 500, "data": f"保存配置失败: {str(e)}"}
+
+
+@router.post("/set-default-model/{model_id}")
+async def set_default_model(model_id: str):
+    """设置默认模型"""
+    if not conf.get_api_by_id(model_id):
+        return {"status": 404, "data": f"未找到模型: {model_id}"}
+    
+    conf.default_api = model_id
+    
+    try:
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        return {"status": 200, "data": f"已将模型设为默认"}
+    except Exception as e:
+        logger.exception(f"设置默认模型失败: {e}")
+        return {"status": 500, "data": f"保存配置失败: {str(e)}"}

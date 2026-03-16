@@ -16,7 +16,10 @@ import {
   Popconfirm,
   Divider,
   Alert,
-  Modal
+  Modal,
+  Form,
+  Switch,
+  InputNumber
 } from 'antd'
 import {
   SaveOutlined,
@@ -27,7 +30,9 @@ import {
   GlobalOutlined,
   DeleteOutlined,
   PlusOutlined,
-  EyeOutlined
+  EyeOutlined,
+  EditOutlined,
+  SettingOutlined
 } from '@ant-design/icons'
 import * as aichatApi from '../api'
 
@@ -61,6 +66,12 @@ function Aichat() {
   
   // 配置相关
   const [config, setConfig] = useState(null)
+
+  // 模型编辑相关
+  const [modelModalVisible, setModelModalVisible] = useState(false)
+  const [modelModalMode, setModelModalMode] = useState('add') // 'add' 或 'edit'
+  const [editingModelId, setEditingModelId] = useState(null)
+  const [modelForm] = Form.useForm()
 
   useEffect(() => {
     fetchInitialData()
@@ -265,6 +276,75 @@ function Aichat() {
     setViewPersonaModalVisible(true)
   }
 
+  // 打开添加模型弹窗
+  const openAddModelModal = () => {
+    setModelModalMode('add')
+    setEditingModelId(null)
+    modelForm.resetFields()
+    // 设置默认值
+    modelForm.setFieldsValue({
+      supports_multimodal: false
+    })
+    setModelModalVisible(true)
+  }
+
+  // 打开编辑模型弹窗
+  const openEditModelModal = (model) => {
+    setModelModalMode('edit')
+    setEditingModelId(model.id)
+    modelForm.setFieldsValue({
+      name: model.name,
+      api_base: model.api_base,
+      api_key: model.api_key,
+      model: model.model,
+      max_tokens: model.max_tokens,
+      temperature: model.temperature,
+      supports_multimodal: model.supports_multimodal || false
+    })
+    setModelModalVisible(true)
+  }
+
+  // 提交模型表单
+  const handleModelSubmit = async (values) => {
+    try {
+      if (modelModalMode === 'add') {
+        // 添加新模型
+        const result = await aichatApi.addAichatModel(values)
+        message.success(result.data || '添加成功')
+      } else {
+        // 编辑模型
+        const result = await aichatApi.updateAichatModel(editingModelId, values)
+        message.success(result.data || '更新成功')
+      }
+      setModelModalVisible(false)
+      await fetchModels()
+    } catch (error) {
+      message.error(modelModalMode === 'add' ? '添加模型失败: ' : '更新模型失败: ' + error.message)
+    }
+  }
+
+  // 删除模型
+  const handleDeleteModel = async (modelId) => {
+    try {
+      const result = await aichatApi.deleteAichatModel(modelId)
+      message.success(result.data || '删除成功')
+      await fetchModels()
+    } catch (error) {
+      message.error('删除模型失败: ' + error.message)
+    }
+  }
+
+  // 设置默认模型
+  const handleSetDefaultModel = async (modelId) => {
+    try {
+      const result = await aichatApi.setDefaultAichatModel(modelId)
+      message.success(result.data || '设置成功')
+      await fetchModels()
+    } catch (error) {
+      message.error('设置默认模型失败: ' + error.message)
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '100px' }}>
@@ -287,9 +367,14 @@ function Aichat() {
           <Card
             title="当前模型"
             extra={
-              <Button icon={<ReloadOutlined />} onClick={fetchModels}>
-                刷新
-              </Button>
+              <Space>
+                <Button icon={<PlusOutlined />} type="primary" onClick={openAddModelModal}>
+                  新增模型
+                </Button>
+                <Button icon={<ReloadOutlined />} onClick={fetchModels}>
+                  刷新
+                </Button>
+              </Space>
             }
           >
             {currentModel ? (
@@ -350,6 +435,65 @@ function Aichat() {
               </Descriptions>
             </Card>
           )}
+
+          {/* 模型列表 */}
+          <Card title="模型列表" style={{ marginTop: 16 }}>
+            <List
+              bordered
+              dataSource={models}
+              renderItem={item => (
+                <List.Item
+                  actions={[
+                    <Button
+                      type="link"
+                      icon={<EditOutlined />}
+                      onClick={() => openEditModelModal(item)}
+                    >
+                      编辑
+                    </Button>,
+                    !item.is_current && !item.is_default && (
+                      <Popconfirm
+                        title="确定要删除这个模型吗？"
+                        onConfirm={() => handleDeleteModel(item.id)}
+                        okText="确定"
+                        cancelText="取消"
+                      >
+                        <Button type="link" danger icon={<DeleteOutlined />}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    ),
+                    !item.is_default && (
+                      <Button
+                        type="link"
+                        icon={<SettingOutlined />}
+                        onClick={() => handleSetDefaultModel(item.id)}
+                      >
+                        设为默认
+                      </Button>
+                    )
+                  ].filter(Boolean)}
+                >
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <span>{item.name}</span>
+                        {item.is_current && <Tag color="green">当前使用</Tag>}
+                        {item.is_default && <Tag color="orange">默认</Tag>}
+                      </Space>
+                    }
+                    description={
+                      <Space direction="vertical" size={0} style={{ fontSize: 12 }}>
+                        <span>ID: <code>{item.id}</code></span>
+                        <span>模型: {item.model}</span>
+                        <span>API: {item.api_base}</span>
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          </Card>
         </TabPane>
 
         <TabPane
@@ -743,6 +887,83 @@ function Aichat() {
             backgroundColor: '#f5f5f5'
           }}
         />
+      </Modal>
+
+      {/* 添加/编辑模型弹窗 */}
+      <Modal
+        title={modelModalMode === 'add' ? '添加新模型' : '编辑模型'}
+        open={modelModalVisible}
+        onCancel={() => setModelModalVisible(false)}
+        onOk={() => modelForm.submit()}
+        width={600}
+      >
+        <Form
+          form={modelForm}
+          layout="vertical"
+          onFinish={handleModelSubmit}
+        >
+          {modelModalMode === 'add' && (
+            <Form.Item
+              name="id"
+              label="模型ID"
+              rules={[{ required: true, message: '请输入模型ID' }]}
+              extra="唯一标识，不可重复，建议使用英文和下划线"
+            >
+              <Input placeholder="例如：deepseek, gpt4, kimi" />
+            </Form.Item>
+          )}
+          <Form.Item
+            name="name"
+            label="显示名称"
+            rules={[{ required: true, message: '请输入显示名称' }]}
+          >
+            <Input placeholder="例如：DeepSeek, GPT-4, Kimi" />
+          </Form.Item>
+          <Form.Item
+            name="api_base"
+            label="API 地址"
+            rules={[{ required: true, message: '请输入API地址' }]}
+          >
+            <Input placeholder="例如：https://api.deepseek.com" />
+          </Form.Item>
+          <Form.Item
+            name="api_key"
+            label="API 密钥"
+            rules={[{ required: true, message: '请输入API密钥' }]}
+          >
+            <Input.Password placeholder="输入API密钥" />
+          </Form.Item>
+          <Form.Item
+            name="model"
+            label="模型名称"
+            rules={[{ required: true, message: '请输入模型名称' }]}
+            extra="具体的模型版本名称"
+          >
+            <Input placeholder="例如：deepseek-chat, gpt-4, kimi-latest" />
+          </Form.Item>
+          <Form.Item
+            name="max_tokens"
+            label="最大 Tokens"
+            extra="留空则使用全局默认设置"
+          >
+            <InputNumber style={{ width: '100%' }} min={1} max={32768} placeholder="8192" />
+          </Form.Item>
+          <Form.Item
+            name="temperature"
+            label="温度 (Temperature)"
+            extra="留空则使用全局默认设置，范围 0-2"
+          >
+            <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} placeholder="0.7" />
+          </Form.Item>
+          <Form.Item
+            name="supports_multimodal"
+            label="支持多模态"
+            valuePropName="checked"
+            extra="是否支持图片识别功能"
+          >
+            <Switch />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   )

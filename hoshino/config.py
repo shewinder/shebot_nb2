@@ -32,3 +32,9 @@ def get_plugin_config() -> Dict[str, BaseConfig]:
 
 def get_plugin_config_by_name(plugin_name: str): 
     return _all_plugin_config.get(plugin_name)
+
+
+def save_plugin_config(plugin_name: str, config: BaseConfig):
+    """保存插件配置到文件"""
+    cfg_file = conf_dir / f"{plugin_name}.json"
+    cfg_file.write_text(config.model_dump_json(indent=2))
