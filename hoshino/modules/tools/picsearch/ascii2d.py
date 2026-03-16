@@ -8,12 +8,13 @@ from pydantic import BaseModel
 from hoshino.sres import Res as R
 from hoshino.util.sutil import get_img_from_url
 from hoshino import MessageSegment
-from hoshino.log import logger
 
 
 class Ascii2dResult(BaseModel):
     thumb: str
     ext_url: str
+    title: str = ""  # 标题（如果有）
+    author: str = ""  # 作者（如果有）
 
 
 def _check_cloudflare(text: str) -> bool:
@@ -28,24 +29,55 @@ def _check_cloudflare(text: str) -> bool:
     ])
 
 
-def _parse_results(html: _Element, base_url: str) -> List[Ascii2dResult]:
-    """解析搜索结果，跳过第一个（操作按钮）"""
+def _parse_results(html: _Element, base_url: str, max_results: int = 3) -> List[Ascii2dResult]:
+    """解析搜索结果（跳过操作按钮）"""
     results: List[Ascii2dResult] = []
     rows: List[_Element] = html.xpath('//div[@class="row item-box"]')
     
-    # 跳过第一个（它是操作按钮：色合検索/特徴検索/詳細登録）
+    # 跳过第一个（它是操作按钮）
     for row in rows[1:]:
+        if len(results) >= max_results:
+            break
+        
         try:
             thumb = base_url + row.xpath("./div/img")[0].attrib["src"]
-            href = row.xpath(".//h6/a")[0].attrib["href"]
-            results.append(Ascii2dResult(thumb=thumb, ext_url=href))
+            
+            # 尝试获取标题和链接
+            link_elem = row.xpath(".//h6/a")
+            if not link_elem:
+                continue
+            
+            href = link_elem[0].attrib["href"]
+            title = link_elem[0].text or ""
+            
+            # 尝试获取作者信息
+            author = ""
+            detail_box = row.xpath(".//div[@class='detail-box gray-link']")
+            if detail_box:
+                links = detail_box[0].xpath(".//a")
+                if len(links) >= 2:
+                    author = links[1].text or ""
+            
+            results.append(Ascii2dResult(
+                thumb=thumb,
+                ext_url=href,
+                title=title,
+                author=author
+            ))
         except IndexError:
             continue
     
     return results
 
 
-async def get_ascii2d_results(pic_url) -> List[Ascii2dResult]:
+async def get_ascii2d_results(pic_url, color_count: int = 3) -> List[Ascii2dResult]:
+    """
+    搜索 ascii2d 图片
+    
+    Args:
+        pic_url: 图片 URL
+        color_count: 返回的颜色搜索结果数量（默认3个）
+    """
     base_url = "https://ascii2d.net"
     res_list: List[Ascii2dResult] = []
     
@@ -53,53 +85,55 @@ async def get_ascii2d_results(pic_url) -> List[Ascii2dResult]:
     async with AsyncSession(impersonate="chrome120") as session:
         # 1. 色合搜索 (颜色搜索)
         color_url = base_url + f"/search/url/{pic_url}"
-        
         resp = await session.get(color_url)
         
-        # 检查是否被 Cloudflare 拦截
         if _check_cloudflare(resp.text):
             raise Exception("ascii2d 搜索被 Cloudflare 拦截，请稍后重试")
         
         color_html: _Element = etree.HTML(resp.text)
-        color_results = _parse_results(color_html, base_url)
+        color_results = _parse_results(color_html, base_url, max_results=color_count)
         
-        # 取色合搜索的第一个结果
-        if color_results:
-            res_list.append(color_results[0])
+        if not color_results:
+            raise Exception("色合搜索未找到结果")
         
-        # 2. 特征搜索 (bovw)
-        # 从色合搜索结果页面获取特征搜索链接
-        bovw_links = color_html.xpath("/html/body/div/div/div[1]/div[1]/div[4]/a[2]/@href")
-        if not bovw_links:
-            bovw_links = color_html.xpath('//a[contains(@href,"/search/bovw/")]/@href')
+        res_list.extend(color_results)
         
-        if bovw_links:
-            bovw_url = base_url + bovw_links[0]
+        # 2. 特征搜索 (bovw) - 尝试获取1个
+        hash_elem = color_html.xpath('//div[@class="hash"]/text()')
+        if hash_elem:
+            img_hash = hash_elem[0].strip()
+            bovw_url = f"{base_url}/search/bovw/{img_hash}"
+            
             try:
                 resp = await session.get(bovw_url)
                 
-                # 检查是否被 Cloudflare 拦截
                 if not _check_cloudflare(resp.text):
                     bovw_html: _Element = etree.HTML(resp.text)
-                    bovw_results = _parse_results(bovw_html, base_url)
-                    
-                    # 取特征搜索的第一个结果
-                    if bovw_results:
-                        res_list.append(bovw_results[0])
-            except Exception as e:
-                logger.error(f"特征搜索失败: {e}")
-                # 特征搜索失败，忽略错误，至少返回色合搜索结果
-        
-        if not res_list:
-            raise Exception("未找到搜索结果")
+                    bovw_results = _parse_results(bovw_html, base_url, max_results=1)
+                    res_list.extend(bovw_results)
+            except Exception:
+                # 特征搜索失败，忽略
+                pass
 
         return res_list
 
 
-async def ascii2d_format(data: Ascii2dResult):
+async def ascii2d_format(data: Ascii2dResult, index: int = 0):
+    """格式化单个搜索结果"""
     try:
         img = await get_img_from_url(data.thumb)
-        img = R.image_from_memory(img)
+        img_seg = R.image_from_memory(img)
     except:
-        img = MessageSegment.text("预览图下载失败")
-    return img + data.ext_url
+        img_seg = MessageSegment.text("[预览图下载失败]")
+    
+    # 构建文本
+    text_parts = []
+    if index > 0:
+        text_parts.append(f"{index}.")
+    if data.title:
+        text_parts.append(f"标题: {data.title}")
+    if data.author:
+        text_parts.append(f"作者: {data.author}")
+    text_parts.append(data.ext_url)
+    
+    return img_seg + "\n" + "\n".join(text_parts)

@@ -52,20 +52,30 @@ async def _(bot: "Bot", event: "Event", state: T_State):
 
     # 自动转为ascii2d
     sv.logger.info('ascii2d search')
+    results = []
     try:
-        # TODO url可能无法直接使用
         results = await get_ascii2d_results(url)
     except Exception as e:
         sv.logger.error(e)
     if results:
         reply = '以下结果来自ascii2d\n\n'
-        reply += '色合搜索结果\n'
-        color_r = results[0]
-        reply += await ascii2d_format(color_r) + '\n'
-        if len(results) > 1:
-            bovw_r = results[1]
-            reply += '特征搜索结果\n'
-            reply += await ascii2d_format(bovw_r)
+        
+        # 先找出特征搜索结果（如果有的话）
+        # 色合搜索最多3个，特征搜索1个在最后
+        color_results = results[:3] if len(results) <= 4 else results[:3]
+        bovw_results = results[len(color_results):] if len(results) > len(color_results) else []
+        
+        # 显示色合搜索结果
+        if color_results:
+            reply += f'【色合搜索结果】({len(color_results)}个)\n'
+            for i, r in enumerate(color_results, 1):
+                reply += await ascii2d_format(r, index=i) + '\n\n'
+        
+        # 显示特征搜索结果
+        if bovw_results:
+            reply += '【特征搜索结果】\n'
+            reply += await ascii2d_format(bovw_results[0], index=1)
+        
         await search_pic.finish(reply)
 
     # 自动转为搜索番剧模式
