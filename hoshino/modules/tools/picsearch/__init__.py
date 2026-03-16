@@ -60,10 +60,12 @@ async def _(bot: "Bot", event: "Event", state: T_State):
     if results:
         reply = '以下结果来自ascii2d\n\n'
         reply += '色合搜索结果\n'
-        color_r, bovw_r = results[0], results[1]
+        color_r = results[0]
         reply += await ascii2d_format(color_r) + '\n'
-        reply += '特征搜索结果\n'
-        reply += await ascii2d_format(bovw_r)
+        if len(results) > 1:
+            bovw_r = results[1]
+            reply += '特征搜索结果\n'
+            reply += await ascii2d_format(bovw_r)
         await search_pic.finish(reply)
 
     # 自动转为搜索番剧模式

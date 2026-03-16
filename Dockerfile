@@ -10,7 +10,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # 使用uv同步依赖（创建虚拟环境）
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --index https://mirrors.aliyun.com/pypi/simple/
 
 # 复制应用代码
 COPY ./res /app/res
