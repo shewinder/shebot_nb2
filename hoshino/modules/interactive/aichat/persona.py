@@ -268,6 +268,31 @@ class PersonaManager:
             return True, f"全局预设人格 '{name}' 已更新"
         return True, f"全局预设人格 '{name}' 已添加"
     
+    def update_global_preset_name(self, old_name: str, new_name: str) -> Tuple[bool, str]:
+        """修改全局预设人格名称
+        返回: (是否成功, 消息)
+        """
+        old_name = old_name.strip()
+        new_name = new_name.strip()
+        
+        if not old_name or not new_name:
+            return False, "人格名称不能为空"
+        
+        if old_name not in self.global_presets:
+            return False, f"未找到全局预设人格 '{old_name}'"
+        
+        if old_name == new_name:
+            return True, "人格名称未变更"
+        
+        if new_name in self.global_presets:
+            return False, f"全局预设人格 '{new_name}' 已存在"
+        
+        # 重命名：先复制内容，再删除旧名称
+        self.global_presets[new_name] = self.global_presets[old_name]
+        del self.global_presets[old_name]
+        self.save_global_presets()
+        return True, f"全局预设人格 '{old_name}' 已重命名为 '{new_name}'"
+    
     def delete_global_preset(self, name: str) -> Tuple[bool, str]:
         """删除全局预设人格
         返回: (是否成功, 消息)

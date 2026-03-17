@@ -270,6 +270,14 @@ function Aichat() {
   // 处理添加/更新全局预设人格
   const handleAddGlobalPreset = async (values) => {
     try {
+      // 如果是编辑模式且名称有变更，先重命名
+      if (editingPreset && editingPreset.name !== values.name) {
+        // 先重命名
+        const renameResult = await aichatApi.updateGlobalPresetName(editingPreset.name, values.name)
+        message.success(renameResult.data || '重命名成功')
+      }
+      
+      // 添加/更新内容
       const result = await aichatApi.addGlobalPreset(values.name, values.content)
       message.success(result.data || '操作成功')
       setPresetModalVisible(false)
@@ -1453,7 +1461,6 @@ function Aichat() {
           >
             <Input 
               placeholder="例如：猫娘" 
-              disabled={!!editingPreset}
             />
           </Form.Item>
           <Form.Item

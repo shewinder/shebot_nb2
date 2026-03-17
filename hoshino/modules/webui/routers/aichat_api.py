@@ -516,6 +516,22 @@ async def add_global_preset(req: AddGlobalPresetRequest):
         return {"status": 400, "data": msg}
 
 
+class UpdateGlobalPresetNameRequest(BaseModel):
+    """修改全局预设人格名称请求"""
+    old_name: str
+    new_name: str
+
+
+@router.post("/update-global-preset-name")
+async def update_global_preset_name(req: UpdateGlobalPresetNameRequest):
+    """修改全局预设人格名称"""
+    success, msg = persona_manager.update_global_preset_name(req.old_name, req.new_name)
+    if success:
+        return {"status": 200, "data": msg}
+    else:
+        return {"status": 400, "data": msg}
+
+
 @router.post("/delete-global-preset")
 async def delete_global_preset(name: str):
     """删除全局预设人格"""

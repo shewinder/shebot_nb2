@@ -129,6 +129,12 @@ export const deleteGlobalPreset = (name) => request.post('/aichat/delete-global-
   name
 })
 
+// 修改全局预设人格名称
+export const updateGlobalPresetName = (oldName, newName) => request.post('/aichat/update-global-preset-name', {
+  old_name: oldName,
+  new_name: newName
+})
+
 // ===== 角色卡导入 API =====
 // 批量导入角色卡
 export const importCharacters = (user_id, files, as_global = false) => {
