@@ -1,694 +1,26 @@
 """
 AI Chat插件
-支持以#开头的消息触发AI对话，支持session管理
+支持以#开头的消息触发AI对话，支持session管理、人格管理和多模态
 """
-import json
-import time
-import base64
-import os
-from typing import Any, Dict, List, Optional, Tuple, Union
-from loguru import logger
-
-from hoshino import Service, Bot, Event, userdata_dir
+from hoshino import Bot, Event, Service
 from hoshino.permission import ADMIN, SUPERUSER
-from hoshino.util import aiohttpx, get_event_imageurl
-from hoshino.util.message_util import extract_images_from_reply
+
+from .api import api_manager
+from .chat import call_ai_api, download_image_to_base64, handle_ai_chat
 from .config import Config
+from .persona import persona_manager
+from .session import Session, SessionManager, session_manager
 
 # 加载配置
 conf = Config.get_instance('aichat')
 
-# 运行时数据目录（data/aichat）
-aichat_data_dir = userdata_dir.joinpath('aichat')
-
 # 创建Service
 sv = Service('aichat', help_='AI聊天插件，使用#开头触发对话')
 
-# Session数据结构
-class Session:
-    """对话Session"""
-    def __init__(self, session_id: str, persona: Optional[str] = None):
-        self.session_id = session_id
-        self.messages: List[Dict[str, Any]] = []  # 对话历史（支持文本和多模态）
-        self.last_active = time.time()  # 最后活跃时间
-        # 如果有人格，在初始化时添加system message
-        if persona:
-            self.messages.append({"role": "system", "content": persona})
-    
-    def add_message(self, role: str, content: Union[str, List[Dict[str, Any]]]):
-        """添加消息到历史（支持文本或多模态内容）"""
-        self.messages.append({"role": role, "content": content})
-        # 限制历史消息数量（保留system message）
-        system_msg = None
-        if self.messages and self.messages[0].get("role") == "system":
-            system_msg = self.messages[0]
-            other_messages = self.messages[1:]
-        else:
-            other_messages = self.messages
-        
-        if len(other_messages) > conf.max_history * 2:  # *2因为包含user和assistant
-            other_messages = other_messages[-conf.max_history * 2:]
-        
-        if system_msg:
-            self.messages = [system_msg] + other_messages
-        else:
-            self.messages = other_messages
-        
-        self.last_active = time.time()
-    
-    def is_expired(self) -> bool:
-        """检查是否过期"""
-        if conf.session_timeout <= 0:
-            return False
-        return time.time() - self.last_active > conf.session_timeout
-
-# Session管理器
-class SessionManager:
-    """管理所有Session（仅内存，不持久化）"""
-    def __init__(self):
-        self.sessions: Dict[str, Session] = {}
-    
-    def get_session_id(self, user_id: int, group_id: Optional[int] = None) -> str:
-        """获取session ID"""
-        if group_id:
-            return f"group_{group_id}_user_{user_id}"
-        return f"private_{user_id}"
-    
-    def get_session(self, user_id: int, group_id: Optional[int] = None, persona: Optional[str] = None) -> Session:
-        """获取或创建session"""
-        session_id = self.get_session_id(user_id, group_id)
-        
-        # 检查是否存在且未过期
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session
-            else:
-                # 过期则删除
-                del self.sessions[session_id]
-        
-        # 创建新session，应用人格
-        session = Session(session_id, persona)
-        self.sessions[session_id] = session
-        return session
-    
-    def clear_session(self, user_id: int, group_id: Optional[int] = None) -> bool:
-        """清除session"""
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            del self.sessions[session_id]
-            return True
-        return False
-
-# 全局Session管理器
-session_manager = SessionManager()
-
-# Persona管理器
-class PersonaManager:
-    """管理AI人格设置（持久化存储）"""
-    def __init__(self):
-        self.personas: Dict[str, str] = {}  # key: persona_id, value: persona_text
-        self.saved_personas: Dict[str, Dict[str, str]] = {}  # key: user_id, value: {name: persona_text}
-        self.global_presets: Dict[str, str] = {}  # key: preset_name, value: persona_text (全局预设人格)
-        self.data_file = aichat_data_dir.joinpath('aichat_personas.json')
-        self.saved_personas_file = aichat_data_dir.joinpath('aichat_saved_personas.json')
-        self.global_presets_file = aichat_data_dir.joinpath('aichat_global_presets.json')
-        self.load_personas()
-        self.load_saved_personas()
-        self.load_global_presets()
-    
-    def _get_user_persona_id(self, user_id: int, group_id: Optional[int] = None) -> str:
-        """获取用户人格ID"""
-        if group_id:
-            return f"{user_id}_{group_id}"
-        return f"private_{user_id}"
-    
-    def _get_group_persona_id(self, group_id: int) -> str:
-        """获取群组默认人格ID"""
-        return f"group_{group_id}"
-    
-    def _get_global_persona_id(self) -> str:
-        """获取全局默认人格ID"""
-        return "global_default"
-    
-    def get_persona(self, user_id: int, group_id: Optional[int] = None) -> Optional[str]:
-        """获取当前用户的人格（按优先级：用户 > 群组 > 全局）"""
-        # 1. 检查用户人格
-        user_persona_id = self._get_user_persona_id(user_id, group_id)
-        if user_persona_id in self.personas:
-            persona = self.personas[user_persona_id]
-            if persona and persona.strip():
-                return persona.strip()
-        
-        # 2. 检查群组默认人格（仅群聊）
-        if group_id:
-            group_persona_id = self._get_group_persona_id(group_id)
-            if group_persona_id in self.personas:
-                persona = self.personas[group_persona_id]
-                if persona and persona.strip():
-                    return persona.strip()
-        
-        # 3. 检查全局默认人格
-        global_persona_id = self._get_global_persona_id()
-        if global_persona_id in self.personas:
-            persona = self.personas[global_persona_id]
-            if persona and persona.strip():
-                return persona.strip()
-        
-        # 4. 检查配置文件中的默认人格
-        if conf.default_persona and conf.default_persona.strip():
-            return conf.default_persona.strip()
-        
-        return None
-    
-    def set_user_persona(self, user_id: int, group_id: Optional[int], persona: str) -> bool:
-        """设置用户人格"""
-        user_persona_id = self._get_user_persona_id(user_id, group_id)
-        self.personas[user_persona_id] = persona.strip()
-        self.save_personas()
-        return True
-    
-    def set_group_default_persona(self, group_id: int, persona: str) -> bool:
-        """设置群组默认人格"""
-        group_persona_id = self._get_group_persona_id(group_id)
-        self.personas[group_persona_id] = persona.strip()
-        self.save_personas()
-        return True
-    
-    def set_global_default_persona(self, persona: str) -> bool:
-        """设置全局默认人格"""
-        global_persona_id = self._get_global_persona_id()
-        self.personas[global_persona_id] = persona.strip()
-        self.save_personas()
-        return True
-    
-    def clear_user_persona(self, user_id: int, group_id: Optional[int] = None) -> bool:
-        """清除用户人格（使用默认）"""
-        user_persona_id = self._get_user_persona_id(user_id, group_id)
-        if user_persona_id in self.personas:
-            del self.personas[user_persona_id]
-            self.save_personas()
-            return True
-        return False
-    
-    def get_user_persona_info(self, user_id: int, group_id: Optional[int] = None) -> Dict[str, Optional[str]]:
-        """获取用户人格信息（包括所有层级）"""
-        user_persona_id = self._get_user_persona_id(user_id, group_id)
-        user_persona = self.personas.get(user_persona_id)
-        
-        group_persona = None
-        if group_id:
-            group_persona_id = self._get_group_persona_id(group_id)
-            group_persona = self.personas.get(group_persona_id)
-        
-        global_persona_id = self._get_global_persona_id()
-        global_persona = self.personas.get(global_persona_id)
-        
-        config_persona = conf.default_persona if conf.default_persona else None
-        
-        return {
-            "user": user_persona,
-            "group": group_persona,
-            "global": global_persona,
-            "config": config_persona,
-            "effective": self.get_persona(user_id, group_id)
-        }
-    
-    def save_personas(self):
-        """保存人格设置到文件"""
-        try:
-            self.data_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(self.personas, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.exception(f"保存人格设置失败: {e}")
-    
-    def load_personas(self):
-        """从文件加载人格设置"""
-        try:
-            if not self.data_file.exists():
-                return
-            
-            with open(self.data_file, 'r', encoding='utf-8') as f:
-                self.personas = json.load(f)
-        except Exception as e:
-            logger.error(f"加载人格设置失败: {e}")
-            self.personas = {}
-    
-    def _get_user_key(self, user_id: int, group_id: Optional[int] = None) -> str:
-        """获取用户保存人格的key（全局，不区分群组）"""
-        return str(user_id)
-    
-    def save_persona(self, user_id: int, group_id: Optional[int], name: str, persona: str) -> Tuple[bool, str]:
-        """保存人格到用户的人格列表
-        返回: (是否成功, 错误信息)
-        """
-        user_key = self._get_user_key(user_id, group_id)
-        
-        # 检查名称是否为空
-        if not name or not name.strip():
-            return False, "人格名称不能为空"
-        
-        name = name.strip()
-        
-        # 获取用户已保存的人格
-        if user_key not in self.saved_personas:
-            self.saved_personas[user_key] = {}
-        
-        user_personas = self.saved_personas[user_key]
-        
-        # 如果名称已存在，直接更新
-        if name in user_personas:
-            user_personas[name] = persona.strip()
-            self.save_saved_personas()
-            return True, f"人格 '{name}' 已更新"
-        
-        # 检查是否超过最大数量
-        if len(user_personas) >= conf.max_saved_personas:
-            return False, f"已保存 {len(user_personas)} 个人格，最多只能保存 {conf.max_saved_personas} 个。请先删除一些人格或使用已有名称更新。"
-        
-        # 保存新人格
-        user_personas[name] = persona.strip()
-        self.save_saved_personas()
-        return True, f"人格 '{name}' 已保存"
-    
-    def get_saved_personas(self, user_id: int, group_id: Optional[int] = None) -> Dict[str, str]:
-        """获取用户保存的所有人格"""
-        user_key = self._get_user_key(user_id, group_id)
-        return self.saved_personas.get(user_key, {}).copy()
-    
-    def get_saved_persona(self, user_id: int, group_id: Optional[int], name: str) -> Optional[str]:
-        """获取用户保存的指定人格"""
-        user_key = self._get_user_key(user_id, group_id)
-        user_personas = self.saved_personas.get(user_key, {})
-        return user_personas.get(name)
-    
-    def delete_saved_persona(self, user_id: int, group_id: Optional[int], name: str) -> Tuple[bool, str]:
-        """删除用户保存的人格
-        返回: (是否成功, 错误信息)
-        """
-        user_key = self._get_user_key(user_id, group_id)
-        
-        if user_key not in self.saved_personas:
-            return False, "未找到保存的人格"
-        
-        user_personas = self.saved_personas[user_key]
-        
-        if name not in user_personas:
-            return False, f"未找到名为 '{name}' 的人格"
-        
-        del user_personas[name]
-        
-        # 如果用户没有保存的人格了，删除该用户的key
-        if not user_personas:
-            del self.saved_personas[user_key]
-        
-        self.save_saved_personas()
-        return True, f"人格 '{name}' 已删除"
-    
-    def save_saved_personas(self):
-        """保存用户人格列表到文件"""
-        try:
-            self.saved_personas_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.saved_personas_file, 'w', encoding='utf-8') as f:
-                json.dump(self.saved_personas, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"保存用户人格列表失败: {e}")
-    
-    def load_saved_personas(self):
-        """从文件加载用户人格列表"""
-        try:
-            if not self.saved_personas_file.exists():
-                return
-            
-            with open(self.saved_personas_file, 'r', encoding='utf-8') as f:
-                self.saved_personas = json.load(f)
-        except Exception as e:
-            logger.error(f"加载用户人格列表失败: {e}")
-            self.saved_personas = {}
-
-    # ========== 全局预设人格管理 ==========
-    
-    def get_global_preset(self, name: str) -> Optional[str]:
-        """获取全局预设人格"""
-        return self.global_presets.get(name.strip())
-    
-    def get_global_presets(self) -> Dict[str, str]:
-        """获取所有全局预设人格"""
-        return self.global_presets.copy()
-    
-    def add_global_preset(self, name: str, persona: str) -> Tuple[bool, str]:
-        """添加全局预设人格
-        返回: (是否成功, 消息)
-        """
-        name = name.strip()
-        if not name:
-            return False, "预设人格名称不能为空"
-        if not persona or not persona.strip():
-            return False, "预设人格内容不能为空"
-        
-        is_update = name in self.global_presets
-        self.global_presets[name] = persona.strip()
-        self.save_global_presets()
-        
-        if is_update:
-            return True, f"全局预设人格 '{name}' 已更新"
-        return True, f"全局预设人格 '{name}' 已添加"
-    
-    def delete_global_preset(self, name: str) -> Tuple[bool, str]:
-        """删除全局预设人格
-        返回: (是否成功, 消息)
-        """
-        name = name.strip()
-        if name not in self.global_presets:
-            return False, f"未找到全局预设人格 '{name}'"
-        
-        del self.global_presets[name]
-        self.save_global_presets()
-        return True, f"全局预设人格 '{name}' 已删除"
-    
-    def save_global_presets(self):
-        """保存全局预设人格到文件"""
-        try:
-            self.global_presets_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.global_presets_file, 'w', encoding='utf-8') as f:
-                json.dump(self.global_presets, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"保存全局预设人格失败: {e}")
-    
-    def load_global_presets(self):
-        """从文件加载全局预设人格"""
-        try:
-            if not self.global_presets_file.exists():
-                self.global_presets = {}
-                return
-            
-            with open(self.global_presets_file, 'r', encoding='utf-8') as f:
-                self.global_presets = json.load(f)
-        except Exception as e:
-            logger.error(f"加载全局预设人格失败: {e}")
-            self.global_presets = {}
-    
-    def find_persona_by_name(self, user_id: int, group_id: Optional[int], name: str) -> Optional[str]:
-        """按名称查找人格（优先级：用户保存 > 全局预设）
-        
-        返回: 找到的人格内容，未找到返回 None
-        """
-        name = name.strip()
-        
-        # 1. 先查找用户自己保存的人格
-        user_saved = self.get_saved_persona(user_id, group_id, name)
-        if user_saved:
-            return user_saved
-        
-        # 2. 查找全局预设人格
-        global_preset = self.get_global_preset(name)
-        if global_preset:
-            return global_preset
-        
-        return None
-
-# 全局Persona管理器
-persona_manager = PersonaManager()
-
-
-def _build_api_config_dict(api_entry) -> Dict[str, Any]:
-    """从 ApiEntry 构建完整 API 调用参数字典（只包含配置的参数）"""
-    config_dict = {
-        "api_base": api_entry.api_base,
-        "api_key": api_entry.api_key,
-        "model": api_entry.model,
-    }
-    # 只在配置了参数时才添加（不强制使用默认值）
-    if api_entry.max_tokens is not None:
-        config_dict["max_tokens"] = api_entry.max_tokens
-    if api_entry.temperature is not None:
-        config_dict["temperature"] = api_entry.temperature
-    # 多模态支持标志（None 表示未配置，默认为 False）
-    config_dict["supports_multimodal"] = api_entry.supports_multimodal if api_entry.supports_multimodal is not None else False
-    return config_dict
-
-
-# API 选择管理器（全局唯一，仅超级用户可切换）
-class ApiManager:
-    """管理当前使用的大模型 API（全局唯一）"""
-    def __init__(self):
-        self._current_api_id: str = ""
-        self.data_file = aichat_data_dir.joinpath('aichat_api_selection.json')
-        self.load()
-
-    def load(self):
-        try:
-            if self.data_file.exists():
-                with open(self.data_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                # 新格式：{"current_api": "kimi"}；旧格式（按用户）取第一个有效值或忽略
-                if isinstance(data, dict) and "current_api" in data:
-                    self._current_api_id = data.get("current_api", "") or ""
-                else:
-                    self._current_api_id = ""
-        except Exception as e:
-            logger.error(f"加载 API 选择失败: {e}")
-            self._current_api_id = ""
-
-    def save(self):
-        try:
-            self.data_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump({"current_api": self._current_api_id}, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"保存 API 选择失败: {e}")
-
-    def get_current_api_id(self) -> str:
-        """获取当前全局使用的 API id"""
-        if self._current_api_id and conf.get_api_by_id(self._current_api_id):
-            return self._current_api_id
-        return conf.get_default_api_id()
-
-    def set_current_api_id(self, api_id: str) -> bool:
-        """设置全局当前使用的 API id（仅超级用户应调用）"""
-        if not conf.get_api_by_id(api_id):
-            return False
-        self._current_api_id = api_id
-        self.save()
-        return True
-
-    def get_api_config(self) -> Optional[Dict[str, Any]]:
-        """获取当前应使用的 API 配置（完整 dict）"""
-        api_id = self.get_current_api_id()
-        entry = conf.get_api_by_id(api_id)
-        if not entry:
-            return None
-        return _build_api_config_dict(entry)
-
-
-api_manager = ApiManager()
-
-
-async def download_image_to_base64(image_url: str) -> Optional[str]:
-    """下载图片并转换为 base64 格式的 data URL"""
-    try:
-        resp = await aiohttpx.get(image_url)
-        if not resp.ok:
-            logger.error(f"下载图片失败: {resp.status_code}, URL: {image_url}")
-            return None
-        
-        image_data = resp.content
-        if not image_data:
-            logger.error(f"图片数据为空: {image_url}")
-            return None
-        
-        # 尝试从 Content-Type 响应头获取图片格式
-        ext = "png"  # 默认格式
-        content_type = resp.headers.get("Content-Type", "")
-        if content_type and content_type.startswith("image/"):
-            # 从 Content-Type 提取格式，如 "image/jpeg" -> "jpeg"
-            ext = content_type.split("/")[1].split(";")[0].strip()
-            # 标准化格式名称
-            if ext == "jpeg":
-                ext = "jpg"
-        else:
-            # 如果响应头没有，尝试从 URL 推断
-            if "." in image_url:
-                url_ext = os.path.splitext(image_url.split("?")[0])[1].lower()
-                if url_ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
-                    ext = url_ext.lstrip(".")
-        
-        # 编码为 base64
-        base64_data = base64.b64encode(image_data).decode('utf-8')
-        image_url_data = f"data:image/{ext};base64,{base64_data}"
-        return image_url_data
-    except Exception as e:
-        logger.exception(f"处理图片失败: {e}, URL: {image_url}")
-        return None
-
-
-async def call_ai_api(messages: List[Dict[str, Any]], api_config: Dict[str, Any]) -> Optional[str]:
-    """调用 AI API，使用指定的 api_config（支持文本和多模态消息）"""
-    if not api_config or not api_config.get("api_key"):
-        logger.warning("AI API 未配置或密钥为空")
-        return None
-
-    if not messages:
-        logger.error("消息列表为空")
-        return None
-
-    url = f"{api_config['api_base'].rstrip('/')}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_config['api_key']}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": api_config["model"],
-        "messages": messages,
-    }
-    # 只在配置了参数时才添加到 payload（避免某些模型不支持这些参数）
-    if "max_tokens" in api_config:
-        payload["max_tokens"] = api_config["max_tokens"]
-    if "temperature" in api_config:
-        payload["temperature"] = api_config["temperature"]
-
-    try:
-        resp = await aiohttpx.post(url, headers=headers, json=payload)
-        if not resp.ok:
-            logger.error(f"AI API 调用失败: {resp.status_code}, 响应: {resp.text}")
-            return None
-
-        result = resp.json
-        if not result:
-            logger.error("AI API 返回空结果")
-            return None
-
-        logger.info(str(result))
-
-        if "choices" in result and len(result["choices"]) > 0:
-            message = result["choices"][0].get("message", {})
-            if "content" in message:
-                return message["content"]
-            logger.error(f"AI API 返回格式错误，缺少 content 字段: {result}")
-            return None
-        error_info = result.get("error", {})
-        error_msg = error_info.get("message", "未知错误") if error_info else "返回格式错误"
-        logger.error(f"AI API 返回错误: {error_msg}, 完整响应: {result}")
-        return None
-    except Exception as e:
-        logger.exception(f"调用 AI API 异常: {e}")
-        return None
-
-async def handle_ai_chat(bot: Bot, event: Event):
-    """处理AI聊天消息（支持图片多模态）"""
-    # 获取消息内容
-    msg = str(event.message).strip()
-    
-    # 检查是否以#开头
-    if not msg.startswith('#'):
-        return
-    
-    # 移除#前缀
-    user_input = msg[1:].strip()
-    
-    user_id = event.user_id
-    group_id = getattr(event, 'group_id', None)
-
-    api_config = api_manager.get_api_config()
-    if not api_config or not api_config.get("api_key"):
-        await bot.send(event, "AI 服务未配置或当前模型不可用，请联系超级用户配置或切换模型")
-        return
-
-    # 检测消息中的图片
-    image_urls = get_event_imageurl(event)
-    
-    # 引用消息里的图片（支持转发消息中的图片）
-    image_urls.extend(await extract_images_from_reply(event, bot))
-    logger.info(f"检测到图片URL: {image_urls}")
-    
-    # 检查模型是否支持多模态
-    supports_multimodal = api_config.get("supports_multimodal", False)
-    
-    # 构建消息内容（支持多模态）
-    message_content: Union[str, List[Dict[str, Any]]]
-    
-    # 如果模型不支持多模态，但有图片，则只发送文本并提示
-    if image_urls and not supports_multimodal:
-        if user_input:
-            # 有文本内容，只发送文本，忽略图片
-            logger.info(f"模型 {api_config.get('model')} 不支持多模态，忽略图片，只发送文本")
-            message_content = user_input
-        else:
-            # 只有图片没有文本，提示用户
-            await bot.send(event, f"当前模型 {api_config.get('model')} 不支持图片识别，请发送文本内容")
-            return
-    elif image_urls and supports_multimodal:
-        # 有多模态内容：图片 + 文本
-        content_parts: List[Dict[str, Any]] = []
-        
-        # 处理所有图片
-        for img_url in image_urls:
-            base64_image = await download_image_to_base64(img_url)
-            if base64_image:
-                content_parts.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": base64_image,
-                    },
-                })
-            else:
-                logger.warning(f"图片处理失败，跳过: {img_url}")
-        
-        # 如果所有图片都处理失败，且没有文本，则返回错误
-        if not content_parts and not user_input:
-            await bot.send(event, "图片处理失败，请重试或提供文本内容")
-            return
-        
-        # 如果有文本内容，添加文本部分
-        if user_input:
-            content_parts.append({
-                "type": "text",
-                "text": user_input,
-            })
-        
-        # 如果只有图片没有文本，添加一个默认提示
-        if not user_input and content_parts:
-            content_parts.append({
-                "type": "text",
-                "text": "请描述图片的内容。",
-            })
-        
-        message_content = content_parts if content_parts else user_input
-    else:
-        # 纯文本消息，检查是否有内容
-        if not user_input:
-            await bot.send(event, "请输入要询问的内容（#后面）")
-            return
-        message_content = user_input
-
-    persona = persona_manager.get_persona(user_id, group_id)
-    session = session_manager.get_session(user_id, group_id, persona)
-    session.add_message("user", message_content)
-
-    response = await call_ai_api(session.messages, api_config)
-    
-    if response is None:
-        await bot.send(event, "AI服务暂时不可用，请稍后再试")
-        # 移除刚才添加的用户消息
-        if session.messages and session.messages[-1].get("role") == "user":
-            session.messages.pop()
-        return
-    
-    # 添加AI回复
-    session.add_message("assistant", response)
-    
-    # 发送回复
-    try:
-        await bot.send(event, response)
-    except Exception as e:
-        logger.error(str(response))
-        logger.error(f"发送AI回复失败: {e}")
-
-# 注册消息处理器
+# ========== 注册消息处理器 ==========
 sv.on_message(priority=10, block=False, only_group=False).handle()(handle_ai_chat)
 
-# 清除session命令
+# ========== 清除session命令 ==========
 clear_cmd = sv.on_command('清除对话', aliases=('清空对话', '重置对话'), only_group=False)
 
 @clear_cmd.handle()
@@ -702,7 +34,7 @@ async def clear_session(bot: Bot, event: Event):
     else:
         await bot.send(event, "没有找到对话历史")
 
-# 设置用户人格命令
+# ========== 设置用户人格命令 ==========
 set_persona_cmd = sv.on_command('设置人格', aliases=('设置AI人格',), only_group=False)
 
 @set_persona_cmd.handle()
@@ -728,7 +60,7 @@ async def set_persona(bot: Bot, event: Event):
     
     await set_persona_cmd.finish(f"人格设置成功！\n当前人格：{persona_text}")
 
-# 设置群组默认人格命令（需要管理员权限）
+# ========== 设置群组默认人格命令（需要管理员权限） ==========
 set_group_persona_cmd = sv.on_command('设置群默认人格', aliases=('设置群组默认人格',), permission=ADMIN, only_group=True)
 
 @set_group_persona_cmd.handle()
@@ -761,7 +93,7 @@ async def set_group_persona(bot: Bot, event: Event):
         persona_manager.set_group_default_persona(group_id, persona_text)
         await set_group_persona_cmd.finish(f"群组默认人格设置成功！\n当前人格：{persona_text}")
 
-# 设置全局默认人格命令（需要超级用户权限）
+# ========== 设置全局默认人格命令（需要超级用户权限） ==========
 set_global_persona_cmd = sv.on_command('设置全局默认人格', aliases=('设置全局人格',), permission=SUPERUSER, only_group=False)
 
 @set_global_persona_cmd.handle()
@@ -793,7 +125,7 @@ async def set_global_persona(bot: Bot, event: Event):
         persona_manager.set_global_default_persona(persona_text)
         await set_global_persona_cmd.finish(f"全局默认人格设置成功！\n当前人格：{persona_text}")
 
-# 查看人格命令
+# ========== 查看人格命令 ==========
 view_persona_cmd = sv.on_command('查看人格', aliases=('查看AI人格', '当前人格'), only_group=False)
 
 @view_persona_cmd.handle()
@@ -809,7 +141,7 @@ async def view_persona(bot: Bot, event: Event):
     else:
         await view_persona_cmd.finish("未设置人格，使用默认行为")
 
-# 清除人格命令
+# ========== 清除人格命令 ==========
 clear_persona_cmd = sv.on_command('清除人格', aliases=('清除AI人格',), only_group=False)
 
 @clear_persona_cmd.handle()
@@ -825,7 +157,7 @@ async def clear_persona(bot: Bot, event: Event):
     else:
         await clear_persona_cmd.finish("未设置用户人格，无需清除")
 
-# 保存人格命令
+# ========== 保存人格命令 ==========
 save_persona_cmd = sv.on_command('保存人格', aliases=('保存AI人格',), only_group=False)
 
 @save_persona_cmd.handle()
@@ -849,7 +181,7 @@ async def save_persona(bot: Bot, event: Event):
     success, msg = persona_manager.save_persona(user_id, group_id, name, persona_text)
     await save_persona_cmd.finish(msg)
 
-# 列出已保存人格命令
+# ========== 列出已保存人格命令 ==========
 list_personas_cmd = sv.on_command('列出人格', aliases=('查看保存的人格', '已保存人格', '人格列表'), only_group=False)
 
 @list_personas_cmd.handle()
@@ -873,7 +205,7 @@ async def list_personas(bot: Bot, event: Event):
     lines.append(f"\n使用「使用人格 名称」来快捷设置人格")
     await list_personas_cmd.finish("\n".join(lines))
 
-# 使用已保存人格命令（支持用户保存的人格和全局预设人格）
+# ========== 使用已保存人格命令（支持用户保存的人格和全局预设人格） ==========
 use_persona_cmd = sv.on_command('使用人格', aliases=('切换人格', '应用人格'), only_group=False)
 
 @use_persona_cmd.handle()
@@ -911,7 +243,7 @@ async def use_persona(bot: Bot, event: Event):
     
     await use_persona_cmd.finish(f"已切换到人格 '{name}' {source}\n人格内容：{persona_text[:100]}{'...' if len(persona_text) > 100 else ''}")
 
-# 删除已保存人格命令
+# ========== 删除已保存人格命令 ==========
 delete_persona_cmd = sv.on_command('删除人格', aliases=('移除人格', '删除保存的人格'), only_group=False)
 
 @delete_persona_cmd.handle()
@@ -930,7 +262,7 @@ async def delete_persona(bot: Bot, event: Event):
     success, msg = persona_manager.delete_saved_persona(user_id, group_id, name)
     await delete_persona_cmd.finish(msg)
 
-# 列出模型命令
+# ========== 列出模型命令 ==========
 list_models_cmd = sv.on_command('列出模型', aliases=('模型列表', '可用模型'), only_group=False)
 
 @list_models_cmd.handle()
@@ -949,7 +281,7 @@ async def list_models(bot: Bot, event: Event):
     lines.append("\n超级用户可使用「切换模型 id」或「切换模型 名称」切换全局使用的模型")
     await list_models_cmd.finish("\n".join(lines))
 
-# 切换模型命令（仅超级用户）
+# ========== 切换模型命令（仅超级用户） ==========
 switch_model_cmd = sv.on_command('切换模型', aliases=('选择模型', '切换大模型'), permission=SUPERUSER, only_group=False)
 
 @switch_model_cmd.handle()
@@ -975,7 +307,7 @@ async def switch_model(bot: Bot, event: Event):
     api_manager.set_current_api_id(target.id)
     await switch_model_cmd.finish(f"已切换全局模型为：{target.name}（{target.model}）")
 
-# 当前模型命令
+# ========== 当前模型命令 ==========
 current_model_cmd = sv.on_command('当前模型', aliases=('查看模型', '当前大模型'), only_group=False)
 
 @current_model_cmd.handle()
@@ -1050,3 +382,18 @@ async def list_global_presets(bot: Bot, event: Event):
     
     lines.append("\n使用「使用人格 名称」或「切换人格 名称」来应用预设人格")
     await list_presets_cmd.finish("\n".join(lines))
+
+
+# 暴露关键类和实例供其他模块使用
+__all__ = [
+    'sv',
+    'conf',
+    'Session',
+    'SessionManager',
+    'session_manager',
+    'persona_manager',
+    'api_manager',
+    'handle_ai_chat',
+    'call_ai_api',
+    'download_image_to_base64',
+]
