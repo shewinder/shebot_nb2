@@ -1234,7 +1234,7 @@ function Aichat() {
                 >
                   开始导入 ({uploadFileList.length} 个文件)
                 </Button>
-              )}}
+              )}
 
               {importLoading && (
                 <div style={{ textAlign: 'center', padding: '20px' }}>
