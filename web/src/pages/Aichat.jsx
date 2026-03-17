@@ -19,7 +19,8 @@ import {
   Modal,
   Form,
   Switch,
-  InputNumber
+  InputNumber,
+  Upload
 } from 'antd'
 import {
   SaveOutlined,
@@ -34,7 +35,10 @@ import {
   EditOutlined,
   SettingOutlined,
   BookOutlined,
-  TagOutlined
+  TagOutlined,
+  UploadOutlined,
+  ImportOutlined,
+  FileImageOutlined
 } from '@ant-design/icons'
 import * as aichatApi from '../api'
 
@@ -82,6 +86,13 @@ function Aichat() {
   const [editingPreset, setEditingPreset] = useState(null)
   const [presetModalVisible, setPresetModalVisible] = useState(false)
   const [presetForm] = Form.useForm()
+
+  // 角色卡导入相关
+  const [importUserId, setImportUserId] = useState('')
+  const [importAsGlobal, setImportAsGlobal] = useState(false)
+  const [importLoading, setImportLoading] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const [uploadFileList, setUploadFileList] = useState([])
 
   useEffect(() => {
     fetchInitialData()
@@ -162,9 +173,85 @@ function Aichat() {
         if (!savedPersonaUserId) {
           setSavedPersonaUserId(String(firstSu))
         }
+        if (!importUserId) {
+          setImportUserId(String(firstSu))
+        }
       }
     } catch (error) {
       // 不显示错误，因为可能没有权限
+    }
+  }
+
+  // 处理文件选择（阻止自动上传，仅保存文件列表，验证文件类型）
+  const handleBeforeUpload = (file) => {
+    // 验证文件类型
+    const isValid = file.name.toLowerCase().endsWith('.png') || 
+                    file.name.toLowerCase().endsWith('.json')
+    if (!isValid) {
+      message.error(`不支持的文件格式: ${file.name}，只支持 PNG 和 JSON 文件`)
+    }
+    // 阻止自动上传，返回 false
+    return false
+  }
+  
+  const handleFileChange = ({ fileList }) => {
+    // 只更新文件列表，不触发上传
+    setUploadFileList(fileList)
+  }
+  
+  // 执行批量导入
+  const handleImportBatch = async () => {
+    if (!importUserId) {
+      message.error('请输入用户ID')
+      return
+    }
+    
+    if (!uploadFileList || uploadFileList.length === 0) {
+      message.error('请选择要导入的文件')
+      return
+    }
+    
+    setImportLoading(true)
+    setImportResult(null)
+    
+    try {
+      // 获取实际的 File 对象
+      const files = uploadFileList.map(f => f.originFileObj).filter(Boolean)
+      
+      if (files.length === 0) {
+        message.error('文件对象无效')
+        setImportLoading(false)
+        return
+      }
+      
+      const result = await aichatApi.importCharacters(
+        parseInt(importUserId),
+        files,
+        importAsGlobal
+      )
+      
+      // 注意：request 拦截器已经解包了 response.data
+      setImportResult(result)
+      setUploadFileList([]) // 清空列表
+      
+      if (result?.summary?.success > 0) {
+        message.success(`成功导入 ${result.summary.success} 个角色卡`)
+        // 刷新列表
+        if (importAsGlobal) {
+          await fetchGlobalPresets()
+        }
+        if (parseInt(importUserId) === parseInt(savedPersonaUserId)) {
+          await handleFetchSavedPersonas()
+        }
+      } else if (result?.summary?.skipped > 0) {
+        message.warning('未找到有效的角色卡文件')
+      } else {
+        message.error('导入失败')
+      }
+    } catch (error) {
+      message.error('导入失败: ' + error.message)
+    } finally {
+      setImportLoading(false)
     }
   }
 
@@ -1083,6 +1170,113 @@ function Aichat() {
             ) : (
               <Empty description="暂无全局预设人格，点击「添加预设人格」创建" />
             )}
+          </Card>
+        </TabPane>
+
+        <TabPane
+          tab={<span><ImportOutlined /> 角色卡导入</span>}
+          key="character-import"
+        >
+          <Card title="从 PNG 图片导入角色卡">
+            <Alert
+              message="角色卡导入"
+              description="支持从 TavernAI / SillyTavern 格式的 PNG 角色卡图片或 JSON 文件导入人格。可同时上传多个文件批量导入。非角色卡文件会被自动跳过。"
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Input
+                placeholder="用户QQ号"
+                value={importUserId}
+                onChange={e => setImportUserId(e.target.value)}
+                style={{ width: 200 }}
+                prefix={<UserOutlined />}
+              />
+              
+              <div>
+                <span style={{ marginRight: 8 }}>导入为：</span>
+                <Select
+                  value={importAsGlobal}
+                  onChange={setImportAsGlobal}
+                  style={{ width: 200 }}
+                >
+                  <Option value={false}>个人人格</Option>
+                  <Option value={true}>全局预设人格（需超级用户）</Option>
+                </Select>
+              </div>
+
+              <Upload.Dragger
+                multiple
+                beforeUpload={handleBeforeUpload}
+                onChange={handleFileChange}
+                disabled={importLoading}
+              >
+                <p className="ant-upload-drag-icon">
+                  <FileImageOutlined />
+                </p>
+                <p className="ant-upload-text">点击或拖拽角色卡文件到此区域</p>
+                <p className="ant-upload-hint">
+                  支持 PNG 图片和 JSON 文件批量上传，选择文件后点击导入按钮
+                </p>
+              </Upload.Dragger>
+              
+              {uploadFileList.length > 0 && (
+                <Button
+                  type="primary"
+                  icon={<ImportOutlined />}
+                  onClick={handleImportBatch}
+                  loading={importLoading}
+                  disabled={importLoading}
+                  style={{ marginTop: 16 }}
+                  block
+                >
+                  开始导入 ({uploadFileList.length} 个文件)
+                </Button>
+              )}}
+
+              {importLoading && (
+                <div style={{ textAlign: 'center', padding: '20px' }}>
+                  <Spin />
+                  <p>正在导入...</p>
+                </div>
+              )}
+
+              {importResult && (
+                <Card title="导入结果" size="small">
+                  <Space wrap>
+                    <Tag color="success">成功: {importResult.summary?.success || 0}</Tag>
+                    <Tag color="warning">跳过: {importResult.summary?.skipped || 0}</Tag>
+                    <Tag color="error">失败: {importResult.summary?.failed || 0}</Tag>
+                    <Tag>总计: {importResult.summary?.total || 0}</Tag>
+                  </Space>
+                  
+                  {importResult.results && importResult.results.length > 0 && (
+                    <List
+                      size="small"
+                      style={{ marginTop: 16, maxHeight: 300, overflow: 'auto' }}
+                      dataSource={importResult.results}
+                      renderItem={item => (
+                        <List.Item>
+                          <Space>
+                            {item.success ? (
+                              <Tag color="success">成功</Tag>
+                            ) : item.message?.includes('不是有效的角色卡') ? (
+                              <Tag color="default">跳过</Tag>
+                            ) : (
+                              <Tag color="error">失败</Tag>
+                            )}
+                            <Text strong>{item.name}</Text>
+                            <Text type="secondary">{item.message}</Text>
+                          </Space>
+                        </List.Item>
+                      )}
+                    />
+                  )}
+                </Card>
+              )}
+            </Space>
           </Card>
         </TabPane>
       </Tabs>

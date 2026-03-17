@@ -21,15 +21,23 @@ class CharacterCard:
     """角色卡数据类"""
     def __init__(self, data: Dict[str, Any]):
         self.raw_data = data
-        self.name = data.get('name', '')
-        self.description = data.get('description', '')
-        self.personality = data.get('personality', '')
-        self.scenario = data.get('scenario', '')
-        self.first_mes = data.get('first_mes', '')
-        self.mes_example = data.get('mes_example', '')
-        self.creator = data.get('creator', '')
-        self.tags = data.get('tags', [])
-        self.version = data.get('character_version', '')
+        
+        # 处理嵌套结构 (chara_card_v2 格式)
+        # 有些 JSON 的数据在 'data' 字段中
+        if 'data' in data and isinstance(data['data'], dict):
+            card_data = data['data']
+        else:
+            card_data = data
+        
+        self.name = card_data.get('name', '')
+        self.description = card_data.get('description', '')
+        self.personality = card_data.get('personality', '')
+        self.scenario = card_data.get('scenario', '')
+        self.first_mes = card_data.get('first_mes', '')
+        self.mes_example = card_data.get('mes_example', '')
+        self.creator = card_data.get('creator', '')
+        self.tags = card_data.get('tags', [])
+        self.version = card_data.get('character_version', '')
     
     def to_persona_text(self) -> str:
         """

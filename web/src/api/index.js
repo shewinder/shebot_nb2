@@ -128,3 +128,28 @@ export const addGlobalPreset = (name, content) => request.post('/aichat/add-glob
 export const deleteGlobalPreset = (name) => request.post('/aichat/delete-global-preset', {
   name
 })
+
+// ===== 角色卡导入 API =====
+// 批量导入角色卡
+export const importCharacters = (user_id, files, as_global = false) => {
+  const formData = new FormData()
+  formData.append('user_id', user_id)
+  formData.append('as_global', as_global)
+  files.forEach(file => formData.append('files', file))
+  
+  return request.post('/aichat/import-character', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}
+
+// 导入单个角色卡
+export const importCharacterSingle = (user_id, file, as_global = false) => {
+  const formData = new FormData()
+  formData.append('user_id', user_id)
+  formData.append('as_global', as_global)
+  formData.append('file', file)
+  
+  return request.post('/aichat/import-character-single', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}

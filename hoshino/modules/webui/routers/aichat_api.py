@@ -3,7 +3,7 @@ AI Chat Web 管理 API
 提供模型切换、人格管理等功能
 """
 from typing import Dict, List, Optional, Set
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile, Form
 from pydantic import BaseModel
 from nonebot import get_driver
 from loguru import logger
@@ -13,6 +13,8 @@ from hoshino import Bot
 from hoshino.config import get_plugin_config_by_name
 from hoshino.modules.interactive.aichat import api_manager, persona_manager, conf
 from hoshino.modules.interactive.aichat.config import ApiEntry
+from hoshino.modules.interactive.aichat.character_import import parse_character_png, CharacterCard
+import json
 
 # 从 NoneBot 配置获取超级用户
 def get_superusers() -> Set[int]:
@@ -522,3 +524,236 @@ async def delete_global_preset(name: str):
         return {"status": 200, "data": msg}
     else:
         return {"status": 404, "data": msg}
+
+
+# ========== 角色卡导入 API ==========
+
+class CharacterImportResult(BaseModel):
+    """角色卡导入结果"""
+    name: str
+    success: bool
+    message: str
+
+
+def _parse_character_file(content: bytes, file_name: str) -> tuple:
+    """
+    解析角色卡文件（支持 JSON 和 PNG 格式）
+    
+    Returns:
+        (success: bool, char_card: CharacterCard|None, message: str)
+    """
+    # 判断文件类型
+    is_json = file_name.lower().endswith('.json')
+    is_png = file_name.lower().endswith('.png')
+    
+    if not is_json and not is_png:
+        # 尝试根据内容判断
+        if content.startswith(b'{') or content.startswith(b'['):
+            is_json = True
+        elif content.startswith(b'\x89PNG'):
+            is_png = True
+        else:
+            return False, None, "不支持的文件格式，请上传 JSON 或 PNG 文件"
+    
+    if is_json:
+        # 解析 JSON
+        try:
+            json_str = content.decode('utf-8')
+            data = json.loads(json_str)
+            
+            if not isinstance(data, dict):
+                return False, None, "JSON 格式错误：应为对象"
+            
+            # 检查 name 字段（支持标准格式和 chara_card_v2 嵌套格式）
+            card_data = data.get('data', data)  # 如果是 v2 格式，使用 data 字段
+            if 'name' not in card_data:
+                return False, None, "JSON 中未找到 'name' 字段，不是有效的角色卡"
+            
+            char_card = CharacterCard(data)
+            return True, char_card, f"成功解析 JSON 角色卡：{char_card.name}"
+        except json.JSONDecodeError as e:
+            return False, None, f"JSON 解析错误：{e}"
+        except UnicodeDecodeError:
+            return False, None, "文件编码错误，请使用 UTF-8 编码"
+    
+    elif is_png:
+        # 解析 PNG
+        return parse_character_png(content)
+    
+    return False, None, "未知的文件类型"
+
+
+@router.post("/import-character")
+async def import_character(
+    user_id: int = Form(...),
+    files: List[UploadFile] = File(...),
+    as_global: bool = Form(False)
+):
+    """
+    从 PNG 图片或 JSON 文件导入角色卡
+    
+    Args:
+        user_id: 用户ID
+        files: 上传的文件列表（支持 PNG 和 JSON）
+        as_global: 是否保存为全局预设（需要超级用户权限）
+    
+    Returns:
+        导入结果列表
+    """
+    # 检查超级用户权限
+    if as_global and user_id not in get_superusers():
+        return {"status": 403, "data": "只有超级用户可以导入全局预设人格"}
+    
+    if not files:
+        return {"status": 400, "data": "未上传文件"}
+    
+    results = []
+    success_count = 0
+    skip_count = 0
+    fail_count = 0
+    
+    for file in files:
+        file_name = file.filename or "unknown"
+        
+        try:
+            # 读取文件内容
+            content = await file.read()
+            if not content:
+                results.append(CharacterImportResult(
+                    name=file_name,
+                    success=False,
+                    message="文件内容为空"
+                ))
+                fail_count += 1
+                continue
+            
+            # 尝试解析角色卡（支持 JSON 和 PNG）
+            success, char_card, msg = _parse_character_file(content, file_name)
+            
+            if not success or not char_card:
+                # 解析失败
+                skip_count += 1
+                results.append(CharacterImportResult(
+                    name=file_name,
+                    success=False,
+                    message=f"不是有效的角色卡: {msg}"
+                ))
+                continue
+            
+            # 转换为角色人格
+            persona_name = char_card.name
+            persona_text = char_card.to_persona_text()
+            
+            # 保存人格
+            if as_global:
+                success_save, msg_save = persona_manager.add_global_preset(persona_name, persona_text)
+            else:
+                success_save, msg_save = persona_manager.save_persona(user_id, None, persona_name, persona_text)
+            
+            if success_save:
+                success_count += 1
+                results.append(CharacterImportResult(
+                    name=persona_name,
+                    success=True,
+                    message=msg_save
+                ))
+            else:
+                fail_count += 1
+                results.append(CharacterImportResult(
+                    name=persona_name,
+                    success=False,
+                    message=msg_save
+                ))
+                
+        except Exception as e:
+            logger.exception(f"导入角色卡失败: {e}")
+            fail_count += 1
+            results.append(CharacterImportResult(
+                name=file_name,
+                success=False,
+                message=f"处理异常: {str(e)}"
+            ))
+        finally:
+            await file.close()
+    
+    return {
+        "status": 200,
+        "data": {
+            "results": results,
+            "summary": {
+                "total": len(files),
+                "success": success_count,
+                "failed": fail_count,
+                "skipped": skip_count
+            }
+        }
+    }
+
+
+@router.post("/import-character-single")
+async def import_character_single(
+    user_id: int = Form(...),
+    file: UploadFile = File(...),
+    as_global: bool = Form(False)
+):
+    """
+    从单个文件导入角色卡（简化版，支持 JSON 和 PNG）
+    
+    Args:
+        user_id: 用户ID
+        file: 上传的文件（JSON 或 PNG）
+        as_global: 是否保存为全局预设
+    
+    Returns:
+        导入结果，包含角色卡详细信息
+    """
+    # 检查超级用户权限
+    if as_global and user_id not in get_superusers():
+        return {"status": 403, "data": "只有超级用户可以导入全局预设人格"}
+    
+    file_name = file.filename or "unknown"
+    
+    try:
+        content = await file.read()
+        if not content:
+            return {"status": 400, "data": "文件内容为空"}
+        
+        # 解析角色卡（支持 JSON 和 PNG）
+        success, char_card, msg = _parse_character_file(content, file_name)
+        
+        if not success or not char_card:
+            return {"status": 400, "data": f"解析失败: {msg}"}
+        
+        # 转换为角色人格
+        persona_name = char_card.name
+        persona_text = char_card.to_persona_text()
+        
+        # 保存人格
+        if as_global:
+            success_save, msg_save = persona_manager.add_global_preset(persona_name, persona_text)
+        else:
+            success_save, msg_save = persona_manager.save_persona(user_id, None, persona_name, persona_text)
+        
+        if success_save:
+            return {
+                "status": 200,
+                "data": {
+                    "name": persona_name,
+                    "description": char_card.description[:200] + "..." if len(char_card.description) > 200 else char_card.description,
+                    "personality": char_card.personality,
+                    "scenario": char_card.scenario,
+                    "creator": char_card.creator,
+                    "tags": char_card.tags if isinstance(char_card.tags, list) else [],
+                    "content_length": len(persona_text),
+                    "message": msg_save,
+                    "is_global": as_global
+                }
+            }
+        else:
+            return {"status": 400, "data": msg_save}
+            
+    except Exception as e:
+        logger.exception(f"导入角色卡失败: {e}")
+        return {"status": 500, "data": f"导入失败: {str(e)}"}
+    finally:
+        await file.close()
