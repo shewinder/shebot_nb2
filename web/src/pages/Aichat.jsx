@@ -835,19 +835,45 @@ function Aichat() {
                 <Title level={4}>查询结果</Title>
                 <Descriptions bordered column={1}>
                   <Descriptions.Item label="当前上下文人格">
-                    {userPersonaInfo.user || '未设置'}
+                    <div style={{ maxWidth: '100%', wordBreak: 'break-all' }}>
+                      {userPersonaInfo.user 
+                        ? (userPersonaInfo.user.length > 100 
+                            ? userPersonaInfo.user.slice(0, 100) + '...' 
+                            : userPersonaInfo.user)
+                        : '未设置'}
+                    </div>
                   </Descriptions.Item>
                   <Descriptions.Item label="当前上下文群组人格">
-                    {userPersonaInfo.group || '未设置'}
+                    <div style={{ maxWidth: '100%', wordBreak: 'break-all' }}>
+                      {userPersonaInfo.group 
+                        ? (userPersonaInfo.group.length > 100 
+                            ? userPersonaInfo.group.slice(0, 100) + '...' 
+                            : userPersonaInfo.group)
+                        : '未设置'}
+                    </div>
                   </Descriptions.Item>
                   <Descriptions.Item label="全局人格">
-                    {userPersonaInfo.global || '未设置'}
+                    <div style={{ maxWidth: '100%', wordBreak: 'break-all' }}>
+                      {userPersonaInfo.global 
+                        ? (userPersonaInfo.global.length > 100 
+                            ? userPersonaInfo.global.slice(0, 100) + '...' 
+                            : userPersonaInfo.global)
+                        : '未设置'}
+                    </div>
                   </Descriptions.Item>
                   <Descriptions.Item label="配置默认">
-                    {userPersonaInfo.config || '未设置'}
+                    <div style={{ maxWidth: '100%', wordBreak: 'break-all' }}>
+                      {userPersonaInfo.config 
+                        ? (userPersonaInfo.config.length > 100 
+                            ? userPersonaInfo.config.slice(0, 100) + '...' 
+                            : userPersonaInfo.config)
+                        : '未设置'}
+                    </div>
                   </Descriptions.Item>
                   <Descriptions.Item label="当前生效">
-                    <Tag color="green">{userPersonaInfo.effective || '无'}</Tag>
+                    <Tag color="green" style={{ maxWidth: '100%', wordBreak: 'break-all', whiteSpace: 'normal', height: 'auto' }}>
+                      {userPersonaInfo.effective || '无'}
+                    </Tag>
                   </Descriptions.Item>
                 </Descriptions>
 
@@ -876,7 +902,13 @@ function Aichat() {
                         >
                           <List.Item.Meta
                             title={item.is_private ? '私聊人格' : `群组 ${item.group_id}`}
-                            description={item.persona}
+                            description={
+                              <span style={{ maxWidth: '100%', wordBreak: 'break-all' }}>
+                                {item.persona && item.persona.length > 100 
+                                  ? item.persona.slice(0, 100) + '...' 
+                                  : (item.persona || '')}
+                              </span>
+                            }
                           />
                         </List.Item>
                       )}
