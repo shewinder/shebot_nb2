@@ -30,6 +30,7 @@ dependencies = [
     # "nonebot_plugin_today_in_history>=0.1.6",
     "h2>=4.3.0",
     "curl-cffi>=0.13.0",
+    "python-multipart>=0.0.22",
 ]
 
 [tool.uv]

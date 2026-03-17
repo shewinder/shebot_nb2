@@ -72,6 +72,8 @@ function Aichat() {
   
   // 配置相关
   const [config, setConfig] = useState(null)
+  const [configModalVisible, setConfigModalVisible] = useState(false)
+  const [configForm] = Form.useForm()
 
   // 模型编辑相关
   const [modelModalVisible, setModelModalVisible] = useState(false)
@@ -495,6 +497,18 @@ function Aichat() {
     }
   }
 
+  // 更新全局配置
+  const handleUpdateConfig = async (values) => {
+    try {
+      const result = await aichatApi.updateAichatConfig(values)
+      message.success(result.data || '配置更新成功')
+      setConfigModalVisible(false)
+      await fetchConfig()
+    } catch (error) {
+      message.error('配置更新失败: ' + error.message)
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '100px' }}>
@@ -575,7 +589,27 @@ function Aichat() {
           </Card>
 
           {config && (
-            <Card title="配置信息" style={{ marginTop: 16 }}>
+            <Card 
+              title="配置信息" 
+              style={{ marginTop: 16 }}
+              extra={
+                <Button 
+                  icon={<EditOutlined />} 
+                  onClick={() => {
+                    configForm.setFieldsValue({
+                      max_history: config.max_history,
+                      session_timeout: config.session_timeout,
+                      max_tokens: config.max_tokens,
+                      temperature: config.temperature,
+                      max_saved_personas: config.max_saved_personas
+                    })
+                    setConfigModalVisible(true)
+                  }}
+                >
+                  编辑配置
+                </Button>
+              }
+            >
               <Descriptions bordered size="small" column={2}>
                 <Descriptions.Item label="最大历史消息">{config.max_history}</Descriptions.Item>
                 <Descriptions.Item label="会话超时">{config.session_timeout} 秒</Descriptions.Item>
@@ -1432,6 +1466,62 @@ function Aichat() {
               placeholder="例如：你是一个温柔可爱的猫娘，说话轻声细语，喜欢用'喵~'结尾..."
               rows={8}
             />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 编辑全局配置弹窗 */}
+      <Modal
+        title="编辑全局配置"
+        open={configModalVisible}
+        onCancel={() => setConfigModalVisible(false)}
+        onOk={() => configForm.submit()}
+        width={600}
+      >
+        <Form
+          form={configForm}
+          layout="vertical"
+          onFinish={handleUpdateConfig}
+        >
+          <Form.Item
+            name="max_history"
+            label="最大历史消息"
+            rules={[{ required: true, message: '请输入最大历史消息数' }]}
+            extra="保留的对话历史消息数量，超过此数量会清理旧消息"
+          >
+            <InputNumber style={{ width: '100%' }} min={1} max={1000} />
+          </Form.Item>
+          <Form.Item
+            name="session_timeout"
+            label="会话超时时间（秒）"
+            rules={[{ required: true, message: '请输入会话超时时间' }]}
+            extra="超过此时间没有新消息，会话会被清理。0 表示永不过期"
+          >
+            <InputNumber style={{ width: '100%' }} min={0} max={86400} />
+          </Form.Item>
+          <Form.Item
+            name="max_tokens"
+            label="最大 Tokens"
+            rules={[{ required: true, message: '请输入最大 Tokens' }]}
+            extra="模型生成的最大 token 数"
+          >
+            <InputNumber style={{ width: '100%' }} min={1} max={32768} />
+          </Form.Item>
+          <Form.Item
+            name="temperature"
+            label="温度 (Temperature)"
+            rules={[{ required: true, message: '请输入温度值' }]}
+            extra="控制输出的随机性，范围 0-2，值越大输出越随机"
+          >
+            <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} />
+          </Form.Item>
+          <Form.Item
+            name="max_saved_personas"
+            label="最大保存人格数"
+            rules={[{ required: true, message: '请输入最大保存人格数' }]}
+            extra="每个用户最多可以保存的人格数量"
+          >
+            <InputNumber style={{ width: '100%' }} min={1} max={50} />
           </Form.Item>
         </Form>
       </Modal>

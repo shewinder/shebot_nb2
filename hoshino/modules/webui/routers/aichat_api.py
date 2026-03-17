@@ -35,6 +35,7 @@ class ModelInfo(BaseModel):
     api_base: str
     is_current: bool
     is_default: bool
+    supports_multimodal: Optional[bool] = None
 
 
 class PersonaInfo(BaseModel):
@@ -79,7 +80,8 @@ async def get_models():
             model=api.model,
             api_base=api.api_base,
             is_current=api.id == current_id,
-            is_default=api.id == default_id
+            is_default=api.id == default_id,
+            supports_multimodal=api.supports_multimodal
         ))
     
     return {"status": 200, "data": result}
@@ -99,7 +101,8 @@ async def get_current_model():
         model=entry.model,
         api_base=entry.api_base,
         is_current=True,
-        is_default=api_id == conf.get_default_api_id()
+        is_default=api_id == conf.get_default_api_id(),
+        supports_multimodal=entry.supports_multimodal
     )}
 
 
