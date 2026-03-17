@@ -610,6 +610,28 @@ function Aichat() {
               style={{ marginBottom: 16 }}
             />
             <Space direction="vertical" style={{ width: '100%' }}>
+              {/* 选择预设人格 */}
+              {globalPresets.length > 0 && (
+                <Select
+                  style={{ width: '100%' }}
+                  placeholder="快速选择：使用全局预设人格"
+                  allowClear
+                  onChange={(value) => {
+                    if (value) {
+                      setGlobalPersona(value)
+                    }
+                  }}
+                >
+                  {globalPresets.map(preset => (
+                    <Option key={preset.name} value={preset.content}>
+                      <Space>
+                        <BookOutlined />
+                        <span>{preset.name}</span>
+                      </Space>
+                    </Option>
+                  ))}
+                </Select>
+              )}
               <TextArea
                 value={globalPersona}
                 onChange={e => setGlobalPersona(e.target.value)}
@@ -700,6 +722,29 @@ function Aichat() {
                     <Tag color="green">已设置人格</Tag>
                   )}
                 </div>
+              )}
+
+              {/* 选择预设人格 */}
+              {selectedGroupId && globalPresets.length > 0 && (
+                <Select
+                  style={{ width: 400 }}
+                  placeholder="快速选择：使用全局预设人格"
+                  allowClear
+                  onChange={(value) => {
+                    if (value) {
+                      setGroupPersonaInput({ ...groupPersonaInput, content: value })
+                    }
+                  }}
+                >
+                  {globalPresets.map(preset => (
+                    <Option key={preset.name} value={preset.content}>
+                      <Space>
+                        <BookOutlined />
+                        <span>{preset.name}</span>
+                      </Space>
+                    </Option>
+                  ))}
+                </Select>
               )}
               
               <TextArea
