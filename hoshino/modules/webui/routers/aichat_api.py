@@ -469,3 +469,56 @@ async def set_default_model(model_id: str):
     except Exception as e:
         logger.exception(f"设置默认模型失败: {e}")
         return {"status": 500, "data": f"保存配置失败: {str(e)}"}
+
+
+# ========== 全局预设人格管理 API ==========
+
+class GlobalPreset(BaseModel):
+    """全局预设人格"""
+    name: str
+    content: str
+
+
+class AddGlobalPresetRequest(BaseModel):
+    """添加全局预设人格请求"""
+    name: str
+    content: str
+
+
+@router.get("/global-presets")
+async def get_global_presets():
+    """获取所有全局预设人格"""
+    presets = persona_manager.get_global_presets()
+    result = [
+        GlobalPreset(name=name, content=content)
+        for name, content in presets.items()
+    ]
+    return {"status": 200, "data": result}
+
+
+@router.post("/add-global-preset")
+async def add_global_preset(req: AddGlobalPresetRequest):
+    """添加或更新全局预设人格"""
+    if not req.name or not req.name.strip():
+        return {"status": 400, "data": "预设人格名称不能为空"}
+    if not req.content or not req.content.strip():
+        return {"status": 400, "data": "预设人格内容不能为空"}
+    
+    success, msg = persona_manager.add_global_preset(req.name, req.content)
+    if success:
+        return {"status": 200, "data": msg}
+    else:
+        return {"status": 400, "data": msg}
+
+
+@router.post("/delete-global-preset")
+async def delete_global_preset(name: str):
+    """删除全局预设人格"""
+    if not name or not name.strip():
+        return {"status": 400, "data": "预设人格名称不能为空"}
+    
+    success, msg = persona_manager.delete_global_preset(name.strip())
+    if success:
+        return {"status": 200, "data": msg}
+    else:
+        return {"status": 404, "data": msg}

@@ -113,3 +113,18 @@ export const deleteAichatModel = (modelId) => request.post(`/aichat/delete-model
 
 // 设置默认模型
 export const setDefaultAichatModel = (modelId) => request.post(`/aichat/set-default-model/${modelId}`)
+
+// ===== 全局预设人格 API =====
+// 获取全局预设人格列表
+export const getGlobalPresets = () => request.get('/aichat/global-presets')
+
+// 添加/更新全局预设人格
+export const addGlobalPreset = (name, content) => request.post('/aichat/add-global-preset', {
+  name,
+  content
+})
+
+// 删除全局预设人格
+export const deleteGlobalPreset = (name) => request.post('/aichat/delete-global-preset', {
+  name
+})

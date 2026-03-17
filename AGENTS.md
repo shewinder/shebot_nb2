@@ -4,13 +4,13 @@
 
 **SheBot** (also known as `hinata`) is a QQ chat bot based on [NoneBot2](https://github.com/nonebot/nonebot2) framework. It's a modified version of [hoshino.nb2](https://github.com/AkiraXie/hoshino.nb2), designed for QQ group management and entertainment features.
 
-The bot connects to QQ via OneBot protocol (through LLOneBot) and provides various services including image search, live streaming notifications, Bilibili video parsing, meme generation, and more.
+The bot connects to QQ via OneBot protocol (through LLOneBot) and provides various services including image search, live streaming notifications, Bilibili video parsing, meme generation, games (Wordle, Handle), and more.
 
 ### Key Features
 - **Service Management**: Modular service system with per-group enable/disable control
 - **Web Dashboard**: React-based management console for bot monitoring and configuration
 - **Information Push**: Live streaming (Bilibili/Douyu) and video upload notifications
-- **Entertainment**: Image search, meme generation, games (Wordle, Handle), and more
+- **Entertainment**: Image search, meme generation, games, and more
 - **Group Management**: Anti-recall, anti-flash image, welcome messages, broadcast
 
 ## Technology Stack
@@ -22,7 +22,9 @@ The bot connects to QQ via OneBot protocol (through LLOneBot) and provides vario
 - **Web Server**: FastAPI (embedded in NoneBot2)
 - **Database**: SQLite (via Peewee ORM)
 - **Image Processing**: Pillow (PIL), OpenCV
-- **HTTP Client**: aiohttp, httpx
+- **HTTP Client**: aiohttp, httpx, curl_cffi
+- **Task Scheduling**: APScheduler (via `nonebot-plugin-apscheduler`)
+- **Authentication**: PyJWT
 
 ### Frontend (Web Dashboard)
 - **Framework**: React 18 + Vite
@@ -65,14 +67,18 @@ The bot connects to QQ via OneBot protocol (through LLOneBot) and provides vario
 │   │   ├── groupmanage/       # Group management features
 │   │   ├── interactive/       # Interactive chat features
 │   │   ├── pixiv/             # Pixiv integration
-│   │   └── web/               # Web dashboard API
+│   │   └── webui/             # Web dashboard API
 │   └── util/                  # Utility functions
 ├── web/                       # React web dashboard
 │   ├── src/                   # React source code
 │   ├── package.json           # NPM dependencies
 │   └── vite.config.js         # Vite configuration
 ├── data/                      # Runtime data (SQLite DB, configs)
+│   ├── db/                    # Database files
+│   ├── service/               # Service enable/disable states
+│   └── config/                # Plugin configurations (JSON)
 ├── res/                       # Static resources (fonts, images)
+│   └── fonts/                 # Font files
 ├── static/                    # Built web dashboard files
 ├── logs/                      # Log files (rotated daily)
 ├── run.py                     # Application entry point
@@ -99,9 +105,10 @@ debug=false               # Debug mode (DO NOT enable in production)
 superusers=[123456]       # Superuser QQ numbers
 nickname=["镜华"]         # Bot nickname in Chinese
 command_start=["/", ""]   # Command prefixes
-modules=["information", "entertainment", "setu", "groupmanage", "tools"]
+modules=["infopush", "entertainment", "setu", "groupmanage", "tools", "interactive", "pixiv", "webui"]
 data=data                 # Data directory
 static=static             # Static resources directory
+web_password=shebot       # Web dashboard password
 ```
 
 ## Build and Run
@@ -170,6 +177,7 @@ Each feature is implemented as a `Service`:
 
 ```python
 from hoshino import Service, Bot, Event
+from hoshino.typing import T_State
 
 # Define service
 sv = Service('服务名', help_='帮助文本', manage_perm=ADMIN)
@@ -204,35 +212,11 @@ from hoshino import R
 
 # Access images
 img_path = R.img('subdir', 'image.png')  # Returns path string
-img_seg = R.img('subdir', 'image.png').open()  # Returns MessageSegment
+img_seg = R.img('subdir', 'image.png').open()  # Returns PIL Image
 
 # Access fonts
 font_path = R.font('msyh.ttf')
 ```
-
-## Testing
-
-There is no formal test suite in this project. Testing is done manually:
-
-1. Run the bot locally
-2. Connect to a test QQ group
-3. Send commands and verify responses
-
-For web dashboard testing:
-```bash
-cd web
-npm run dev  # Development server with hot reload
-```
-
-## Security Considerations
-
-1. **Superuser Configuration**: Set `superusers` in `.env.prod` to your QQ number
-2. **Access Token**: Configure `access_token` for go-cqhttp/LLOneBot connection
-3. **Web Dashboard Auth**: Default login is QQ number as both username and password
-   - JWT-based authentication (implementation in `hoshino/modules/web/`)
-   - Token validation middleware can be enabled in `app.py`
-4. **R18 Content**: Controlled by `check_r18()` function, disabled by default in groups
-5. **Rate Limiting**: Services use `FreqLimiter` and `DailyNumberLimiter` for abuse prevention
 
 ## Module Loading
 
@@ -254,11 +238,14 @@ if modules := config.modules:
 ```
 
 ### Available Module Categories
-- `information`: Info push (live streams, video uploads)
+- `infopush`: Info push (live streams, video uploads)
 - `entertainment`: Games and fun features
 - `setu`: Image search
 - `groupmanage`: Group management
 - `tools`: Utility tools
+- `interactive`: Interactive chat
+- `pixiv`: Pixiv integration
+- `webui`: Web dashboard API
 
 ## Web Dashboard
 
@@ -269,7 +256,7 @@ The web dashboard provides:
 - **Log Monitoring**: Real-time log viewing via WebSocket
 
 ### API Endpoints
-- `/login` - Authentication
+- `/api/login` - Authentication
 - `/api/bot/*` - Bot management APIs
 - `/api/infopush/*` - Info push management
 - `/ws` - WebSocket for real-time logs
@@ -281,6 +268,49 @@ npm run dev
 # Access http://localhost:3000
 # API requests proxy to http://localhost:9002
 ```
+
+## Testing
+
+There is no formal test suite in this project. Testing is done manually:
+
+1. Run the bot locally
+2. Connect to a test QQ group
+3. Send commands and verify responses
+
+For web dashboard testing:
+```bash
+cd web
+npm run dev  # Development server with hot reload
+```
+
+## Security Considerations
+
+1. **Superuser Configuration**: Set `superusers` in `.env.prod` to your QQ number
+2. **Access Token**: Configure `access_token` for go-cqhttp/LLOneBot connection
+3. **Web Dashboard Auth**: Default login password is configured via `web_password` in `.env.prod`
+   - JWT-based authentication (implementation in `hoshino/modules/webui/`)
+   - Token validation middleware in `app.py`
+4. **R18 Content**: Controlled by `check_r18()` function, disabled by default in groups
+5. **Rate Limiting**: Services use `FreqLimiter` and `DailyNumberLimiter` for abuse prevention
+
+## Permission System
+
+Permissions are defined in `hoshino/permission.py`:
+
+- `SUPERUSER`: Bot superuser (from config)
+- `ADMIN`: SUPERUSER | GROUP_ADMIN | GROUP_OWNER
+- `OWNER`: SUPERUSER | GROUP_OWNER
+- `NORMAL`: SUPERUSER | GROUP | PRIVATE
+
+Service management requires at least `ADMIN` permission.
+
+## Logging
+
+Logs are managed via `loguru` with the following features:
+- Console output with colors (DEBUG level in dev, INFO in prod)
+- Daily rotated log files in `logs/` directory
+- Separate error log file
+- Service-specific loggers via `wrap_logger`
 
 ## Troubleshooting
 

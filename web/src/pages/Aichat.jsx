@@ -32,7 +32,9 @@ import {
   PlusOutlined,
   EyeOutlined,
   EditOutlined,
-  SettingOutlined
+  SettingOutlined,
+  BookOutlined,
+  TagOutlined
 } from '@ant-design/icons'
 import * as aichatApi from '../api'
 
@@ -73,6 +75,14 @@ function Aichat() {
   const [editingModelId, setEditingModelId] = useState(null)
   const [modelForm] = Form.useForm()
 
+  // 全局预设人格相关
+  const [globalPresets, setGlobalPresets] = useState([])
+  const [newPresetName, setNewPresetName] = useState('')
+  const [newPresetContent, setNewPresetContent] = useState('')
+  const [editingPreset, setEditingPreset] = useState(null)
+  const [presetModalVisible, setPresetModalVisible] = useState(false)
+  const [presetForm] = Form.useForm()
+
   useEffect(() => {
     fetchInitialData()
   }, [])
@@ -85,7 +95,8 @@ function Aichat() {
         fetchPersonas(),
         fetchConfig(),
         fetchSuperusers(),
-        fetchGroups()
+        fetchGroups(),
+        fetchGlobalPresets()
       ])
     } catch (error) {
       message.error('加载数据失败: ' + error.message)
@@ -155,6 +166,58 @@ function Aichat() {
     } catch (error) {
       // 不显示错误，因为可能没有权限
     }
+  }
+
+  // 获取全局预设人格
+  const fetchGlobalPresets = async () => {
+    try {
+      const data = await aichatApi.getGlobalPresets()
+      setGlobalPresets(data || [])
+    } catch (error) {
+      message.error('加载全局预设人格失败: ' + error.message)
+    }
+  }
+
+  // 处理添加/更新全局预设人格
+  const handleAddGlobalPreset = async (values) => {
+    try {
+      const result = await aichatApi.addGlobalPreset(values.name, values.content)
+      message.success(result.data || '操作成功')
+      setPresetModalVisible(false)
+      presetForm.resetFields()
+      setEditingPreset(null)
+      await fetchGlobalPresets()
+    } catch (error) {
+      message.error('保存失败: ' + error.message)
+    }
+  }
+
+  // 处理删除全局预设人格
+  const handleDeleteGlobalPreset = async (name) => {
+    try {
+      const result = await aichatApi.deleteGlobalPreset(name)
+      message.success(result.data || '删除成功')
+      await fetchGlobalPresets()
+    } catch (error) {
+      message.error('删除失败: ' + error.message)
+    }
+  }
+
+  // 打开添加预设人格弹窗
+  const openAddPresetModal = () => {
+    setEditingPreset(null)
+    presetForm.resetFields()
+    setPresetModalVisible(true)
+  }
+
+  // 打开编辑预设人格弹窗
+  const openEditPresetModal = (preset) => {
+    setEditingPreset(preset)
+    presetForm.setFieldsValue({
+      name: preset.name,
+      content: preset.content
+    })
+    setPresetModalVisible(true)
   }
 
   const handleSwitchModel = async () => {
@@ -863,6 +926,88 @@ function Aichat() {
             </Card>
           </Card>
         </TabPane>
+
+        <TabPane
+          tab={<span><BookOutlined /> 全局预设人格</span>}
+          key="global-presets"
+        >
+          <Card
+            title="全局预设人格管理"
+            extra={
+              <Space>
+                <Button icon={<PlusOutlined />} type="primary" onClick={openAddPresetModal}>
+                  添加预设人格
+                </Button>
+                <Button icon={<ReloadOutlined />} onClick={fetchGlobalPresets}>
+                  刷新
+                </Button>
+              </Space>
+            }
+          >
+            <Alert
+              message="全局预设人格"
+              description="超级用户可以预设一些人格供所有用户使用。普通用户可以通过「切换人格 名称」或「使用人格 名称」命令直接使用这些预设人格。"
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            {globalPresets.length > 0 ? (
+              <List
+                bordered
+                dataSource={globalPresets}
+                renderItem={item => (
+                  <List.Item
+                    actions={[
+                      <Button
+                        type="link"
+                        icon={<EyeOutlined />}
+                        onClick={() => handleViewPersona(item)}
+                      >
+                        查看
+                      </Button>,
+                      <Button
+                        type="link"
+                        icon={<EditOutlined />}
+                        onClick={() => openEditPresetModal(item)}
+                      >
+                        编辑
+                      </Button>,
+                      <Popconfirm
+                        title={`确定要删除预设人格「${item.name}」吗？`}
+                        onConfirm={() => handleDeleteGlobalPreset(item.name)}
+                        okText="确定"
+                        cancelText="取消"
+                      >
+                        <Button type="link" danger icon={<DeleteOutlined />}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    ]}
+                  >
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          <TagOutlined />
+                          <span>{item.name}</span>
+                        </Space>
+                      }
+                      description={
+                        <span style={{ fontSize: 12 }}>
+                          {item.content.length > 100
+                            ? item.content.slice(0, 100) + '...'
+                            : item.content}
+                        </span>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Empty description="暂无全局预设人格，点击「添加预设人格」创建" />
+            )}
+          </Card>
+        </TabPane>
       </Tabs>
 
       {/* 查看完整人格内容的弹窗 - 放在所有 TabPane 外部 */}
@@ -962,6 +1107,48 @@ function Aichat() {
             extra="是否支持图片识别功能"
           >
             <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 添加/编辑预设人格弹窗 */}
+      <Modal
+        title={editingPreset ? `编辑预设人格: ${editingPreset.name}` : '添加全局预设人格'}
+        open={presetModalVisible}
+        onCancel={() => {
+          setPresetModalVisible(false)
+          setEditingPreset(null)
+          presetForm.resetFields()
+        }}
+        onOk={() => presetForm.submit()}
+        width={600}
+      >
+        <Form
+          form={presetForm}
+          layout="vertical"
+          onFinish={handleAddGlobalPreset}
+        >
+          <Form.Item
+            name="name"
+            label="人格名称"
+            rules={[{ required: true, message: '请输入人格名称' }]}
+            extra="建议使用简洁易记的名称，如：猫娘、温柔助手、霸道总裁"
+          >
+            <Input 
+              placeholder="例如：猫娘" 
+              disabled={!!editingPreset}
+            />
+          </Form.Item>
+          <Form.Item
+            name="content"
+            label="人格描述"
+            rules={[{ required: true, message: '请输入人格描述' }]}
+            extra="详细描述AI应该扮演的角色、性格特点、说话方式等"
+          >
+            <TextArea
+              placeholder="例如：你是一个温柔可爱的猫娘，说话轻声细语，喜欢用'喵~'结尾..."
+              rows={8}
+            />
           </Form.Item>
         </Form>
       </Modal>

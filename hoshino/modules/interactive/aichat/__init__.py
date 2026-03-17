@@ -109,10 +109,13 @@ class PersonaManager:
     def __init__(self):
         self.personas: Dict[str, str] = {}  # key: persona_id, value: persona_text
         self.saved_personas: Dict[str, Dict[str, str]] = {}  # key: user_id, value: {name: persona_text}
+        self.global_presets: Dict[str, str] = {}  # key: preset_name, value: persona_text (全局预设人格)
         self.data_file = aichat_data_dir.joinpath('aichat_personas.json')
         self.saved_personas_file = aichat_data_dir.joinpath('aichat_saved_personas.json')
+        self.global_presets_file = aichat_data_dir.joinpath('aichat_global_presets.json')
         self.load_personas()
         self.load_saved_personas()
+        self.load_global_presets()
     
     def _get_user_persona_id(self, user_id: int, group_id: Optional[int] = None) -> str:
         """获取用户人格ID"""
@@ -323,6 +326,87 @@ class PersonaManager:
         except Exception as e:
             logger.error(f"加载用户人格列表失败: {e}")
             self.saved_personas = {}
+
+    # ========== 全局预设人格管理 ==========
+    
+    def get_global_preset(self, name: str) -> Optional[str]:
+        """获取全局预设人格"""
+        return self.global_presets.get(name.strip())
+    
+    def get_global_presets(self) -> Dict[str, str]:
+        """获取所有全局预设人格"""
+        return self.global_presets.copy()
+    
+    def add_global_preset(self, name: str, persona: str) -> Tuple[bool, str]:
+        """添加全局预设人格
+        返回: (是否成功, 消息)
+        """
+        name = name.strip()
+        if not name:
+            return False, "预设人格名称不能为空"
+        if not persona or not persona.strip():
+            return False, "预设人格内容不能为空"
+        
+        is_update = name in self.global_presets
+        self.global_presets[name] = persona.strip()
+        self.save_global_presets()
+        
+        if is_update:
+            return True, f"全局预设人格 '{name}' 已更新"
+        return True, f"全局预设人格 '{name}' 已添加"
+    
+    def delete_global_preset(self, name: str) -> Tuple[bool, str]:
+        """删除全局预设人格
+        返回: (是否成功, 消息)
+        """
+        name = name.strip()
+        if name not in self.global_presets:
+            return False, f"未找到全局预设人格 '{name}'"
+        
+        del self.global_presets[name]
+        self.save_global_presets()
+        return True, f"全局预设人格 '{name}' 已删除"
+    
+    def save_global_presets(self):
+        """保存全局预设人格到文件"""
+        try:
+            self.global_presets_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.global_presets_file, 'w', encoding='utf-8') as f:
+                json.dump(self.global_presets, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存全局预设人格失败: {e}")
+    
+    def load_global_presets(self):
+        """从文件加载全局预设人格"""
+        try:
+            if not self.global_presets_file.exists():
+                self.global_presets = {}
+                return
+            
+            with open(self.global_presets_file, 'r', encoding='utf-8') as f:
+                self.global_presets = json.load(f)
+        except Exception as e:
+            logger.error(f"加载全局预设人格失败: {e}")
+            self.global_presets = {}
+    
+    def find_persona_by_name(self, user_id: int, group_id: Optional[int], name: str) -> Optional[str]:
+        """按名称查找人格（优先级：用户保存 > 全局预设）
+        
+        返回: 找到的人格内容，未找到返回 None
+        """
+        name = name.strip()
+        
+        # 1. 先查找用户自己保存的人格
+        user_saved = self.get_saved_persona(user_id, group_id, name)
+        if user_saved:
+            return user_saved
+        
+        # 2. 查找全局预设人格
+        global_preset = self.get_global_preset(name)
+        if global_preset:
+            return global_preset
+        
+        return None
 
 # 全局Persona管理器
 persona_manager = PersonaManager()
@@ -789,15 +873,15 @@ async def list_personas(bot: Bot, event: Event):
     lines.append(f"\n使用「使用人格 名称」来快捷设置人格")
     await list_personas_cmd.finish("\n".join(lines))
 
-# 使用已保存人格命令
+# 使用已保存人格命令（支持用户保存的人格和全局预设人格）
 use_persona_cmd = sv.on_command('使用人格', aliases=('切换人格', '应用人格'), only_group=False)
 
 @use_persona_cmd.handle()
 async def use_persona(bot: Bot, event: Event):
-    """使用已保存的人格"""
+    """使用已保存的人格（支持用户人格和全局预设人格）"""
     args = str(event.message).strip().split(maxsplit=1)
     if len(args) < 2:
-        await use_persona_cmd.finish("请提供人格名称，例如：使用人格 猫娘\n使用「列出人格」查看已保存的人格")
+        await use_persona_cmd.finish("请提供人格名称，例如：使用人格 猫娘\n使用「列出人格」查看自己的保存人格，「预设人格列表」查看全局预设人格")
         return
     
     name = args[1].strip()
@@ -805,10 +889,14 @@ async def use_persona(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
-    persona_text = persona_manager.get_saved_persona(user_id, group_id, name)
+    # 优先查找用户自己保存的人格，然后是全局预设人格
+    persona_text = persona_manager.find_persona_by_name(user_id, group_id, name)
     
     if not persona_text:
-        await use_persona_cmd.finish(f"未找到名为 '{name}' 的已保存人格。\n使用「列出人格」查看已保存的人格")
+        msg = f"未找到名为 '{name}' 的人格。\n"
+        msg += "使用「列出人格」查看自己保存的人格\n"
+        msg += "使用「预设人格列表」查看可用的全局预设人格"
+        await use_persona_cmd.finish(msg)
         return
     
     # 设置为当前人格
@@ -817,7 +905,11 @@ async def use_persona(bot: Bot, event: Event):
     # 清除当前session，以便新人格生效
     session_manager.clear_session(user_id, group_id)
     
-    await use_persona_cmd.finish(f"已切换到人格 '{name}'\n人格内容：{persona_text[:100]}{'...' if len(persona_text) > 100 else ''}")
+    # 判断是否来自全局预设
+    is_global_preset = name in persona_manager.get_global_presets()
+    source = "[全局预设]" if is_global_preset else "[个人保存]"
+    
+    await use_persona_cmd.finish(f"已切换到人格 '{name}' {source}\n人格内容：{persona_text[:100]}{'...' if len(persona_text) > 100 else ''}")
 
 # 删除已保存人格命令
 delete_persona_cmd = sv.on_command('删除人格', aliases=('移除人格', '删除保存的人格'), only_group=False)
@@ -895,3 +987,66 @@ async def current_model(bot: Bot, event: Event):
         await current_model_cmd.finish("当前未选择有效模型，超级用户可使用「切换模型」进行设置")
         return
     await current_model_cmd.finish(f"当前全局使用：{entry.name}（id: {entry.id}）\n模型：{entry.model}")
+
+
+# ========== 全局预设人格管理命令（仅超级用户） ==========
+
+# 添加/更新全局预设人格命令
+add_preset_cmd = sv.on_command('预设人格', aliases=('添加预设人格', '全局预设人格'), permission=SUPERUSER, only_group=False)
+
+@add_preset_cmd.handle()
+async def add_global_preset(bot: Bot, event: Event):
+    """添加或更新全局预设人格（仅超级用户）"""
+    args = str(event.message).strip().split(maxsplit=2)
+    if len(args) < 3:
+        await add_preset_cmd.finish("请提供人格名称和描述，例如：\n预设人格 猫娘 你是一个可爱的猫娘，说话温柔，喜欢撒娇\n\n或查看已有预设：预设人格列表")
+        return
+    
+    name = args[1].strip()
+    persona_text = args[2].strip()
+    
+    if not persona_text:
+        await add_preset_cmd.finish("人格描述不能为空")
+        return
+    
+    success, msg = persona_manager.add_global_preset(name, persona_text)
+    await add_preset_cmd.finish(msg)
+
+
+# 删除全局预设人格命令
+delete_preset_cmd = sv.on_command('删除预设人格', aliases=('移除预设人格', '删除全局预设'), permission=SUPERUSER, only_group=False)
+
+@delete_preset_cmd.handle()
+async def delete_global_preset(bot: Bot, event: Event):
+    """删除全局预设人格（仅超级用户）"""
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await delete_preset_cmd.finish("请提供预设人格名称，例如：删除预设人格 猫娘\n使用「预设人格列表」查看所有预设")
+        return
+    
+    name = args[1].strip()
+    
+    success, msg = persona_manager.delete_global_preset(name)
+    await delete_preset_cmd.finish(msg)
+
+
+# 列出全局预设人格命令
+list_presets_cmd = sv.on_command('预设人格列表', aliases=('全局预设列表', '可用预设人格', '预设列表'), only_group=False)
+
+@list_presets_cmd.handle()
+async def list_global_presets(bot: Bot, event: Event):
+    """列出所有全局预设人格"""
+    presets = persona_manager.get_global_presets()
+    
+    if not presets:
+        await list_presets_cmd.finish("暂无全局预设人格。\n超级用户可使用「预设人格 名称 描述」来添加预设人格。")
+        return
+    
+    lines = [f"全局预设人格列表（共 {len(presets)} 个）："]
+    for i, (name, persona) in enumerate(presets.items(), 1):
+        # 截断过长的描述
+        preview = persona[:50] + "..." if len(persona) > 50 else persona
+        lines.append(f"{i}. {name}: {preview}")
+    
+    lines.append("\n使用「使用人格 名称」或「切换人格 名称」来应用预设人格")
+    await list_presets_cmd.finish("\n".join(lines))
