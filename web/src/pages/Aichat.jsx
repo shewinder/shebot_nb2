@@ -680,7 +680,14 @@ function Aichat() {
                 </Space>
               }
             >
-              <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, margin: 0 }}>
+              <pre style={{ 
+                background: 'var(--ant-color-bg-elevated)', 
+                color: 'var(--ant-color-text)',
+                padding: 12, 
+                borderRadius: 4, 
+                margin: 0,
+                border: '1px solid var(--ant-color-border)'
+              }}>
                 {personas.global.length > 200 
                   ? personas.global.slice(0, 200) + '...' 
                   : personas.global}
@@ -759,7 +766,13 @@ function Aichat() {
                 showIcon
                 style={{ marginBottom: 8 }}
               />
-              <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4 }}>
+              <pre style={{ 
+                background: 'var(--ant-color-bg-elevated)', 
+                color: 'var(--ant-color-text)',
+                padding: 12, 
+                borderRadius: 4,
+                border: '1px solid var(--ant-color-border)'
+              }}>
                 {personas.config}
               </pre>
             </Card>
@@ -1299,8 +1312,7 @@ function Aichat() {
           rows={15}
           style={{ 
             fontFamily: 'monospace', 
-            fontSize: 14,
-            backgroundColor: '#f5f5f5'
+            fontSize: 14
           }}
         />
       </Modal>
