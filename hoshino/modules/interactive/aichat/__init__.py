@@ -20,10 +20,93 @@ from hoshino.util.message_util import extract_images_from_reply
 conf = Config.get_instance('aichat')
 
 # 创建Service
-sv = Service('aichat', help_='AI聊天插件，使用#开头触发对话')
+sv = Service('aichat', help_='''AI聊天插件
+基础用法：
+  #消息   以#开头触发AI对话
+  进入对话模式/连续对话  进入免#触发模式
+  退出对话模式/结束对话模式  退出连续对话模式
+  查看对话模式  查看当前模式状态
+对话管理：
+  清除对话/清空对话/重置对话  清除当前对话历史
+  回溯/回退 [N]  回溯N条对话
+人格设置：
+  设置人格 [描述]  设置当前人格
+  使用人格 [名称]  使用已保存的人格
+  保存人格 [名称] [描述]  保存人格
+  列出人格  查看已保存的人格
+  查看人格  查看当前生效的人格
+  清除人格  清除用户人格设置
+模型管理：
+  列出模型  查看可用模型
+  当前模型  查看当前模型
+  切换模型 [名称/id]  切换模型（超管）
+角色卡：
+  导入角色卡 [图片]  从PNG角色卡导入人格
+  导入全局角色卡 [图片]  导入全局预设人格（超管）
+预设人格（超管）：
+  预设人格 [名称] [描述]  添加/更新预设人格
+  预设人格列表  列出全局预设人格
+  删除预设人格 [名称]  删除预设人格''')
 
 # ========== 注册消息处理器 ==========
 sv.on_message(priority=10, block=False, only_group=False).handle()(handle_ai_chat)
+
+# ========== 进入连续对话模式命令 ==========
+enter_chat_mode_cmd = sv.on_command('进入对话模式', aliases=('连续对话', '免井号对话', '聊天模式', '进入聊天'), only_group=False, block=True)
+
+@enter_chat_mode_cmd.handle()
+async def enter_chat_mode(bot: Bot, event: Event):
+    """进入连续对话模式，无需#前缀即可触发AI对话"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    # 设置连续对话模式
+    session_manager.set_continuous_mode(user_id, group_id, True)
+    
+    # 获取或创建session（确保人格设置正确）
+    persona = persona_manager.get_persona(user_id, group_id)
+    session = session_manager.get_session(user_id, group_id, persona)
+    
+    msg = "已进入连续对话模式！\n现在可以直接发送消息，无需 # 前缀即可与AI对话。\n"
+    msg += f"当前人格：{persona[:30]}..." if persona else "当前人格：默认"
+    msg += "\n\n提示：\n- 发送「退出对话模式」退出此模式\n- 发送「清除对话」清空当前对话历史\n- session过期后将自动退出此模式"
+    
+    await enter_chat_mode_cmd.finish(msg)
+
+# ========== 退出连续对话模式命令 ==========
+exit_chat_mode_cmd = sv.on_command('退出对话模式', aliases=('退出聊天', '结束对话模式'), only_group=False)
+
+@exit_chat_mode_cmd.handle()
+async def exit_chat_mode(bot: Bot, event: Event):
+    """退出连续对话模式"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    was_in_mode = session_manager.is_continuous_mode(user_id, group_id)
+    
+    if not was_in_mode:
+        await exit_chat_mode_cmd.finish("你当前不在连续对话模式中，发送「进入对话模式」来开启")
+        return
+    
+    # 退出连续对话模式
+    session_manager.set_continuous_mode(user_id, group_id, False)
+    await exit_chat_mode_cmd.finish("已退出连续对话模式。\n现在需要使用 # 前缀来触发AI对话。")
+
+# ========== 查看当前对话模式命令 ==========
+check_chat_mode_cmd = sv.on_command('查看对话模式', aliases=('对话模式状态',), only_group=False)
+
+@check_chat_mode_cmd.handle()
+async def check_chat_mode(bot: Bot, event: Event):
+    """查看当前是否处于连续对话模式"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    in_mode = session_manager.is_continuous_mode(user_id, group_id)
+    
+    if in_mode:
+        await check_chat_mode_cmd.finish("当前处于「连续对话模式」，直接发送消息即可与AI对话\n发送「退出对话模式」退出此模式")
+    else:
+        await check_chat_mode_cmd.finish("当前处于「普通模式」，需要使用 # 前缀触发AI对话\n发送「进入对话模式」开启免#触发")
 
 # ========== 清除session命令 ==========
 clear_cmd = sv.on_command('清除对话', aliases=('清空对话', '重置对话'), only_group=False)

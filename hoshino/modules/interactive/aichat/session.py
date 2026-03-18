@@ -17,6 +17,7 @@ class Session:
         self.session_id = session_id
         self.messages: List[Dict[str, Any]] = []  # 对话历史（支持文本和多模态）
         self.last_active = time.time()  # 最后活跃时间
+        self.continuous_mode = False  # 是否处于连续对话模式（免#触发）
         # 如果有人格，在初始化时添加system message
         if persona:
             self.messages.append({"role": "system", "content": persona})
@@ -53,6 +54,8 @@ class SessionManager:
     """管理所有Session（仅内存，不持久化）"""
     def __init__(self):
         self.sessions: Dict[str, Session] = {}
+        # 记录用户的连续对话模式状态，独立于session生命周期
+        self.continuous_users: Dict[str, bool] = {}
     
     def get_session_id(self, user_id: int, group_id: Optional[int] = None) -> str:
         """获取session ID"""
@@ -70,11 +73,16 @@ class SessionManager:
             if not session.is_expired():
                 return session
             else:
-                # 过期则删除
+                # 过期则删除（连续对话模式也自动退出）
                 del self.sessions[session_id]
+                if session_id in self.continuous_users:
+                    del self.continuous_users[session_id]
         
         # 创建新session，应用人格
         session = Session(session_id, persona)
+        # 恢复连续对话模式状态（如果之前设置了）
+        if self.continuous_users.get(session_id, False):
+            session.continuous_mode = True
         self.sessions[session_id] = session
         return session
     
@@ -83,8 +91,37 @@ class SessionManager:
         session_id = self.get_session_id(user_id, group_id)
         if session_id in self.sessions:
             del self.sessions[session_id]
+            # 清除连续对话模式状态
+            if session_id in self.continuous_users:
+                del self.continuous_users[session_id]
             return True
         return False
+    
+    def set_continuous_mode(self, user_id: int, group_id: Optional[int] = None, enabled: bool = True) -> bool:
+        """设置连续对话模式"""
+        session_id = self.get_session_id(user_id, group_id)
+        self.continuous_users[session_id] = enabled
+        
+        # 如果当前有活跃session，也更新其状态
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            if not session.is_expired():
+                session.continuous_mode = enabled
+                return True
+        return False
+    
+    def is_continuous_mode(self, user_id: int, group_id: Optional[int] = None) -> bool:
+        """检查是否处于连续对话模式"""
+        session_id = self.get_session_id(user_id, group_id)
+        
+        # 优先检查活跃session
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            if not session.is_expired():
+                return session.continuous_mode
+        
+        # 否则检查持久化的状态
+        return self.continuous_users.get(session_id, False)
     
     def rollback_messages(self, user_id: int, group_id: Optional[int] = None, count: int = 1) -> int:
         """回溯消息，删除最近的 N 条对话（用户+AI算一条）

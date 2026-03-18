@@ -112,15 +112,21 @@ async def handle_ai_chat(bot: Bot, event: Event):
     # 获取消息内容
     msg = str(event.message).strip()
     
-    # 检查是否以#开头
-    if not msg.startswith('#'):
-        return
-    
-    # 移除#前缀
-    user_input = msg[1:].strip()
-    
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
+    
+    # 检查是否以#开头，或者处于连续对话模式
+    in_continuous_mode = session_manager.is_continuous_mode(user_id, group_id)
+    
+    if msg.startswith('#'):
+        # 移除#前缀
+        user_input = msg[1:].strip()
+    elif in_continuous_mode:
+        # 连续对话模式，无需#前缀
+        user_input = msg
+    else:
+        # 非连续对话模式且不以#开头，忽略
+        return
 
     api_config = api_manager.get_api_config()
     if not api_config or not api_config.get("api_key"):
