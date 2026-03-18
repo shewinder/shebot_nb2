@@ -681,6 +681,11 @@ function Aichat() {
                         <span>模型: {item.model}</span>
                         <span>API: {item.api_base}</span>
                         <span>密钥: <code style={{ color: '#f59e0b' }}>{item.api_key}</code></span>
+                        <span>
+                          温度: {item.temperature ?? '默认'} | 
+                          MaxTokens: {item.max_tokens ?? '默认'} | 
+                          多模态: {item.supports_multimodal ? '是' : '否'}
+                        </span>
                       </Space>
                     }
                   />

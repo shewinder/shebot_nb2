@@ -34,6 +34,8 @@ class ModelInfo(BaseModel):
     model: str
     api_base: str
     api_key: str
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
     is_current: bool
     is_default: bool
     supports_multimodal: Optional[bool] = None
@@ -66,6 +68,12 @@ class SavedPersona(BaseModel):
     content: str
 
 
+class DeleteSavedPersonaRequest(BaseModel):
+    """删除保存的人格请求"""
+    user_id: int
+    name: str
+
+
 @router.get("/models")
 async def get_models():
     """获取所有可用的模型列表"""
@@ -81,6 +89,8 @@ async def get_models():
             model=api.model,
             api_base=api.api_base,
             api_key=api.api_key,
+            max_tokens=api.max_tokens,
+            temperature=api.temperature,
             is_current=api.id == current_id,
             is_default=api.id == default_id,
             supports_multimodal=api.supports_multimodal
@@ -103,6 +113,8 @@ async def get_current_model():
         model=entry.model,
         api_base=entry.api_base,
         api_key=entry.api_key,
+        max_tokens=entry.max_tokens,
+        temperature=entry.temperature,
         is_current=True,
         is_default=api_id == conf.get_default_api_id(),
         supports_multimodal=entry.supports_multimodal
@@ -252,9 +264,9 @@ async def save_persona(user_id: int, name: str, content: str):
 
 
 @router.post("/delete-saved-persona")
-async def delete_saved_persona(user_id: int, name: str):
+async def delete_saved_persona(req: DeleteSavedPersonaRequest):
     """删除保存的人格"""
-    success, msg = persona_manager.delete_saved_persona(user_id, None, name)
+    success, msg = persona_manager.delete_saved_persona(req.user_id, None, req.name)
     if success:
         return {"status": 200, "data": msg}
     else:
