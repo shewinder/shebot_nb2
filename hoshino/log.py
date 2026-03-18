@@ -80,7 +80,8 @@ logger.add(sys.stdout,
            colorize=True,
            diagnose=False,
            filter=hoshino_filter,
-           format=default_format)
+           format=default_format,
+           level='DEBUG' if hsn_config.debug else "INFO")
 logger.add(log_root / 'hsn{time:YYYYMMDD}.log', rotation='00:00', level='INFO')
 logger.add(log_root / 'hsn{time:YYYYMMDD}_error.log',
            rotation='00:00', level='ERROR')
