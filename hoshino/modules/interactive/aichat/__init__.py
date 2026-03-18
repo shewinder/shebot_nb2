@@ -39,6 +39,43 @@ async def clear_session(bot: Bot, event: Event):
     else:
         await bot.send(event, "没有找到对话历史")
 
+# ========== 回溯对话命令 ==========
+rollback_cmd = sv.on_command('回溯', aliases=('回退', '删除对话', '返回'), only_group=False)
+
+@rollback_cmd.handle()
+async def rollback_session(bot: Bot, event: Event):
+    """回溯对话，删除最近的 N 条对话"""
+    args = str(event.message).strip().split()
+    
+    # 默认回溯1条
+    count = 1
+    if len(args) >= 2:
+        try:
+            count = int(args[1].strip())
+            if count < 1:
+                await rollback_cmd.finish("回溯条数必须大于0，例如：回溯 3")
+                return
+            if count > 50:
+                await rollback_cmd.finish("一次最多回溯50条对话")
+                return
+        except ValueError:
+            await rollback_cmd.finish("请输入有效的数字，例如：回溯 3")
+            return
+    
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    deleted = session_manager.rollback_messages(user_id, group_id, count)
+    
+    if deleted == 0:
+        await rollback_cmd.finish("没有可回溯的对话记录")
+    elif deleted < count * 2:
+        # 只删除了部分（消息不够）
+        actual_pairs = deleted // 2
+        await rollback_cmd.finish(f"已回溯 {actual_pairs} 条对话（共删除 {deleted} 条消息，历史记录不足）")
+    else:
+        await rollback_cmd.finish(f"已回溯 {count} 条对话（共删除 {deleted} 条消息）")
+
 # ========== 设置用户人格命令 ==========
 set_persona_cmd = sv.on_command('设置人格', aliases=('设置AI人格',), only_group=False)
 

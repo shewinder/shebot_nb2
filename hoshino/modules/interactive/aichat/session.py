@@ -85,6 +85,53 @@ class SessionManager:
             del self.sessions[session_id]
             return True
         return False
+    
+    def rollback_messages(self, user_id: int, group_id: Optional[int] = None, count: int = 1) -> int:
+        """回溯消息，删除最近的 N 条对话（用户+AI算一条）
+        
+        Args:
+            count: 要删除的对话条数
+            
+        Returns:
+            实际删除的消息数量
+        """
+        session_id = self.get_session_id(user_id, group_id)
+        if session_id not in self.sessions:
+            return 0
+        
+        session = self.sessions[session_id]
+        if not session.messages:
+            return 0
+        
+        # 保留 system message
+        system_msg = None
+        start_idx = 0
+        if session.messages and session.messages[0].get("role") == "system":
+            system_msg = session.messages[0]
+            start_idx = 1
+        
+        # 计算要删除多少条消息（一条对话 = user + assistant = 2条消息）
+        messages_to_delete = count * 2
+        
+        # 获取当前非系统消息列表
+        other_messages = session.messages[start_idx:]
+        
+        # 如果消息数不足，只删除存在的
+        if len(other_messages) <= messages_to_delete:
+            deleted = len(other_messages)
+            other_messages = []
+        else:
+            deleted = messages_to_delete
+            other_messages = other_messages[:-messages_to_delete]
+        
+        # 重新组合
+        if system_msg:
+            session.messages = [system_msg] + other_messages
+        else:
+            session.messages = other_messages
+        
+        session.last_active = time.time()
+        return deleted
 
 
 # 全局Session管理器

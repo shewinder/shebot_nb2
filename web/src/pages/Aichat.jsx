@@ -452,14 +452,16 @@ function Aichat() {
   const openEditModelModal = (model) => {
     setModelModalMode('edit')
     setEditingModelId(model.id)
+    // 先重置表单，避免上次状态干扰
+    modelForm.resetFields()
     // 直接显示真实 api_key
     modelForm.setFieldsValue({
       name: model.name,
       api_base: model.api_base,
       api_key: model.api_key || '',
       model: model.model,
-      max_tokens: model.max_tokens,
-      temperature: model.temperature,
+      max_tokens: model.max_tokens !== undefined && model.max_tokens !== null ? model.max_tokens : undefined,
+      temperature: model.temperature !== undefined && model.temperature !== null ? model.temperature : undefined,
       supports_multimodal: model.supports_multimodal || false
     })
     setModelModalVisible(true)
