@@ -452,10 +452,11 @@ function Aichat() {
   const openEditModelModal = (model) => {
     setModelModalMode('edit')
     setEditingModelId(model.id)
+    // 直接显示真实 api_key
     modelForm.setFieldsValue({
       name: model.name,
       api_base: model.api_base,
-      api_key: model.api_key,
+      api_key: model.api_key || '',
       model: model.model,
       max_tokens: model.max_tokens,
       temperature: model.temperature,
@@ -472,7 +473,7 @@ function Aichat() {
         const result = await aichatApi.addAichatModel(values)
         message.success(result.data || '添加成功')
       } else {
-        // 编辑模型
+        // 编辑模型：直接提交所有值（已显示真实 api_key）
         const result = await aichatApi.updateAichatModel(editingModelId, values)
         message.success(result.data || '更新成功')
       }
@@ -679,6 +680,7 @@ function Aichat() {
                         <span>ID: <code>{item.id}</code></span>
                         <span>模型: {item.model}</span>
                         <span>API: {item.api_base}</span>
+                        <span>密钥: <code style={{ color: '#f59e0b' }}>{item.api_key}</code></span>
                       </Space>
                     }
                   />
@@ -1401,7 +1403,7 @@ function Aichat() {
             label="API 密钥"
             rules={[{ required: true, message: '请输入API密钥' }]}
           >
-            <Input.Password placeholder="输入API密钥" />
+            <Input placeholder="输入API密钥" />
           </Form.Item>
           <Form.Item
             name="model"

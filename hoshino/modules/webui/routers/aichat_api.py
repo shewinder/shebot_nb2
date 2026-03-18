@@ -33,6 +33,7 @@ class ModelInfo(BaseModel):
     name: str
     model: str
     api_base: str
+    api_key: str
     is_current: bool
     is_default: bool
     supports_multimodal: Optional[bool] = None
@@ -79,6 +80,7 @@ async def get_models():
             name=api.name,
             model=api.model,
             api_base=api.api_base,
+            api_key=api.api_key,
             is_current=api.id == current_id,
             is_default=api.id == default_id,
             supports_multimodal=api.supports_multimodal
@@ -100,6 +102,7 @@ async def get_current_model():
         name=entry.name,
         model=entry.model,
         api_base=entry.api_base,
+        api_key=entry.api_key,
         is_current=True,
         is_default=api_id == conf.get_default_api_id(),
         supports_multimodal=entry.supports_multimodal
@@ -406,12 +409,12 @@ async def update_model(model_id: str, req: UpdateModelRequest):
     if not api_entry:
         return {"status": 404, "data": f"未找到模型: {model_id}"}
     
-    # 更新字段
+    # 更新字段（空字符串表示不修改）
     if req.name is not None:
         api_entry.name = req.name
     if req.api_base is not None:
         api_entry.api_base = req.api_base
-    if req.api_key is not None:
+    if req.api_key is not None and req.api_key.strip() != "":
         api_entry.api_key = req.api_key
     if req.model is not None:
         api_entry.model = req.model
