@@ -23,9 +23,13 @@ conf = Config.get_instance('aichat')
 sv = Service('aichat', help_='''AI聊天插件
 基础用法：
   #消息   以#开头触发AI对话
-  进入对话模式/连续对话  进入免#触发模式
+  进入对话模式 [--option 指导标准]  进入免#触发模式，加--option同时开启选项模式
   退出对话模式/结束对话模式  退出连续对话模式
   查看对话模式  查看当前模式状态
+选项模式：
+  开启选项模式 [指导标准]  开启选项生成，如：开启选项模式 暧昧场景程度
+  关闭选项模式  关闭选项生成
+  选项状态  查看选项模式状态
 对话管理：
   清除对话/清空对话/重置对话  清除当前对话历史
   回溯/回退 [N]  回溯N条对话
@@ -56,12 +60,30 @@ enter_chat_mode_cmd = sv.on_command('进入对话模式', aliases=('连续对话
 
 @enter_chat_mode_cmd.handle()
 async def enter_chat_mode(bot: Bot, event: Event):
-    """进入连续对话模式，无需#前缀即可触发AI对话"""
+    """进入连续对话模式，无需#前缀即可触发AI对话。支持 --option 参数同时开启选项模式"""
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
+    # 解析参数，检查是否有 --option
+    full_msg = str(event.message).strip()
+    choice_mode_enabled = False
+    choice_guideline = None
+    
+    # 检查是否包含 --option 参数
+    if '--option' in full_msg:
+        choice_mode_enabled = True
+        # 提取 --option 后面的内容作为指导标准
+        option_idx = full_msg.find('--option')
+        after_option = full_msg[option_idx + len('--option'):].strip()
+        if after_option:
+            choice_guideline = after_option
+    
     # 设置连续对话模式
     session_manager.set_continuous_mode(user_id, group_id, True)
+    
+    # 如果开启了选项模式，同时设置选项模式
+    if choice_mode_enabled:
+        session_manager.set_choice_mode(user_id, group_id, True, choice_guideline)
     
     # 获取或创建session（确保人格设置正确）
     persona = persona_manager.get_persona(user_id, group_id)
@@ -69,6 +91,13 @@ async def enter_chat_mode(bot: Bot, event: Event):
     
     msg = "已进入连续对话模式！\n现在可以直接发送消息，无需 # 前缀即可与AI对话。\n"
     msg += f"当前人格：{persona[:30]}..." if persona else "当前人格：默认"
+    
+    if choice_mode_enabled:
+        msg += "\n\n✅ 已同时开启选项生成模式！"
+        if choice_guideline:
+            msg += f"\n📋 指导标准：{choice_guideline}"
+        msg += "\nAI回复时会自动生成3个选项供你选择，发送 1/2/3 即可快速选择。"
+    
     msg += "\n\n提示：\n- 发送「退出对话模式」退出此模式\n- 发送「清除对话」清空当前对话历史\n- session过期后将自动退出此模式"
     
     await enter_chat_mode_cmd.finish(msg)
@@ -108,6 +137,83 @@ async def check_chat_mode(bot: Bot, event: Event):
     else:
         await check_chat_mode_cmd.finish("当前处于「普通模式」，需要使用 # 前缀触发AI对话\n发送「进入对话模式」开启免#触发")
 
+# ========== 开启选项模式命令 ==========
+enable_choice_mode_cmd = sv.on_command('开启选项模式', aliases=('打开选项模式', '选项模式开启'), only_group=False, block=True)
+
+@enable_choice_mode_cmd.handle()
+async def enable_choice_mode(bot: Bot, event: Event):
+    """开启选项生成模式，AI回复时会生成3个选项供用户选择"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    # 检查是否在连续对话模式
+    in_continuous_mode = session_manager.is_continuous_mode(user_id, group_id)
+    if not in_continuous_mode:
+        await enable_choice_mode_cmd.finish("选项模式仅在「连续对话模式」下可用\n请先发送「进入对话模式」开启连续对话")
+        return
+    
+    # 获取指导标准（可选）
+    args = str(event.message).strip().split(maxsplit=1)
+    guideline = args[1].strip() if len(args) > 1 else None
+    
+    # 开启选项模式
+    session_manager.set_choice_mode(user_id, group_id, True, guideline)
+    
+    msg = "✅ 已开启选项生成模式！\n"
+    if guideline:
+        msg += f"📋 指导标准：{guideline}\n"
+    msg += "\n现在AI回复时会自动生成3个选项供你选择。\n"
+    msg += "发送数字 1/2/3 即可快速选择对应选项。\n\n"
+    msg += "提示：\n- 发送「关闭选项模式」关闭此功能\n- 发送「选项状态」查看当前状态"
+    
+    await enable_choice_mode_cmd.finish(msg)
+
+# ========== 关闭选项模式命令 ==========
+disable_choice_mode_cmd = sv.on_command('关闭选项模式', aliases=('退出选项模式', '选项模式关闭'), only_group=False)
+
+@disable_choice_mode_cmd.handle()
+async def disable_choice_mode(bot: Bot, event: Event):
+    """关闭选项生成模式"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    choice_enabled, _ = session_manager.get_choice_mode(user_id, group_id)
+    
+    if not choice_enabled:
+        await disable_choice_mode_cmd.finish("选项生成模式当前未开启。\n发送「开启选项模式」来开启此功能。")
+        return
+    
+    # 关闭选项模式
+    session_manager.set_choice_mode(user_id, group_id, False)
+    await disable_choice_mode_cmd.finish("已关闭选项生成模式。\nAI将不再自动生成选项。")
+
+# ========== 查看选项模式状态命令 ==========
+check_choice_mode_cmd = sv.on_command('选项状态', aliases=('选项模式状态', '查看选项模式'), only_group=False)
+
+@check_choice_mode_cmd.handle()
+async def check_choice_mode(bot: Bot, event: Event):
+    """查看当前选项模式状态"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    in_continuous_mode = session_manager.is_continuous_mode(user_id, group_id)
+    choice_enabled, guideline = session_manager.get_choice_mode(user_id, group_id)
+    
+    if not in_continuous_mode:
+        await check_choice_mode_cmd.finish("当前不在连续对话模式中。\n发送「进入对话模式」开启连续对话，然后可以「开启选项模式」")
+        return
+    
+    if choice_enabled:
+        msg = "当前选项生成模式：🟢 已开启\n"
+        if guideline:
+            msg += f"📋 指导标准：{guideline}\n"
+        msg += "\nAI回复时会自动生成3个选项\n发送 1/2/3 快速选择"
+    else:
+        msg = "当前选项生成模式：⚪ 已关闭\n"
+        msg += "发送「开启选项模式」开启此功能"
+    
+    await check_choice_mode_cmd.finish(msg)
+
 # ========== 清除session命令 ==========
 clear_cmd = sv.on_command('清除对话', aliases=('清空对话', '重置对话'), only_group=False)
 
@@ -123,7 +229,7 @@ async def clear_session(bot: Bot, event: Event):
         await bot.send(event, "没有找到对话历史")
 
 # ========== 回溯对话命令 ==========
-rollback_cmd = sv.on_command('回溯', aliases=('回退', '删除对话', '返回'), only_group=False)
+rollback_cmd = sv.on_command('回溯', aliases=('回退', '删除对话', '返回'), only_group=False, block=True)
 
 @rollback_cmd.handle()
 async def rollback_session(bot: Bot, event: Event):

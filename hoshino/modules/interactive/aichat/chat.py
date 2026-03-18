@@ -4,7 +4,8 @@ AI 聊天处理模块
 """
 import base64
 import os
-from typing import Any, Dict, List, Optional, Union
+import re
+from typing import Any, Dict, List, Optional, Tuple, Union
 from loguru import logger
 
 from hoshino import Bot, Event
@@ -14,6 +15,120 @@ from hoshino.util.message_util import extract_images_from_reply
 from .api import api_manager
 from .persona import persona_manager
 from .session import session_manager
+
+
+# 选项标记的正则表达式
+CHOICES_PATTERN = re.compile(r'\[CHOICES\](.*?)\[/CHOICES\]', re.DOTALL)
+CHOICE_ITEM_PATTERN = re.compile(r'^(\d+)\.\s*(.+)$', re.MULTILINE)
+
+# 选项生成提示词模板
+CHOICE_MODE_PROMPT_TEMPLATE = """[选项生成模式]
+请在你的回复末尾，使用以下格式为用户提供3个接下来的行动选项，格外注意[CHOICES]标签是成对出现的：
+[CHOICES]
+1. 选项1内容
+2. 选项2内容
+3. 选项3内容
+[/CHOICES]
+{guideline_section}
+[/选项生成模式]"""
+
+
+def parse_choices_from_response(response: str) -> Tuple[str, Dict[int, str]]:
+    """
+    从 AI 回复中解析选项
+    
+    Returns:
+        (正文内容, {1: "选项1", 2: "选项2", 3: "选项3"})
+    """
+    choices_dict = {}
+    
+    # 查找 [CHOICES]...[/CHOICES] 标记
+    match = CHOICES_PATTERN.search(response)
+    if not match:
+        return response.strip(), choices_dict
+    
+    choices_text = match.group(1).strip()
+    
+    # 解析选项行
+    for line in choices_text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        
+        choice_match = CHOICE_ITEM_PATTERN.match(line)
+        if choice_match:
+            num = int(choice_match.group(1))
+            content = choice_match.group(2).strip()
+            if num in [1, 2, 3]:
+                choices_dict[num] = content
+    
+    # 移除 [CHOICES] 标记，保留正文
+    content = CHOICES_PATTERN.sub('', response).strip()
+    
+    return content, choices_dict
+
+
+def format_choices_for_display(choices: Dict[int, str]) -> str:
+    """格式化选项为易读格式"""
+    if not choices:
+        return ""
+    
+    emoji_map = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣"}
+    
+    lines = [
+        "\n",
+        "📝 请选择接下来的行动：",
+    ]
+    
+    for num in [1, 2, 3]:
+        if num in choices:
+            lines.append(f"{emoji_map[num]} {choices[num]}")
+    
+    return "\n".join(lines)
+
+
+def build_messages_with_choice_mode(
+    session_messages: List[Dict[str, Any]], 
+    original_persona: Optional[str],
+    guideline: Optional[str]
+) -> List[Dict[str, Any]]:
+    """
+    构建带选项模式提示词的消息列表
+    
+    Args:
+        session_messages: 原始 session 消息列表
+        original_persona: 原始人格
+        guideline: 选项生成指导标准
+        
+    Returns:
+        修改后的消息列表
+    """
+    messages = []
+    
+    # 构建 system message
+    system_content = ""
+    
+    # 先添加原始人格（如果有）
+    if original_persona:
+        system_content = original_persona
+    
+    # 添加选项生成提示词
+    guideline_section = f"\n选项生成指导标准：{guideline}\n请根据以上指导标准生成合适的选项。" if guideline else ""
+    choice_prompt = CHOICE_MODE_PROMPT_TEMPLATE.format(guideline_section=guideline_section)
+    
+    if system_content:
+        system_content += "\n\n" + choice_prompt
+    else:
+        system_content = choice_prompt
+    
+    messages.append({"role": "system", "content": system_content})
+    
+    # 添加其他消息（跳过原来的 system message）
+    for msg in session_messages:
+        if msg.get("role") != "system":
+            messages.append(msg)
+    
+    return messages
 
 
 async def download_image_to_base64(image_url: str) -> Optional[str]:
@@ -73,6 +188,9 @@ async def call_ai_api(messages: List[Dict[str, Any]], api_config: Dict[str, Any]
         "model": api_config["model"],
         "messages": messages,
     }
+
+    logger.debug(f"调用 AI API: URL={url}, Payload={payload}")
+
     # 只在配置了参数时才添加到 payload（避免某些模型不支持这些参数）
     if "max_tokens" in api_config:
         payload["max_tokens"] = api_config["max_tokens"]
@@ -108,7 +226,7 @@ async def call_ai_api(messages: List[Dict[str, Any]], api_config: Dict[str, Any]
 
 
 async def handle_ai_chat(bot: Bot, event: Event):
-    """处理AI聊天消息（支持图片多模态）"""
+    """处理AI聊天消息（支持图片多模态和选项模式）"""
     # 获取消息内容
     msg = str(event.message).strip()
     
@@ -117,6 +235,10 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     # 检查是否以#开头，或者处于连续对话模式
     in_continuous_mode = session_manager.is_continuous_mode(user_id, group_id)
+    
+    # 获取选项模式状态
+    choice_mode_enabled, choice_guideline = session_manager.get_choice_mode(user_id, group_id)
+    last_choices = session_manager.get_last_choices(user_id, group_id)
     
     if msg.startswith('#'):
         # 移除#前缀
@@ -127,6 +249,16 @@ async def handle_ai_chat(bot: Bot, event: Event):
     else:
         # 非连续对话模式且不以#开头，忽略
         return
+    
+    # 检查是否发送了数字选项（仅在选项模式下）
+    if choice_mode_enabled and last_choices:
+        # 检查是否为纯数字 1/2/3
+        if msg in ['1', '2', '3']:
+            choice_num = int(msg)
+            if choice_num in last_choices:
+                # 将数字替换为选项内容
+                user_input = last_choices[choice_num]
+                logger.info(f"用户选择选项 {choice_num}: {user_input}")
 
     api_config = api_manager.get_api_config()
     if not api_config or not api_config.get("api_key"):
@@ -204,7 +336,15 @@ async def handle_ai_chat(bot: Bot, event: Event):
     session = session_manager.get_session(user_id, group_id, persona)
     session.add_message("user", message_content)
 
-    response = await call_ai_api(session.messages, api_config)
+    # 如果开启了选项模式，构建带提示词的消息列表
+    if choice_mode_enabled and in_continuous_mode:
+        messages_for_api = build_messages_with_choice_mode(
+            session.messages, persona, choice_guideline
+        )
+    else:
+        messages_for_api = session.messages
+
+    response = await call_ai_api(messages_for_api, api_config)
     
     if response is None:
         await bot.send(event, "AI服务暂时不可用，请稍后再试")
@@ -213,12 +353,27 @@ async def handle_ai_chat(bot: Bot, event: Event):
             session.messages.pop()
         return
     
-    # 添加AI回复
-    session.add_message("assistant", response)
+    # 解析选项（如果开启了选项模式）
+    display_response = response
+    if choice_mode_enabled and in_continuous_mode:
+        content, choices = parse_choices_from_response(response)
+        if choices:
+            # 存储选项到 session
+            session_manager.set_last_choices(user_id, group_id, choices)
+            # 构建显示内容（正文 + 格式化选项）
+            display_response = content + format_choices_for_display(choices)
+            # 将解析后的内容（不含选项标记）添加到历史
+            session.add_message("assistant", content)
+        else:
+            # 没有解析到选项，清空上一次的选项
+            session_manager.set_last_choices(user_id, group_id, {})
+            session.add_message("assistant", response)
+    else:
+        session.add_message("assistant", response)
     
     # 发送回复
     try:
-        await bot.send(event, response)
+        await bot.send(event, display_response)
     except Exception as e:
-        logger.error(str(response))
+        logger.error(str(display_response))
         logger.error(f"发送AI回复失败: {e}")
