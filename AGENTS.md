@@ -157,6 +157,47 @@ web_password=shebot       # Web 仪表板密码
 
 ## 代码风格和约定
 
+### 研究现有代码规范（重要）
+
+在编写任何新代码或修改现有代码之前，**必须**先研究项目中已有的代码实践。不要假设标准库的 API 或通用框架的 API 可以直接使用。
+
+**必须执行的检查步骤：**
+
+1. **查看匹配的写法** - 在现有模块中搜索类似功能：
+   ```bash
+   # 查看命令定义方式
+   grep -r "sv.on_" hoshino/modules/ | head -20
+   
+   # 查看 logger 用法
+   grep -r "sv.logger" hoshino/modules/ | head -10
+   
+   # 查看 Service 定义
+   grep -r "Service(" hoshino/modules/ | head -10
+   
+   # 查看权限定义
+   grep -r "manage_perm" hoshino/modules/
+   ```
+
+2. **查看同一目录下的其他文件** - 复制已有的代码模式：
+   ```bash
+   # 例如要为 tools 添加新模块，先看现有 tools 怎么写
+   cat hoshino/modules/tools/b64.py
+   cat hoshino/modules/tools/ocr.py
+   ```
+
+3. **验证 API 存在性** - 不确定的接口先搜索再使用：
+   ```bash
+   # 检查接口是否定义
+   grep -r "def on_prefix" hoshino/
+   grep -r "new_logger" hoshino/
+   ```
+
+**常见陷阱：**
+- ❌ 直接使用 `from nonebot import on_prefix` - 本项目可能没有此接口
+- ❌ 使用 `log.new_logger()` - 本项目使用 `sv.logger`
+- ❌ 臆造参数如 `manage_perm=0` - 应使用 `permission.py` 中的常量
+- ❌ 假设通用 NoneBot2 文档完全适用 - 本项目基于 hoshino 框架有额外封装
+
 ### Python 代码风格
 - **文档字符串**：注释和文档字符串使用中文
 - **文件头**：每个文件应包含作者信息头：
@@ -177,15 +218,39 @@ web_password=shebot       # Web 仪表板密码
 
 ```python
 from hoshino import Service, Bot, Event
-from hoshino.typing import T_State
+from hoshino.permission import ADMIN, NORMAL, SUPERUSER
 
 # 定义服务
-sv = Service('服务名', help_='帮助文本', manage_perm=ADMIN)
+sv = Service('服务名', help_='帮助文本')
 
-# 定义命令处理器
-@sv.on_regex(r'正则表达式')
-async def handler(bot: Bot, event: Event, state: T_State):
+# 使用 sv.on_command 定义命令（不是 nonebot 的 on_command）
+cmd = sv.on_command('命令名', aliases={'别名1', '别名2'}, only_group=False)
+
+@cmd.handle()  # 必须加 .handle()
+async def handler(bot: Bot, event: Event):
+    # 使用 sv.logger 记录日志
+    sv.logger.info('日志信息')
     await bot.send(event, '回复内容')
+```
+
+**可用的 Service 方法：**
+- `sv.on_command(name, aliases=set(), only_group=True)` - 命令匹配
+- `sv.on_startswith(msg, only_group=True)` - 前缀匹配
+- `sv.on_endswith(msg, only_group=True)` - 后缀匹配
+- `sv.on_regex(pattern, only_group=True)` - 正则匹配
+- `sv.on_keyword(keywords, only_group=True)` - 关键词匹配
+- `sv.on_message(only_group=True)` - 消息匹配
+- `sv.on_notice(only_group=True)` - 通知事件
+- `sv.on_request(only_group=True)` - 请求事件
+
+**日志记录：**
+```python
+# 正确：使用 sv.logger
+sv.logger.info('信息')
+sv.logger.error('错误')
+sv.logger.exception(e)  # 记录异常
+
+# 错误：不要直接使用 log.new_logger()
 ```
 
 ### 配置模式
@@ -246,6 +311,114 @@ if modules := config.modules:
 - `interactive`：交互式聊天
 - `pixiv`：Pixiv 集成
 - `webui`：Web 仪表板 API
+
+## Playwright 浏览器自动化
+
+项目集成了 Playwright 用于浏览器自动化，浏览器通过 Docker 独立运行，无需在应用容器中安装浏览器。
+
+### 架构
+
+```
+┌─────────────┐      WebSocket       ┌──────────────┐
+│   shebot    │ ◄──────────────────► │  browserless │
+│  (Playwright)│                     │    /chrome   │
+│             │                      │   (Docker)   │
+└─────────────┘                      └──────────────┘
+```
+
+### 配置
+
+浏览器服务地址通过环境变量配置（已在 docker-compose.yml 中设置）：
+
+```bash
+BROWSER_WS_URL=ws://browser:3000/chromium?launch={"headless":false}
+```
+
+### 使用方式
+
+#### 1. 基础截图功能
+
+```python
+from hoshino.util.playwright_util import screenshot
+
+# 截取网页全屏
+img_bytes = await screenshot("https://example.com", full_page=True)
+
+# 发送图片
+await bot.send(event, MessageSegment.image(BytesIO(img_bytes)))
+```
+
+#### 2. 获取网页内容
+
+```python
+from hoshino.util.playwright_util import fetch_page_content
+
+# 获取渲染后的 HTML
+html = await fetch_page_content("https://spa-example.com")
+
+# 执行 JavaScript 获取特定内容
+title = await fetch_page_content(
+    "https://example.com",
+    evaluate="document.title"
+)
+```
+
+#### 3. 高级用法（自定义页面操作）
+
+```python
+from hoshino.util.playwright_util import get_page
+
+async with get_page() as page:
+    await page.goto("https://example.com")
+    
+    # 点击元素
+    await page.click("#login-button")
+    
+    # 填写表单
+    await page.fill("#username", "myuser")
+    await page.fill("#password", "mypass")
+    
+    # 等待元素出现
+    await page.wait_for_selector(".content-loaded")
+    
+    # 截图
+    img_bytes = await page.screenshot(full_page=True)
+```
+
+#### 4. 检查浏览器服务状态
+
+```python
+from hoshino.util.playwright_util import check_browser_health
+
+if await check_browser_health():
+    print("浏览器服务正常")
+```
+
+### 可用命令（演示模块）
+
+`hoshino/modules/tools/playwright_demo.py` 提供了以下演示命令：
+
+- `网页截图 [url]` - 截取网页全屏
+- `网页内容 [url]` - 获取网页文本内容
+- `浏览器状态` - 检查浏览器服务状态
+- `网页元素 [选择器] [url]` - 截取特定元素
+- `执行脚本 [url] [JS代码]` - 在页面执行 JavaScript
+- `滚动截图 [url]` - 滚动页面后截图（适用于懒加载页面）
+
+### 部署注意事项
+
+1. **首次启动**：浏览器镜像较大（约 2GB），首次拉取需要较长时间
+2. **内存占用**：建议为 browser 服务分配至少 1GB 内存
+3. **并发限制**：默认最大并发会话数为 5，可通过环境变量调整
+4. **调试访问**：浏览器服务提供调试界面，访问 `http://localhost:3003`
+
+### 故障排除
+
+| 问题 | 解决方案 |
+|------|----------|
+| 连接失败 | 检查 browser 容器是否正常运行：`docker-compose ps` |
+| 超时错误 | 增加 `CONNECTION_TIMEOUT` 环境变量值 |
+| 内存不足 | 增加 browser 服务的内存限制 |
 
 ## Web 仪表板
 

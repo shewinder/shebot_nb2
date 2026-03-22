@@ -11,6 +11,11 @@ services:
       - ./logs/:/app/logs/
     networks:
       - app-network
+    depends_on:
+      - browser
+    environment:
+      # 浏览器服务地址（容器内通信）
+      - BROWSER_WS_URL=ws://browser:3000/chromium?launch={"headless":false}
 
   llonebot:
     volumes:
@@ -26,6 +31,36 @@ services:
     image: initialencounter/llonebot:latest
     networks:
       - app-network
+
+  # Browserless Chrome - 独立的浏览器服务
+  # 为 Playwright 提供远程浏览器连接
+  browser:
+    image: browserless/chrome:latest
+    restart: always
+    ports:
+      - 3003:3000  # 浏览器服务端口（外部访问）
+    environment:
+      # 最大并发会话数
+      - MAX_CONCURRENT_SESSIONS=5
+      # 会话超时时间（毫秒）
+      - CONNECTION_TIMEOUT=300000
+      # 空闲超时时间（毫秒）
+      - MAX_IDLE_TIME=60000
+      # 启用调试
+      - DEBUG=browserless:*
+      # 默认启动参数
+      - DEFAULT_HEADLESS=false
+      # 启用 DevTools
+      - ENABLE_DEBUG_VIEWER=true
+    networks:
+      - app-network
+    # 资源限制（可选）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2G
+    #     reservations:
+    #       memory: 512M
 
 volumes:
   hinata_data:
