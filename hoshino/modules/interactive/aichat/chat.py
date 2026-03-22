@@ -8,13 +8,20 @@ import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 from loguru import logger
 
-from hoshino import Bot, Event
+from io import BytesIO
+
+from hoshino import Bot, Event, MessageSegment
 from hoshino.util import aiohttpx, get_event_imageurl
 from hoshino.util.message_util import extract_images_from_reply
 
 from .api import api_manager
+from .config import Config
+from .md_render import render_text_if_markdown, strip_thinking_tags
 from .persona import persona_manager
 from .session import session_manager
+
+# 加载配置
+conf = Config.get_instance('aichat')
 
 
 # 选项标记的正则表达式
@@ -372,8 +379,31 @@ async def handle_ai_chat(bot: Bot, event: Event):
         session.add_message("assistant", response)
     
     # 发送回复
+    sent = False
     try:
-        await bot.send(event, display_response)
+        # 检查是否需要渲染为图片
+        should_render = (
+            conf.enable_markdown_render and
+            len(display_response) >= conf.markdown_min_length
+        )
+        
+        if should_render:
+            try:
+                img_bytes = await render_text_if_markdown(
+                    display_response,
+                    min_length=conf.markdown_min_length
+                )
+                if img_bytes:
+                    await bot.send(event, MessageSegment.image(BytesIO(img_bytes)))
+                    sent = True
+            except Exception as render_err:
+                logger.warning(f"Markdown 渲染失败，降级为文本发送: {render_err}")
+        
+        if not sent:
+            # 直接发送文本
+            await bot.send(event, display_response)
+            sent = True
+            
     except Exception as e:
         logger.error(str(display_response))
         logger.error(f"发送AI回复失败: {e}")

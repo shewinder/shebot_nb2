@@ -43,6 +43,11 @@ class Config(BaseConfig):
     default_persona: str = ""
     max_saved_personas: int = 5
 
+    # Markdown 渲染配置
+    enable_markdown_render: bool = True  # 是否启用 Markdown 自动渲染
+    markdown_min_length: int = 100  # 触发渲染的最小文本长度
+    markdown_preview_length: int = 50  # 预览文本长度（图片描述）
+
     def get_api_list(self) -> List[ApiEntry]:
         """获取 API 列表"""
         return self.apis
