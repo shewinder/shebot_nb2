@@ -1,36 +1,67 @@
 services:
   shebot:
-    image: shebot:latest
+    container_name: hinata
+    image: shewinder/shebot:latest
     restart: always
     ports:
       - 9000:9000
     working_dir: /app
     volumes:
-      - hinata_data:/app/data
+      # 共享数据目录（与 llbot 共享）
+      - ./data/shared:/app/data
+      # 环境配置
       - ./.env.prod:/app/.env.prod
-      - ./logs/:/app/logs/
+      - ./logs:/app/logs
     networks:
-      - app-network
+      - bot-network
     depends_on:
       - browser
     environment:
       # 浏览器服务地址（容器内通信）
       - BROWSER_WS_URL=ws://browser:3000/chromium?launch={"headless":false}
 
-  llonebot:
-    volumes:
-        - ./QQ:/root/.config/QQ # 挂载 QQ 配置目录
-        - ./llonebot:/root/llonebot # 挂载 llonebot 数据目录
-        - hinata_data:/app/data 
-    ports:
-        - 3000:3000 # OneBot HTTP 端口
-        - 3001:3001 # OneBot WebSocket 端口
-        - 5600:5600 # Satori 端口
-        - 3080:3080 # webui
-    restart: always
-    image: initialencounter/llonebot:latest
+  # QQ 客户端 (PMHQ)
+  pmhq:
+    image: linyuchen/pmhq:7.3.0
+    container_name: pmhq
+    privileged: true
+    environment:
+      - ENABLE_HEADLESS=false
     networks:
-      - app-network
+      - bot-network
+    volumes:
+      # QQ 数据目录（与 llbot 共享，使用容器卷）
+      - qq_config:/root/.config/QQ
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # LLBot (本地构建，含 120s 超时修改)
+  llonebot:
+    container_name: llob
+    image: linyuchen/llonebot:latest
+    ports:
+      - 3080:3080
+    environment:
+      - pmhq_host=pmhq
+      - pmhq_port=13000
+      - WEBUI_PORT=3080
+    networks:
+      - bot-network
+    volumes:
+      # LLBot 数据目录
+      - ./data/llbot:/app/llbot/data
+      # 共享数据目录（与 shebot 共享）
+      - ./data/shared:/app/data
+      # QQ 数据目录（与 pmhq 共享，使用容器卷）
+      - qq_config:/root/.config/QQ
+    depends_on:
+      - pmhq
+    restart: unless-stopped
 
   # Browserless Chrome - 独立的浏览器服务
   # 为 Playwright 提供远程浏览器连接
@@ -53,7 +84,7 @@ services:
       # 启用 DevTools
       - ENABLE_DEBUG_VIEWER=true
     networks:
-      - app-network
+      - bot-network
     # 资源限制（可选）
     # deploy:
     #   resources:
@@ -63,10 +94,11 @@ services:
     #       memory: 512M
 
 volumes:
-  hinata_data:
+  # QQ 配置数据卷（pmhq 和 llbot 共享）
+  qq_config:
     driver: local
 
 networks:
-  app-network:
+  bot-network:
     driver: bridge
-    name: app-network
+    name: bot-network
