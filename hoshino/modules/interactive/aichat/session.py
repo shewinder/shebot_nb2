@@ -134,6 +134,10 @@ class SessionManager:
             session = self.sessions[session_id]
             if not session.is_expired():
                 return session.continuous_mode
+            else:
+                # session已过期，清理连续对话模式状态
+                if session_id in self.continuous_users:
+                    del self.continuous_users[session_id]
         
         # 否则检查持久化的状态
         return self.continuous_users.get(session_id, False)
@@ -172,6 +176,12 @@ class SessionManager:
             session = self.sessions[session_id]
             if not session.is_expired():
                 return session.choice_mode_enabled, session.choice_guideline
+            else:
+                # session已过期，清理选项模式状态
+                if session_id in self.choice_mode_users:
+                    del self.choice_mode_users[session_id]
+                if session_id in self.choice_guideline_users:
+                    del self.choice_guideline_users[session_id]
         
         # 否则检查持久化的状态
         enabled = self.choice_mode_users.get(session_id, False)
@@ -197,6 +207,11 @@ class SessionManager:
             session = self.sessions[session_id]
             if not session.is_expired():
                 return session.last_choices
+            else:
+                # session已过期，清理session和连续对话状态
+                del self.sessions[session_id]
+                if session_id in self.continuous_users:
+                    del self.continuous_users[session_id]
         return {}
     
     def rollback_messages(self, user_id: int, group_id: Optional[int] = None, count: int = 1) -> int:
