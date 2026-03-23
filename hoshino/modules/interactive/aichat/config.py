@@ -14,12 +14,14 @@ class ApiEntry(BaseModel):
     max_tokens: Optional[int] = None  # 不填则用全局默认
     temperature: Optional[float] = None  # 不填则用全局默认
     supports_multimodal: Optional[bool] = None  # 是否支持多模态（图片），None 表示未配置，默认 False
+    supports_tools: Optional[bool] = True  # 是否支持 Tool/Function Calling，None 表示未配置，默认 False
 
 
 @configuration('aichat')
 class Config(BaseConfig):
     """AI Chat插件配置"""
     # 多 API 配置（默认提供一个示例模板）
+    # 注意：要启用 Tool Calling（如生图功能），需要设置 supports_tools=true
     apis: List[ApiEntry] = [
         ApiEntry(
             id="deepseek",

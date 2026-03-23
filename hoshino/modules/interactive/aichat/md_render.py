@@ -59,6 +59,39 @@ def is_markdown(text: str, min_features: int = 2) -> bool:
     return False
 
 
+# Markdown 图片格式正则
+MD_IMAGE_PATTERN = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
+# 纯文本图片 URL 正则
+PLAIN_IMAGE_URL_PATTERN = re.compile(r'https?://[^\s<>"\']+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"\']*)?', re.IGNORECASE)
+
+
+def extract_image_urls(text: str) -> List[str]:
+    """
+    从文本中提取图片 URL
+    支持 Markdown 图片格式 ![alt](url) 和纯文本 URL
+    
+    Returns:
+        图片 URL 列表
+    """
+    urls = []
+    if not text:
+        return urls
+    
+    # 提取 Markdown 图片格式
+    for match in MD_IMAGE_PATTERN.finditer(text):
+        url = match.group(2).strip()
+        if url:
+            urls.append(url)
+    
+    # 提取纯文本图片 URL
+    for match in PLAIN_IMAGE_URL_PATTERN.finditer(text):
+        url = match.group(0)
+        if url and url not in urls:  # 去重
+            urls.append(url)
+    
+    return urls
+
+
 def strip_thinking_tags(text: str) -> str:
     """去除 <think>...</think> 标签内容"""
     text = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE)

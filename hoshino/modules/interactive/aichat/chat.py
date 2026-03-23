@@ -19,6 +19,7 @@ from .config import Config
 from .md_render import render_text_if_markdown, strip_thinking_tags
 from .persona import persona_manager
 from .session import session_manager
+from .tools import get_available_tools, get_tool_function
 
 # 加载配置
 conf = Config.get_instance('aichat')
@@ -176,15 +177,31 @@ async def download_image_to_base64(image_url: str) -> Optional[str]:
         return None
 
 
-async def call_ai_api(messages: List[Dict[str, Any]], api_config: Dict[str, Any]) -> Optional[str]:
-    """调用 AI API，使用指定的 api_config（支持文本和多模态消息）"""
+async def call_ai_api(
+    messages: List[Dict[str, Any]], 
+    api_config: Dict[str, Any],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    tool_choice: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    调用 AI API，支持 Tool/Function Calling
+    
+    Returns:
+        {
+            "content": str,  # AI 回复文本
+            "reasoning_content": str,  # 推理内容
+            "tool_calls": List[Dict],  # 工具调用请求
+            "finish_reason": str,  # 结束原因
+            "raw_response": Dict,  # 原始响应
+        }
+    """
     if not api_config or not api_config.get("api_key"):
         logger.warning("AI API 未配置或密钥为空")
-        return None
+        return {"error": "API 未配置", "content": None}
 
     if not messages:
         logger.error("消息列表为空")
-        return None
+        return {"error": "消息列表为空", "content": None}
 
     url = f"{api_config['api_base'].rstrip('/')}/chat/completions"
     headers = {
@@ -196,40 +213,212 @@ async def call_ai_api(messages: List[Dict[str, Any]], api_config: Dict[str, Any]
         "messages": messages,
     }
 
-    logger.debug(f"调用 AI API: URL={url}, Payload={payload}")
-
     # 只在配置了参数时才添加到 payload（避免某些模型不支持这些参数）
     if "max_tokens" in api_config:
         payload["max_tokens"] = api_config["max_tokens"]
     if "temperature" in api_config:
         payload["temperature"] = api_config["temperature"]
+    
+    # 添加 tools 参数（如果模型支持且提供了 tools）
+    if tools and api_config.get("supports_tools", False):
+        payload["tools"] = tools
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+        logger.debug(f"启用 Tool Calling，工具数量: {len(tools)}")
+
+    logger.debug(f"调用 AI API: URL={url}, Payload: {payload}")
 
     try:
         resp = await aiohttpx.post(url, headers=headers, json=payload)
         if not resp.ok:
             logger.error(f"AI API 调用失败: {resp.status_code}, 响应: {resp.text}")
-            return None
+            return {"error": f"HTTP {resp.status_code}", "content": None}
 
         result = resp.json
         if not result:
             logger.error("AI API 返回空结果")
-            return None
+            return {"error": "返回空结果", "content": None}
 
-        logger.info(str(result))
+        logger.info(f"AI API 响应: {str(result)}")
 
         if "choices" in result and len(result["choices"]) > 0:
-            message = result["choices"][0].get("message", {})
-            if "content" in message:
-                return message["content"]
-            logger.error(f"AI API 返回格式错误，缺少 content 字段: {result}")
-            return None
+            choice = result["choices"][0]
+            message = choice.get("message", {})
+            finish_reason = choice.get("finish_reason", "")
+            
+            content = message.get("content", "") or ""
+            reasoning_content = message.get("reasoning_content", "") or ""
+            tool_calls = message.get("tool_calls", [])
+            
+            return {
+                "content": content.strip() if content else None,
+                "reasoning_content": reasoning_content.strip() if reasoning_content else None,
+                "tool_calls": tool_calls if tool_calls else [],
+                "finish_reason": finish_reason,
+                "raw_response": result,
+            }
+        
         error_info = result.get("error", {})
         error_msg = error_info.get("message", "未知错误") if error_info else "返回格式错误"
         logger.error(f"AI API 返回错误: {error_msg}, 完整响应: {result}")
-        return None
+        return {"error": error_msg, "content": None}
+        
     except Exception as e:
         logger.exception(f"调用 AI API 异常: {e}")
-        return None
+        return {"error": str(e), "content": None}
+
+
+async def execute_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    执行单个工具调用
+    
+    Args:
+        tool_call: {
+            "id": str,
+            "type": "function",
+            "function": {
+                "name": str,
+                "arguments": str (JSON)
+            }
+        }
+    
+    Returns:
+        {
+            "tool_call_id": str,
+            "role": "tool",
+            "content": str (JSON)
+        }
+    """
+    import json
+    
+    tool_id = tool_call.get("id", "")
+    function_info = tool_call.get("function", {})
+    function_name = function_info.get("name", "")
+    arguments_str = function_info.get("arguments", "{}")
+    
+    logger.info(f"执行工具调用: {function_name}, args: {arguments_str}")
+    
+    # 解析参数
+    try:
+        arguments = json.loads(arguments_str)
+    except json.JSONDecodeError:
+        logger.error(f"工具参数解析失败: {arguments_str}")
+        return {
+            "tool_call_id": tool_id,
+            "role": "tool",
+            "content": json.dumps({"error": "参数解析失败"})
+        }
+    
+    # 获取工具函数
+    tool_func = get_tool_function(function_name)
+    if not tool_func:
+        logger.error(f"未找到工具函数: {function_name}")
+        return {
+            "tool_call_id": tool_id,
+            "role": "tool",
+            "content": json.dumps({"error": f"未知工具: {function_name}"})
+        }
+    
+    # 执行工具
+    try:
+        result = await tool_func(**arguments)
+        return {
+            "tool_call_id": tool_id,
+            "role": "tool",
+            "content": json.dumps(result, ensure_ascii=False)
+        }
+    except Exception as e:
+        logger.exception(f"工具执行失败: {e}")
+        return {
+            "tool_call_id": tool_id,
+            "role": "tool",
+            "content": json.dumps({"error": str(e)})
+        }
+
+
+async def call_ai_api_with_tools(
+    messages: List[Dict[str, Any]], 
+    api_config: Dict[str, Any],
+    max_tool_rounds: int = 5
+) -> Dict[str, Any]:
+    """
+    调用 AI API 并处理 Tool Calling（支持多轮工具调用）
+    
+    Args:
+        messages: 消息列表
+        api_config: API 配置
+        max_tool_rounds: 最大工具调用轮数，防止无限循环
+    
+    Returns:
+        {
+            "content": str,  # 最终回复文本
+            "tool_results": List[Dict],  # 所有工具调用结果
+            "error": str,  # 错误信息
+        }
+    """
+    if not api_config.get("supports_tools", False):
+        # 不支持 tools，直接调用普通 API
+        result = await call_ai_api(messages, api_config, tools=None)
+        return {
+            "content": result.get("content") or result.get("reasoning_content"),
+            "tool_results": [],
+            "error": result.get("error")
+        }
+    
+    tools = get_available_tools()
+    current_messages = messages.copy()
+    all_tool_results = []
+    
+    for round_num in range(max_tool_rounds):
+        logger.debug(f"Tool calling 第 {round_num + 1} 轮")
+        
+        # 调用 API
+        result = await call_ai_api(current_messages, api_config, tools=tools)
+        
+        if result.get("error"):
+            return {"content": None, "tool_results": all_tool_results, "error": result["error"]}
+        
+        # 检查是否有工具调用
+        tool_calls = result.get("tool_calls", [])
+        if not tool_calls:
+            # 没有工具调用，返回最终回复
+            content = result.get("content")
+            if not content and result.get("reasoning_content"):
+                content = result.get("reasoning_content")
+            return {
+                "content": content,
+                "tool_results": all_tool_results,
+                "error": None
+            }
+        
+        # 有工具调用，添加 assistant 消息到对话
+        assistant_message = result.get("raw_response", {}).get("choices", [{}])[0].get("message", {})
+        current_messages.append(assistant_message)
+        
+        # 执行所有工具调用
+        for tool_call in tool_calls:
+            tool_result = await execute_tool_call(tool_call)
+            all_tool_results.append({
+                "tool_call": tool_call,
+                "result": tool_result
+            })
+            current_messages.append(tool_result)
+            logger.info(f"工具调用结果: {tool_result['content'][:200]}...")
+    
+    # 达到最大轮数限制
+    logger.warning(f"达到最大工具调用轮数限制: {max_tool_rounds}")
+    return {
+        "content": "工具调用次数过多，请简化请求",
+        "tool_results": all_tool_results,
+        "error": "达到最大工具调用轮数限制"
+    }
+
+
+# 保留旧函数以兼容代码，但实际使用 call_ai_api_with_tools
+async def call_ai_api_legacy(messages: List[Dict[str, Any]], api_config: Dict[str, Any]) -> Optional[str]:
+    """旧版 API 调用（兼容用）"""
+    result = await call_ai_api(messages, api_config, tools=None)
+    return result.get("content") or result.get("reasoning_content")
 
 
 async def handle_ai_chat(bot: Bot, event: Event):
@@ -351,14 +540,21 @@ async def handle_ai_chat(bot: Bot, event: Event):
     else:
         messages_for_api = session.messages
 
-    response = await call_ai_api(messages_for_api, api_config)
+    # 调用 AI API（支持 Tool Calling）
+    api_result = await call_ai_api_with_tools(messages_for_api, api_config)
     
-    if response is None:
-        await bot.send(event, "AI服务暂时不可用，请稍后再试")
+    if api_result.get("error") and not api_result.get("content"):
+        await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result['error']}")
         # 移除刚才添加的用户消息
         if session.messages and session.messages[-1].get("role") == "user":
             session.messages.pop()
         return
+    
+    response = api_result.get("content", "")
+    
+    # 注意：工具结果已包含在对话历史中传给模型
+    # 模型应在最终回复中组织好工具结果的呈现方式
+    # 下面的代码统一处理最终回复的发送（Markdown 渲染或提取图片 URL）
     
     # 解析选项（如果开启了选项模式）
     display_response = response
@@ -381,7 +577,13 @@ async def handle_ai_chat(bot: Bot, event: Event):
     # 发送回复
     sent = False
     try:
-        # 检查是否需要渲染为图片
+        if not display_response:
+            await bot.send(event, "抱歉，我没有生成任何内容，请重试")
+            return
+        
+        # 策略：优先尝试 Markdown 渲染（包含图片链接的文本）
+        # 如果渲染成功，发送渲染后的图片
+        # 如果渲染失败或未启用，再提取 URL 单独发送图片和文本
         should_render = (
             conf.enable_markdown_render and
             len(display_response) >= conf.markdown_min_length
@@ -396,13 +598,37 @@ async def handle_ai_chat(bot: Bot, event: Event):
                 if img_bytes:
                     await bot.send(event, MessageSegment.image(BytesIO(img_bytes)))
                     sent = True
+                    logger.info("Markdown 渲染成功，发送渲染后的图片")
             except Exception as render_err:
-                logger.warning(f"Markdown 渲染失败，降级为文本发送: {render_err}")
+                logger.warning(f"Markdown 渲染失败: {render_err}")
         
         if not sent:
-            # 直接发送文本
-            await bot.send(event, display_response)
-            sent = True
+            # Markdown 未启用、不满足条件或渲染失败
+            # 提取消息中的图片 URL 并发送
+            from .md_render import extract_image_urls
+            image_urls = extract_image_urls(display_response)
+            
+            if image_urls:
+                # 有图片 URL，先发送图片
+                for url in image_urls:
+                    try:
+                        await bot.send(event, MessageSegment.image(url))
+                    except Exception as img_err:
+                        logger.error(f"发送图片失败: {url}, 错误: {img_err}")
+                
+                # 发送文本（去掉图片 URL 后的内容）
+                text_content = display_response
+                for url in image_urls:
+                    text_content = text_content.replace(url, "")
+                text_content = text_content.strip()
+                
+                if text_content:
+                    await bot.send(event, text_content)
+                sent = True
+            else:
+                # 没有图片 URL，直接发送文本
+                await bot.send(event, display_response)
+                sent = True
             
     except Exception as e:
         logger.error(str(display_response))

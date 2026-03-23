@@ -31,6 +31,8 @@ def _build_api_config_dict(api_entry) -> Dict[str, Any]:
         config_dict["temperature"] = api_entry.temperature
     # 多模态支持标志（None 表示未配置，默认为 False）
     config_dict["supports_multimodal"] = api_entry.supports_multimodal if api_entry.supports_multimodal is not None else False
+    # Tool/Function Calling 支持标志（None 表示未配置，默认为 False）
+    config_dict["supports_tools"] = api_entry.supports_tools if api_entry.supports_tools is not None else False
     return config_dict
 
 
