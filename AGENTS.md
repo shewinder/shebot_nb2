@@ -106,6 +106,14 @@ from hoshino.config import get_plugin_config_by_name
 conf = get_plugin_config_by_name('plugin_name')
 ```
 
+**⚠️ 重要：不要在代码库中编写配置迁移代码**
+
+- ❌ 禁止编写 `_migrate_config()` 等配置迁移逻辑
+- ❌ 禁止在代码中检测旧配置格式并自动转换
+- ✅ 配置变更时直接更新 Pydantic 模型，利用默认值处理
+- ✅ 在 CHANGELOG 或文档中注明配置变更即可
+- 理由：迁移代码会增加复杂度，成为长期技术债务，维护成本高于收益
+
 ### 资源访问
 
 ```python
