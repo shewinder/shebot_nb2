@@ -1,6 +1,6 @@
 """
 AI Chat Web 管理 API
-提供模型切换、人格管理等功能
+提供 API 厂商管理、模型切换、人格管理等功能
 """
 from typing import Dict, List, Optional, Set
 from fastapi import APIRouter, File, UploadFile, Form
@@ -27,18 +27,20 @@ def get_superusers() -> Set[int]:
 router = APIRouter(prefix="/aichat")
 
 
-class ModelInfo(BaseModel):
-    """模型信息"""
-    id: str
-    name: str
-    model: str
+class ApiInfo(BaseModel):
+    """API 厂商信息 - 兼容前端模型管理格式"""
+    id: str                 # 前端使用的唯一标识（同 api）
+    name: str               # 显示名称（同 api）
+    api: str                # 厂商标识
+    model: str              # 模型名称
     api_base: str
     api_key: str
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-    is_current: bool
-    is_default: bool
+    max_tokens: int
+    temperature: float
+    is_current: bool        # 是否当前使用
+    is_default: bool        # 是否默认（第一个且当前未设置时）
     supports_multimodal: Optional[bool] = None
+    supports_tools: Optional[bool] = None
 
 
 class PersonaInfo(BaseModel):
@@ -49,9 +51,14 @@ class PersonaInfo(BaseModel):
     effective: bool
 
 
+class SwitchApiRequest(BaseModel):
+    """切换 API 厂商请求"""
+    api: str
+
+
 class SwitchModelRequest(BaseModel):
     """切换模型请求"""
-    api_id: str
+    model: str
 
 
 class SetPersonaRequest(BaseModel):
@@ -74,63 +81,78 @@ class DeleteSavedPersonaRequest(BaseModel):
     name: str
 
 
-@router.get("/models")
-async def get_models():
-    """获取所有可用的模型列表"""
-    apis = conf.get_api_list()
-    current_id = api_manager.get_current_api_id()
-    default_id = conf.get_default_api_id()
+@router.get("/apis")
+async def get_apis():
+    """获取所有可用的 API 厂商列表"""
+    apis = conf.get_apis()
+    current_api = api_manager.get_current_api()
     
     result = []
     for api in apis:
-        result.append(ModelInfo(
-            id=api.id,
-            name=api.name,
+        result.append(ApiInfo(
+            api=api.api,
             model=api.model,
             api_base=api.api_base,
             api_key=api.api_key,
             max_tokens=api.max_tokens,
             temperature=api.temperature,
-            is_current=api.id == current_id,
-            is_default=api.id == default_id,
-            supports_multimodal=api.supports_multimodal
+            is_current=api.api == current_api,
+            supports_multimodal=api.supports_multimodal,
+            supports_tools=api.supports_tools
         ))
     
     return {"status": 200, "data": result}
 
 
-@router.get("/current-model")
-async def get_current_model():
-    """获取当前使用的模型"""
-    api_id = api_manager.get_current_api_id()
-    entry = conf.get_api_by_id(api_id)
+@router.get("/current-api")
+async def get_current_api():
+    """获取当前使用的 API 厂商"""
+    api_name = api_manager.get_current_api()
+    entry = conf.get_api_by_name(api_name)
     if not entry:
         return {"status": 404, "data": None}
     
-    return {"status": 200, "data": ModelInfo(
-        id=entry.id,
-        name=entry.name,
+    return {"status": 200, "data": ApiInfo(
+        api=entry.api,
         model=entry.model,
         api_base=entry.api_base,
         api_key=entry.api_key,
         max_tokens=entry.max_tokens,
         temperature=entry.temperature,
         is_current=True,
-        is_default=api_id == conf.get_default_api_id(),
-        supports_multimodal=entry.supports_multimodal
+        supports_multimodal=entry.supports_multimodal,
+        supports_tools=entry.supports_tools
     )}
+
+
+@router.post("/switch-api")
+async def switch_api(req: SwitchApiRequest):
+    """切换当前使用的 API 厂商"""
+    if not conf.get_api_by_name(req.api):
+        return {"status": 400, "data": f"未找到 API 厂商: {req.api}"}
+    
+    success = api_manager.set_current_api(req.api)
+    if success:
+        entry = conf.get_api_by_name(req.api)
+        return {"status": 200, "data": f"已切换到 API 厂商: {entry.api}，当前模型: {entry.model}"}
+    else:
+        return {"status": 500, "data": "切换 API 厂商失败"}
+
+
+@router.get("/current-model")
+async def get_current_model():
+    """获取当前使用的模型"""
+    api_name = api_manager.get_current_api()
+    model = api_manager.get_current_model()
+    return {"status": 200, "data": {"api": api_name, "model": model}}
 
 
 @router.post("/switch-model")
 async def switch_model(req: SwitchModelRequest):
-    """切换当前使用的模型"""
-    if not conf.get_api_by_id(req.api_id):
-        return {"status": 400, "data": f"未找到模型: {req.api_id}"}
-    
-    success = api_manager.set_current_api_id(req.api_id)
+    """切换当前 API 厂商使用的模型"""
+    success = api_manager.set_current_model(req.model)
     if success:
-        entry = conf.get_api_by_id(req.api_id)
-        return {"status": 200, "data": f"已切换到模型: {entry.name} ({entry.model})"}
+        return {"status": 200, "data": f"已切换到模型: {req.model}"}
     else:
         return {"status": 500, "data": "切换模型失败"}
 
@@ -276,7 +298,7 @@ async def delete_saved_persona(req: DeleteSavedPersonaRequest):
 class ApiConfigUpdate(BaseModel):
     """更新 API 配置请求"""
     apis: List[ApiEntry]
-    default_api: str
+    current_api: str
 
 
 @router.get("/config")
@@ -359,46 +381,46 @@ async def get_groups():
         return {"status": 500, "data": str(e)}
 
 
-class AddModelRequest(BaseModel):
-    """添加模型请求"""
-    id: str
-    name: str
+class AddApiRequest(BaseModel):
+    """添加 API 厂商请求"""
+    api: str
     api_base: str
     api_key: str
     model: str
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
+    max_tokens: int = 8192
+    temperature: float = 0.7
     supports_multimodal: Optional[bool] = None
+    supports_tools: Optional[bool] = True
 
 
-class UpdateModelRequest(BaseModel):
-    """更新模型请求"""
-    name: Optional[str] = None
+class UpdateApiRequest(BaseModel):
+    """更新 API 厂商请求"""
     api_base: Optional[str] = None
     api_key: Optional[str] = None
     model: Optional[str] = None
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     supports_multimodal: Optional[bool] = None
+    supports_tools: Optional[bool] = None
 
 
-@router.post("/add-model")
-async def add_model(req: AddModelRequest):
-    """添加新模型"""
-    # 检查 ID 是否已存在
-    if conf.get_api_by_id(req.id):
-        return {"status": 400, "data": f"模型 ID '{req.id}' 已存在"}
+@router.post("/add-api")
+async def add_api(req: AddApiRequest):
+    """添加新 API 厂商"""
+    # 检查 api 是否已存在
+    if conf.get_api_by_name(req.api):
+        return {"status": 400, "data": f"API 厂商 '{req.api}' 已存在"}
     
     # 创建新的 API Entry
     new_api = ApiEntry(
-        id=req.id,
-        name=req.name,
+        api=req.api,
         api_base=req.api_base,
         api_key=req.api_key,
         model=req.model,
         max_tokens=req.max_tokens,
         temperature=req.temperature,
-        supports_multimodal=req.supports_multimodal
+        supports_multimodal=req.supports_multimodal,
+        supports_tools=req.supports_tools
     )
     
     # 添加到配置
@@ -408,22 +430,20 @@ async def add_model(req: AddModelRequest):
         # 保存配置
         from hoshino.config import save_plugin_config
         save_plugin_config("aichat", conf)
-        return {"status": 200, "data": f"模型 '{req.name}' 添加成功"}
+        return {"status": 200, "data": f"API 厂商 '{req.api}' 添加成功"}
     except Exception as e:
-        logger.exception(f"添加模型失败: {e}")
+        logger.exception(f"添加 API 厂商失败: {e}")
         return {"status": 500, "data": f"保存配置失败: {str(e)}"}
 
 
-@router.post("/update-model/{model_id}")
-async def update_model(model_id: str, req: UpdateModelRequest):
-    """更新模型配置"""
-    api_entry = conf.get_api_by_id(model_id)
+@router.post("/update-api/{api_name}")
+async def update_api(api_name: str, req: UpdateApiRequest):
+    """更新 API 厂商配置"""
+    api_entry = conf.get_api_by_name(api_name)
     if not api_entry:
-        return {"status": 404, "data": f"未找到模型: {model_id}"}
+        return {"status": 404, "data": f"未找到 API 厂商: {api_name}"}
     
-    # 更新字段（空字符串表示不修改）
-    if req.name is not None:
-        api_entry.name = req.name
+    # 更新字段
     if req.api_base is not None:
         api_entry.api_base = req.api_base
     if req.api_key is not None and req.api_key.strip() != "":
@@ -436,58 +456,39 @@ async def update_model(model_id: str, req: UpdateModelRequest):
         api_entry.temperature = req.temperature
     if req.supports_multimodal is not None:
         api_entry.supports_multimodal = req.supports_multimodal
+    if req.supports_tools is not None:
+        api_entry.supports_tools = req.supports_tools
     
     try:
         from hoshino.config import save_plugin_config
         save_plugin_config("aichat", conf)
-        return {"status": 200, "data": f"模型 '{api_entry.name}' 更新成功"}
+        return {"status": 200, "data": f"API 厂商 '{api_entry.api}' 更新成功"}
     except Exception as e:
-        logger.exception(f"更新模型失败: {e}")
+        logger.exception(f"更新 API 厂商失败: {e}")
         return {"status": 500, "data": f"保存配置失败: {str(e)}"}
 
 
-@router.post("/delete-model/{model_id}")
-async def delete_model(model_id: str):
-    """删除模型"""
-    api_entry = conf.get_api_by_id(model_id)
+@router.post("/delete-api/{api_name}")
+async def delete_api(api_name: str):
+    """删除 API 厂商"""
+    api_entry = conf.get_api_by_name(api_name)
     if not api_entry:
-        return {"status": 404, "data": f"未找到模型: {model_id}"}
+        return {"status": 404, "data": f"未找到 API 厂商: {api_name}"}
     
-    # 不能删除当前正在使用的模型
-    current_id = api_manager.get_current_api_id()
-    if model_id == current_id:
-        return {"status": 400, "data": "不能删除当前正在使用的模型，请先切换到其他模型"}
-    
-    # 不能删除默认模型
-    if model_id == conf.get_default_api_id():
-        return {"status": 400, "data": "不能删除默认模型，请先将其他模型设为默认"}
+    # 不能删除当前正在使用的 API 厂商
+    current_api = api_manager.get_current_api()
+    if api_name == current_api:
+        return {"status": 400, "data": "不能删除当前正在使用的 API 厂商，请先切换到其他厂商"}
     
     # 从列表中移除
-    conf.apis = [a for a in conf.apis if a.id != model_id]
+    conf.apis = [a for a in conf.apis if a.api != api_name]
     
     try:
         from hoshino.config import save_plugin_config
         save_plugin_config("aichat", conf)
-        return {"status": 200, "data": f"模型 '{api_entry.name}' 删除成功"}
+        return {"status": 200, "data": f"API 厂商 '{api_entry.api}' 删除成功"}
     except Exception as e:
-        logger.exception(f"删除模型失败: {e}")
-        return {"status": 500, "data": f"保存配置失败: {str(e)}"}
-
-
-@router.post("/set-default-model/{model_id}")
-async def set_default_model(model_id: str):
-    """设置默认模型"""
-    if not conf.get_api_by_id(model_id):
-        return {"status": 404, "data": f"未找到模型: {model_id}"}
-    
-    conf.default_api = model_id
-    
-    try:
-        from hoshino.config import save_plugin_config
-        save_plugin_config("aichat", conf)
-        return {"status": 200, "data": f"已将模型设为默认"}
-    except Exception as e:
-        logger.exception(f"设置默认模型失败: {e}")
+        logger.exception(f"删除 API 厂商失败: {e}")
         return {"status": 500, "data": f"保存配置失败: {str(e)}"}
 
 

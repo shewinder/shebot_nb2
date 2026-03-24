@@ -126,8 +126,8 @@ function Aichat() {
       ])
       setModels(modelsData || [])
       setCurrentModel(currentData)
-      if (currentData) {
-        setSelectedModel(currentData.id)
+      if (currentData?.api) {
+        setSelectedModel(currentData.api)
       }
     } catch (error) {
       message.error('加载模型列表失败: ' + error.message)
@@ -318,16 +318,16 @@ function Aichat() {
   }
 
   const handleSwitchModel = async () => {
-    if (!selectedModel || selectedModel === currentModel?.id) {
-      message.info('请选择不同的模型')
+    if (!selectedModel || selectedModel === currentModel?.api) {
+      message.info('请选择不同的 API 厂商')
       return
     }
     try {
-      const result = await aichatApi.switchModel(selectedModel)
-      message.success(result)
+      const result = await aichatApi.switchApi(selectedModel)
+      message.success(result.data || '切换成功')
       await fetchModels()
     } catch (error) {
-      message.error('切换模型失败: ' + error.message)
+      message.error('切换 API 厂商失败: ' + error.message)
     }
   }
 
@@ -443,7 +443,10 @@ function Aichat() {
     modelForm.resetFields()
     // 设置默认值
     modelForm.setFieldsValue({
-      supports_multimodal: false
+      supports_multimodal: false,
+      supports_tools: true,
+      max_tokens: 8192,
+      temperature: 0.7
     })
     setModelModalVisible(true)
   }
@@ -451,18 +454,18 @@ function Aichat() {
   // 打开编辑模型弹窗
   const openEditModelModal = (model) => {
     setModelModalMode('edit')
-    setEditingModelId(model.id)
+    setEditingModelId(model.api)
     // 先重置表单，避免上次状态干扰
     modelForm.resetFields()
     // 直接显示真实 api_key
     modelForm.setFieldsValue({
-      name: model.name,
       api_base: model.api_base,
       api_key: model.api_key || '',
       model: model.model,
       max_tokens: model.max_tokens !== undefined && model.max_tokens !== null ? model.max_tokens : undefined,
       temperature: model.temperature !== undefined && model.temperature !== null ? model.temperature : undefined,
-      supports_multimodal: model.supports_multimodal || false
+      supports_multimodal: model.supports_multimodal || false,
+      supports_tools: model.supports_tools !== false
     })
     setModelModalVisible(true)
   }
@@ -471,40 +474,40 @@ function Aichat() {
   const handleModelSubmit = async (values) => {
     try {
       if (modelModalMode === 'add') {
-        // 添加新模型
-        const result = await aichatApi.addAichatModel(values)
+        // 添加新 API 厂商
+        const result = await aichatApi.addAichatApi(values)
         message.success(result.data || '添加成功')
       } else {
-        // 编辑模型：直接提交所有值（已显示真实 api_key）
-        const result = await aichatApi.updateAichatModel(editingModelId, values)
+        // 编辑 API 厂商：直接提交所有值（已显示真实 api_key）
+        const result = await aichatApi.updateAichatApi(editingModelId, values)
         message.success(result.data || '更新成功')
       }
       setModelModalVisible(false)
       await fetchModels()
     } catch (error) {
-      message.error(modelModalMode === 'add' ? '添加模型失败: ' : '更新模型失败: ' + error.message)
+      message.error(modelModalMode === 'add' ? '添加 API 厂商失败: ' : '更新 API 厂商失败: ' + error.message)
     }
   }
 
   // 删除模型
-  const handleDeleteModel = async (modelId) => {
+  const handleDeleteModel = async (apiName) => {
     try {
-      const result = await aichatApi.deleteAichatModel(modelId)
+      const result = await aichatApi.deleteAichatApi(apiName)
       message.success(result.data || '删除成功')
       await fetchModels()
     } catch (error) {
-      message.error('删除模型失败: ' + error.message)
+      message.error('删除 API 厂商失败: ' + error.message)
     }
   }
 
-  // 设置默认模型
-  const handleSetDefaultModel = async (modelId) => {
+  // 设置默认模型（切换到该 API 厂商）
+  const handleSetDefaultModel = async (apiName) => {
     try {
-      const result = await aichatApi.setDefaultAichatModel(modelId)
-      message.success(result.data || '设置成功')
+      const result = await aichatApi.switchApi(apiName)
+      message.success(result.data || '切换成功')
       await fetchModels()
     } catch (error) {
-      message.error('设置默认模型失败: ' + error.message)
+      message.error('切换 API 厂商失败: ' + error.message)
     }
   }
 
@@ -536,11 +539,11 @@ function Aichat() {
 
       <Tabs defaultActiveKey="models">
         <TabPane
-          tab={<span><RobotOutlined /> 模型管理</span>}
+          tab={<span><RobotOutlined /> API 厂商管理</span>}
           key="models"
         >
           <Card
-            title="当前模型"
+            title="当前 API 厂商"
             extra={
               <Space>
                 <Button icon={<PlusOutlined />} type="primary" onClick={openAddModelModal}>
@@ -552,49 +555,45 @@ function Aichat() {
               </Space>
             }
           >
-            {currentModel ? (
+            {currentModel?.api ? (
               <Descriptions bordered column={2}>
+                <Descriptions.Item label="API 厂商">
+                  <Tag color="blue">{currentModel.api}</Tag>
+                </Descriptions.Item>
                 <Descriptions.Item label="模型名称">
-                  <Tag color="blue">{currentModel.name}</Tag>
+                  <code>{currentModel.model}</code>
                 </Descriptions.Item>
-                <Descriptions.Item label="模型ID">
-                  <code>{currentModel.id}</code>
-                </Descriptions.Item>
-                <Descriptions.Item label="模型类型">{currentModel.model}</Descriptions.Item>
-                <Descriptions.Item label="API 地址">{currentModel.api_base}</Descriptions.Item>
                 <Descriptions.Item label="状态">
-                  {currentModel.is_current && <Tag color="green">当前使用</Tag>}
-                  {currentModel.is_default && <Tag color="orange">默认</Tag>}
+                  <Tag color="green">当前使用</Tag>
                 </Descriptions.Item>
               </Descriptions>
             ) : (
-              <Empty description="未配置模型" />
+              <Empty description="未配置 API 厂商" />
             )}
           </Card>
 
-          <Card title="切换模型" style={{ marginTop: 16 }}>
+          <Card title="切换 API 厂商" style={{ marginTop: 16 }}>
             <Space>
-              <Text>选择模型:</Text>
+              <Text>选择 API 厂商:</Text>
               <Select
-                style={{ width: 250 }}
+                style={{ width: 300 }}
                 value={selectedModel}
                 onChange={setSelectedModel}
-                placeholder="请选择模型"
+                placeholder="请选择 API 厂商"
               >
                 {models.map(model => (
-                  <Option key={model.id} value={model.id}>
-                    {model.name} ({model.model})
+                  <Option key={model.api} value={model.api}>
+                    {model.api} ({model.model})
                     {model.is_current && ' [当前]'}
-                    {model.is_default && ' [默认]'}
                   </Option>
                 ))}
               </Select>
               <Button
                 type="primary"
                 onClick={handleSwitchModel}
-                disabled={!selectedModel || selectedModel === currentModel?.id}
+                disabled={!selectedModel || selectedModel === currentModel?.api}
               >
-                切换模型
+                切换 API 厂商
               </Button>
             </Space>
           </Card>
@@ -631,8 +630,8 @@ function Aichat() {
             </Card>
           )}
 
-          {/* 模型列表 */}
-          <Card title="模型列表" style={{ marginTop: 16 }}>
+          {/* API 厂商列表 */}
+          <Card title="API 厂商列表" style={{ marginTop: 16 }}>
             <List
               bordered
               dataSource={models}
@@ -646,10 +645,10 @@ function Aichat() {
                     >
                       编辑
                     </Button>,
-                    !item.is_current && !item.is_default && (
+                    !item.is_current && (
                       <Popconfirm
-                        title="确定要删除这个模型吗？"
-                        onConfirm={() => handleDeleteModel(item.id)}
+                        title="确定要删除这个 API 厂商吗？"
+                        onConfirm={() => handleDeleteModel(item.api)}
                         okText="确定"
                         cancelText="取消"
                       >
@@ -658,13 +657,13 @@ function Aichat() {
                         </Button>
                       </Popconfirm>
                     ),
-                    !item.is_default && (
+                    !item.is_current && (
                       <Button
                         type="link"
                         icon={<SettingOutlined />}
-                        onClick={() => handleSetDefaultModel(item.id)}
+                        onClick={() => handleSetDefaultModel(item.api)}
                       >
-                        设为默认
+                        切换到此厂商
                       </Button>
                     )
                   ].filter(Boolean)}
@@ -672,21 +671,20 @@ function Aichat() {
                   <List.Item.Meta
                     title={
                       <Space>
-                        <span>{item.name}</span>
+                        <span>{item.api}</span>
                         {item.is_current && <Tag color="green">当前使用</Tag>}
-                        {item.is_default && <Tag color="orange">默认</Tag>}
                       </Space>
                     }
                     description={
                       <Space direction="vertical" size={0} style={{ fontSize: 12 }}>
-                        <span>ID: <code>{item.id}</code></span>
                         <span>模型: {item.model}</span>
-                        <span>API: {item.api_base}</span>
+                        <span>API地址: {item.api_base}</span>
                         <span>密钥: <code style={{ color: '#f59e0b' }}>{item.api_key}</code></span>
                         <span>
                           温度: {item.temperature ?? '默认'} | 
                           MaxTokens: {item.max_tokens ?? '默认'} | 
-                          多模态: {item.supports_multimodal ? '是' : '否'}
+                          多模态: {item.supports_multimodal ? '是' : '否'} |
+                          Tools: {item.supports_tools !== false ? '是' : '否'}
                         </span>
                       </Space>
                     }
@@ -1368,9 +1366,9 @@ function Aichat() {
         />
       </Modal>
 
-      {/* 添加/编辑模型弹窗 */}
+      {/* 添加/编辑 API 厂商弹窗 */}
       <Modal
-        title={modelModalMode === 'add' ? '添加新模型' : '编辑模型'}
+        title={modelModalMode === 'add' ? '添加新 API 厂商' : '编辑 API 厂商'}
         open={modelModalVisible}
         onCancel={() => setModelModalVisible(false)}
         onOk={() => modelForm.submit()}
@@ -1383,21 +1381,14 @@ function Aichat() {
         >
           {modelModalMode === 'add' && (
             <Form.Item
-              name="id"
-              label="模型ID"
-              rules={[{ required: true, message: '请输入模型ID' }]}
-              extra="唯一标识，不可重复，建议使用英文和下划线"
+              name="api"
+              label="厂商标识"
+              rules={[{ required: true, message: '请输入厂商标识' }]}
+              extra="唯一标识，不可重复，建议使用英文和下划线，如：deepseek, kimi, gpt4"
             >
               <Input placeholder="例如：deepseek, gpt4, kimi" />
             </Form.Item>
           )}
-          <Form.Item
-            name="name"
-            label="显示名称"
-            rules={[{ required: true, message: '请输入显示名称' }]}
-          >
-            <Input placeholder="例如：DeepSeek, GPT-4, Kimi" />
-          </Form.Item>
           <Form.Item
             name="api_base"
             label="API 地址"
@@ -1416,29 +1407,37 @@ function Aichat() {
             name="model"
             label="模型名称"
             rules={[{ required: true, message: '请输入模型名称' }]}
-            extra="具体的模型版本名称"
+            extra="具体的模型版本名称，如：deepseek-chat, gpt-4, kimi-latest"
           >
             <Input placeholder="例如：deepseek-chat, gpt-4, kimi-latest" />
           </Form.Item>
           <Form.Item
             name="max_tokens"
             label="最大 Tokens"
-            extra="留空则使用全局默认设置"
+            extra="模型生成的最大 token 数"
           >
-            <InputNumber style={{ width: '100%' }} min={1} max={32768} placeholder="8192" />
+            <InputNumber style={{ width: '100%' }} min={1} max={32768} />
           </Form.Item>
           <Form.Item
             name="temperature"
             label="温度 (Temperature)"
-            extra="留空则使用全局默认设置，范围 0-2"
+            extra="控制输出的随机性，范围 0-2，值越大输出越随机"
           >
-            <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} placeholder="0.7" />
+            <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} />
           </Form.Item>
           <Form.Item
             name="supports_multimodal"
             label="支持多模态"
             valuePropName="checked"
             extra="是否支持图片识别功能"
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            name="supports_tools"
+            label="支持 Tools/Function Calling"
+            valuePropName="checked"
+            extra="是否支持工具调用/函数调用功能（如生图等）"
           >
             <Switch />
           </Form.Item>

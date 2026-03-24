@@ -34,14 +34,35 @@ export const getProjectInfo = () => request.get('/get_project_info')
 export const getConfig = () => request.get('/get_config')
 
 // ===== AI Chat API =====
-// 获取所有模型
-export const getAichatModels = () => request.get('/aichat/models')
+// 获取所有 API 厂商（模型列表）
+export const getAichatApis = () => request.get('/aichat/apis')
+
+// 获取所有模型列表（兼容命名，实际返回 API 列表）
+export const getAichatModels = () => request.get('/aichat/apis')
+
+// 添加新模型（API 厂商）
+export const addAichatModel = (data) => request.post('/aichat/add-api', data)
+
+// 更新模型（API 厂商）
+export const updateAichatModel = (modelId, data) => request.post(`/aichat/update-api/${modelId}`, data)
+
+// 删除模型（API 厂商）
+export const deleteAichatModel = (modelId) => request.post(`/aichat/delete-api/${modelId}`)
+
+// 设置默认模型（切换到该 API 厂商）
+export const setDefaultAichatModel = (modelId) => request.post('/aichat/switch-api', { api: modelId })
+
+// 获取当前 API 厂商
+export const getCurrentApi = () => request.get('/aichat/current-api')
+
+// 切换 API 厂商
+export const switchApi = (api) => request.post('/aichat/switch-api', { api })
 
 // 获取当前模型
 export const getCurrentModel = () => request.get('/aichat/current-model')
 
-// 切换模型
-export const switchModel = (api_id) => request.post('/aichat/switch-model', { api_id })
+// 切换模型（在当前 API 下）
+export const switchModel = (model) => request.post('/aichat/switch-model', { model })
 
 // 获取人格设置
 export const getAichatPersonas = (group_id, user_id) => {
@@ -102,17 +123,14 @@ export const updateAichatConfig = (config) => request.post('/aichat/update-confi
 // 获取超级用户列表
 export const getSuperusers = () => request.get('/aichat/superusers')
 
-// 添加新模型
-export const addAichatModel = (data) => request.post('/aichat/add-model', data)
+// 添加新 API 厂商
+export const addAichatApi = (data) => request.post('/aichat/add-api', data)
 
-// 更新模型
-export const updateAichatModel = (modelId, data) => request.post(`/aichat/update-model/${modelId}`, data)
+// 更新 API 厂商
+export const updateAichatApi = (apiName, data) => request.post(`/aichat/update-api/${apiName}`, data)
 
-// 删除模型
-export const deleteAichatModel = (modelId) => request.post(`/aichat/delete-model/${modelId}`)
-
-// 设置默认模型
-export const setDefaultAichatModel = (modelId) => request.post(`/aichat/set-default-model/${modelId}`)
+// 删除 API 厂商
+export const deleteAichatApi = (apiName) => request.post(`/aichat/delete-api/${apiName}`)
 
 // ===== 全局预设人格 API =====
 // 获取全局预设人格列表

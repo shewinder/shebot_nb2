@@ -40,10 +40,13 @@ sv = Service('aichat', help_='''AI聊天插件
   列出人格  查看已保存的人格
   查看人格  查看当前生效的人格
   清除人格  清除用户人格设置
+API管理：
+  列出API  查看可用API厂商
+  当前API  查看当前API厂商
+  切换API [名称]  切换API厂商（超管）
 模型管理：
-  列出模型  查看可用模型
-  当前模型  查看当前模型
-  切换模型 [名称/id]  切换模型（超管）
+  当前模型  查看当前使用的模型
+  切换模型 [模型名]  切换当前API的模型（超管）
 工具功能（需要模型支持 Tool Calling）：
   支持画图、搜索等工具调用
   注意：在 config 中设置 supports_tools=true 启用
@@ -399,7 +402,7 @@ async def save_persona(bot: Bot, event: Event):
     """保存人格到用户的人格列表"""
     args = str(event.message).strip().split(maxsplit=2)
     if len(args) < 3:
-        await save_persona_cmd.finish(f"请提供人格名称和描述，例如：保存人格 猫娘 你是一个可爱的猫娘\n最多可保存 {conf.max_saved_personas} 个人格")
+        await save_persona_cmd.finish("请提供人格名称和描述，例如：保存人格 猫娘 你是一个可爱的猫娘")
         return
     
     name = args[1].strip()
@@ -431,13 +434,13 @@ async def list_personas(bot: Bot, event: Event):
     
     # 显示用户保存的人格
     if saved_personas:
-        lines.append(f"📁 已保存的人格（{len(saved_personas)}/{conf.max_saved_personas}）：")
+        lines.append(f"📁 已保存的人格（{len(saved_personas)} 个）：")
         for i, (name, persona) in enumerate(saved_personas.items(), 1):
             # 截断过长的描述
             preview = persona[:50] + "..." if len(persona) > 50 else persona
             lines.append(f"  {i}. {name}: {preview}")
     else:
-        lines.append(f"📁 已保存的人格（0/{conf.max_saved_personas}）：无")
+        lines.append("📁 已保存的人格（0 个）：无")
         lines.append("  使用「保存人格 名称 描述」或「导入角色卡」来添加")
     
     # 显示全局预设人格
@@ -511,63 +514,96 @@ async def delete_persona(bot: Bot, event: Event):
     success, msg = persona_manager.delete_saved_persona(user_id, group_id, name)
     await delete_persona_cmd.finish(msg)
 
-# ========== 列出模型命令 ==========
-list_models_cmd = sv.on_command('列出模型', aliases=('模型列表', '可用模型'), only_group=False)
+# ========== 列出API命令 ==========
+list_apis_cmd = sv.on_command('列出API', aliases=('API列表', '可用API'), only_group=False)
 
-@list_models_cmd.handle()
-async def list_models(bot: Bot, event: Event):
-    """列出已配置的大模型 API"""
-    apis = conf.get_api_list()
+@list_apis_cmd.handle()
+async def list_apis(bot: Bot, event: Event):
+    """列出已配置的 API 厂商"""
+    apis = conf.get_apis()
     if not apis:
-        await list_models_cmd.finish("未配置任何大模型 API，请联系管理员在 config/aichat.json 中配置 apis")
+        await list_apis_cmd.finish("未配置任何 API 厂商，请联系管理员在 config/aichat.json 中配置 apis")
         return
-    default_id = conf.get_default_api_id()
-    current_id = api_manager.get_current_api_id()
-    lines = ["已配置的大模型："]
+    current_api = api_manager.get_current_api()
+    lines = ["已配置的 API 厂商："]
     for i, a in enumerate(apis, 1):
-        mark = " (当前)" if a.id == current_id else (" (默认)" if a.id == default_id else "")
-        lines.append(f"{i}. {a.name}（id: {a.id}）{mark} - {a.model}")
-    lines.append("\n超级用户可使用「切换模型 id」或「切换模型 名称」切换全局使用的模型")
-    await list_models_cmd.finish("\n".join(lines))
+        mark = " (当前)" if a.api == current_api else ""
+        lines.append(f"{i}. {a.api}{mark} - 模型: {a.model}")
+    lines.append("\n超级用户可使用「切换API 厂商名」切换 API 厂商")
+    await list_apis_cmd.finish("\n".join(lines))
 
-# ========== 切换模型命令（仅超级用户） ==========
-switch_model_cmd = sv.on_command('切换模型', aliases=('选择模型', '切换大模型'), permission=SUPERUSER, only_group=False)
+# ========== 切换API命令（仅超级用户） ==========
+switch_api_cmd = sv.on_command('切换API', aliases=('切换厂商', '选择API'), permission=SUPERUSER, only_group=False)
 
-@switch_model_cmd.handle()
-async def switch_model(bot: Bot, event: Event):
-    """切换全局使用的大模型（仅超级用户）"""
+@switch_api_cmd.handle()
+async def switch_api(bot: Bot, event: Event):
+    """切换当前使用的 API 厂商（仅超级用户）"""
     args = str(event.message).strip().split(maxsplit=1)
     if len(args) < 2:
-        await switch_model_cmd.finish("请指定模型 id 或名称，例如：切换模型 kimi\n使用「列出模型」查看可用模型")
+        await switch_api_cmd.finish("请指定 API 厂商名称，例如：切换API kimi\n使用「列出API」查看可用厂商")
         return
-    key = args[1].strip()
-    apis = conf.get_api_list()
+    api_name = args[1].strip()
+    apis = conf.get_apis()
     if not apis:
-        await switch_model_cmd.finish("未配置任何大模型 API，请联系管理员在 config/aichat.json 中配置 apis")
+        await switch_api_cmd.finish("未配置任何 API 厂商，请联系管理员在 config/aichat.json 中配置 apis")
         return
     target = None
     for a in apis:
-        if a.id == key or a.name == key:
+        if a.api == api_name:
             target = a
             break
     if not target:
-        await switch_model_cmd.finish(f"未找到模型「{key}」，使用「列出模型」查看可用模型")
+        await switch_api_cmd.finish(f"未找到 API 厂商「{api_name}」，使用「列出API」查看可用厂商")
         return
-    api_manager.set_current_api_id(target.id)
-    await switch_model_cmd.finish(f"已切换全局模型为：{target.name}（{target.model}）")
+    api_manager.set_current_api(target.api)
+    await switch_api_cmd.finish(f"已切换 API 厂商为：{target.api}\n当前模型：{target.model}")
+
+# ========== 当前API命令 ==========
+current_api_cmd = sv.on_command('当前API', aliases=('查看API', '当前厂商'), only_group=False)
+
+@current_api_cmd.handle()
+async def current_api(bot: Bot, event: Event):
+    """查看当前使用的 API 厂商"""
+    api_name = api_manager.get_current_api()
+    entry = conf.get_api_by_name(api_name)
+    if not entry:
+        await current_api_cmd.finish("当前未选择有效 API 厂商，超级用户可使用「切换API」进行设置")
+        return
+    await current_api_cmd.finish(f"当前 API 厂商：{entry.api}\n当前模型：{entry.model}")
+
+# ========== 切换模型命令（仅超级用户） ==========
+switch_model_cmd = sv.on_command('切换模型', aliases=('选择模型', '设置模型'), permission=SUPERUSER, only_group=False)
+
+@switch_model_cmd.handle()
+async def switch_model(bot: Bot, event: Event):
+    """切换当前 API 厂商使用的模型（仅超级用户）"""
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await switch_model_cmd.finish("请指定模型名称，例如：切换模型 kimi-k2.5")
+        return
+    model_name = args[1].strip()
+    
+    current_api = api_manager.get_current_api()
+    entry = conf.get_api_by_name(current_api)
+    if not entry:
+        await switch_model_cmd.finish("当前 API 厂商无效")
+        return
+    
+    old_model = entry.model
+    if api_manager.set_current_model(model_name):
+        await switch_model_cmd.finish(f"已切换模型：{old_model} → {model_name}\n当前 API 厂商：{current_api}")
+    else:
+        await switch_model_cmd.finish("切换模型失败")
 
 # ========== 当前模型命令 ==========
 current_model_cmd = sv.on_command('当前模型', aliases=('查看模型', '当前大模型'), only_group=False)
 
 @current_model_cmd.handle()
 async def current_model(bot: Bot, event: Event):
-    """查看当前全局使用的大模型"""
-    api_id = api_manager.get_current_api_id()
-    entry = conf.get_api_by_id(api_id)
-    if not entry:
-        await current_model_cmd.finish("当前未选择有效模型，超级用户可使用「切换模型」进行设置")
-        return
-    await current_model_cmd.finish(f"当前全局使用：{entry.name}（id: {entry.id}）\n模型：{entry.model}")
+    """查看当前使用的模型"""
+    api_name = api_manager.get_current_api()
+    model_name = api_manager.get_current_model()
+    await current_model_cmd.finish(f"当前 API 厂商：{api_name}\n当前模型：{model_name}")
 
 
 # ========== 全局预设人格管理命令（仅超级用户） ==========

@@ -170,19 +170,12 @@ class PersonaManager:
         
         user_personas = self.saved_personas[user_key]
         
-        # 如果名称已存在，直接更新
-        if name in user_personas:
-            user_personas[name] = persona.strip()
-            self.save_saved_personas()
-            return True, f"人格 '{name}' 已更新"
-        
-        # 检查是否超过最大数量
-        if len(user_personas) >= conf.max_saved_personas:
-            return False, f"已保存 {len(user_personas)} 个人格，最多只能保存 {conf.max_saved_personas} 个。请先删除一些人格或使用已有名称更新。"
-        
-        # 保存新人格
+        # 保存人格（更新或新增）
+        is_update = name in user_personas
         user_personas[name] = persona.strip()
         self.save_saved_personas()
+        if is_update:
+            return True, f"人格 '{name}' 已更新"
         return True, f"人格 '{name}' 已保存"
     
     def get_saved_personas(self, user_id: int, group_id: Optional[int] = None) -> Dict[str, str]:

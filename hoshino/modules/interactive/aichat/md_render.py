@@ -5,7 +5,7 @@ Markdown 渲染为图片模块
 import os
 import re
 from io import BytesIO
-from typing import Optional
+from typing import List, Optional
 
 from loguru import logger
 
