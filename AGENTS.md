@@ -41,6 +41,14 @@ web_password=shebot           # Web 管理面板密码
 
 ## 项目规范
 
+### 工作准则
+
+**⚠️ 重要：未经明确指令，不要执行 `git commit`**
+
+- 只有用户明确说 "commit" 或 "提交" 时才执行代码提交
+- 完成代码修改后，等待用户确认再提交
+- 不要在用户未要求的情况下主动提交代码
+
 ### 核心原则：先查现有代码
 
 **在编写任何新代码前，必须先研究项目中已有的代码实践。**
@@ -61,6 +69,7 @@ grep -r "Service(" hoshino/modules/ | head -10
 - ❌ `log.new_logger()` - 本项目使用 `sv.logger`
 - ❌ 臆造参数如 `manage_perm=0` - 应使用 `permission.py` 常量
 - ❌ 假设通用 NoneBot2 文档完全适用 - 本项目有额外封装
+- ❌ `for x: Type in iterable:` - Python 不支持在 for 语句中给循环变量加类型注解，会导致 `SyntaxError`
 
 ### 服务模式标准写法
 
@@ -144,6 +153,59 @@ from hoshino.permission import ADMIN, NORMAL, SUPERUSER
 ```python
 from hoshino.config import save_plugin_config
 save_plugin_config("aichat", conf)  # 保存后立即生效
+```
+
+**类型注解（Typing）：**
+- 函数参数和返回值必须添加类型注解
+- 变量推导类型不清晰时添加注解（如 `state.get()` 返回值）
+- 容器类型使用泛型：`List[str]`, `Dict[str, int]`, `Optional[Model]`
+- ❌ 禁止 `for x: Type in iterable:` 语法错误
+
+```python
+from typing import List, Optional, Dict, Tuple
+
+def get_models(api: str) -> List[str]:
+    models: List[str] = state.get('models', [])
+    target: Optional[str] = None
+    return models
+```
+
+**交互式命令（多步对话）：**
+使用 `got` 方法实现等待用户输入：
+
+```python
+from hoshino.typing import T_State
+
+cmd = sv.on_command('选择')
+
+@cmd.handle()
+async def handle(bot: Bot, event: Event, state: T_State):
+    await cmd.send("请发送选项序号")
+    # 可选：预存数据到 state
+    state['options'] = ['a', 'b', 'c']
+
+@cmd.got('choice', prompt='请发送序号')  # 参数名 + 提示语
+async def got_choice(bot: Bot, event: Event, state: T_State):
+    choice = str(state['choice']).strip()
+    if choice == '取消':
+        await cmd.finish("已取消")
+    options: List[str] = state.get('options', [])
+    # 处理选择...
+```
+
+**NoneBot 异常处理：**
+- `FinishedException` - 调用 `matcher.finish()` 后抛出，用于结束命令流程，**不是错误**
+- 不要在 `except Exception` 中记录 `FinishedException` 为错误
+
+```python
+from nonebot.exception import FinishedException
+
+try:
+    await matcher.finish("消息")  # 会抛出 FinishedException
+except FinishedException:
+    raise  # 重新抛出，正常流程
+except Exception as e:
+    logger.error(f"真正错误: {e}")
 ```
 
 ### Playwright 浏览器自动化

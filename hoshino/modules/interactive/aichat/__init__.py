@@ -2,10 +2,11 @@
 AI Chat插件
 支持以#开头的消息触发AI对话，支持session管理、人格管理和多模态
 """
-from typing import Tuple
+from typing import Tuple, List, Optional
 from loguru import logger
 from hoshino import Bot, Event, Service
 from hoshino.permission import ADMIN, SUPERUSER
+from hoshino.typing import T_State
 
 from .api import api_manager
 from .chat import call_ai_api, download_image_to_base64, handle_ai_chat
@@ -43,7 +44,7 @@ sv = Service('aichat', help_='''AI聊天插件
 API/模型管理：
   当前模型  查看当前API厂商和模型
   切换API [厂商名]  切换API厂商，无参数时列出可用厂商（超管）
-  切换模型 [模型名/序号]  切换模型，无参数时列出可用模型（超管）
+  切换模型  进入模型切换流程，自动获取可用模型列表（超管）
 工具功能（需要模型支持 Tool Calling）：
   支持画图、搜索等工具调用
   注意：在 config 中设置 supports_tools=true 启用
@@ -512,7 +513,7 @@ async def delete_persona(bot: Bot, event: Event):
     await delete_persona_cmd.finish(msg)
 
 # ========== 切换API命令（仅超级用户） ==========
-switch_api_cmd = sv.on_command('切换API', aliases=('切换厂商', '选择API'), permission=SUPERUSER, only_group=False)
+switch_api_cmd = sv.on_command('切换API', aliases=('切换厂商', '选择API', '切换api'), permission=SUPERUSER, only_group=False)
 
 @switch_api_cmd.handle()
 async def switch_api(bot: Bot, event: Event):
@@ -569,61 +570,134 @@ async def switch_api(bot: Bot, event: Event):
 switch_model_cmd = sv.on_command('切换模型', aliases=('选择模型', '设置模型'), permission=SUPERUSER, only_group=False)
 
 @switch_model_cmd.handle()
-async def switch_model(bot: Bot, event: Event):
+async def switch_model_handle(bot: Bot, event: Event, state: T_State):
     """切换当前 API 厂商使用的模型（仅超级用户）
     
-    无参数：从 API 获取可用模型列表并显示
-    有参数：切换到指定模型（支持序号或模型名）
+    流程：
+    1. 获取模型列表
+    2. 如有参数，用关键字过滤
+    3. 根据过滤结果决定：直接切换 / 显示列表交互 / 提示未找到
     """
-    args = str(event.message).strip().split(maxsplit=1)
-    
-    current_api = api_manager.get_current_api()
+    current_api: str = api_manager.get_current_api()
     entry = conf.get_api_by_name(current_api)
     if not entry:
         await switch_model_cmd.finish("当前 API 厂商无效")
         return
     
-    # 无参数：获取并显示可用模型列表
-    if len(args) < 2:
-        await switch_model_cmd.send(f"正在获取 {current_api} 支持的模型列表...")
-        try:
-            models = await api_manager.get_available_models()
-            if not models:
-                await switch_model_cmd.finish(f"无法获取 {current_api} 的模型列表，请直接输入模型名称切换\n当前配置模型：{entry.model}")
+    # 检查是否有关键字参数（如：切换模型 grok）
+    args: List[str] = str(event.message).strip().split(maxsplit=1)
+    keyword: Optional[str] = args[1].strip().lower() if len(args) >= 2 else None
+    
+    await switch_model_cmd.send(f"正在获取 {current_api} 支持的模型列表...")
+    
+    try:
+        models: List[str] = await api_manager.get_available_models()
+        if not models:
+            await switch_model_cmd.finish(f"无法获取 {current_api} 的模型列表\n当前配置模型：{entry.model}")
+            return
+        
+        # 如果有关键字，过滤模型列表
+        filtered_models: List[str] = models
+        if keyword:
+            filtered_models = [m for m in models if keyword in m.lower()]
+            if not filtered_models:
+                await switch_model_cmd.finish(f"未找到包含「{keyword}」的模型\n当前配置模型：{entry.model}")
                 return
-            
-            lines = [f"{current_api} 支持的模型（共 {len(models)} 个）："]
-            # 只显示前 20 个，避免消息过长
-            display_models = models[:20]
-            for i, m in enumerate(display_models, 1):
-                mark = " (当前)" if m == entry.model else ""
-                lines.append(f"{i}. {m}{mark}")
-            if len(models) > 20:
-                lines.append(f"... 还有 {len(models) - 20} 个模型")
-            lines.append(f"\n请输入「切换模型 序号」或「切换模型 模型名」")
-            await switch_model_cmd.finish("\n".join(lines))
-        except Exception as e:
-            logger.error(f"获取模型列表失败: {e}")
-            await switch_model_cmd.finish(f"获取模型列表失败，请直接输入模型名称切换\n当前配置模型：{entry.model}")
+        
+        # 缓存到 state
+        state['models'] = filtered_models
+        state['all_models'] = models  # 保留完整列表供参考
+        state['current_api'] = current_api
+        state['old_model'] = entry.model
+        state['keyword'] = keyword
+        
+        # 只有一个匹配，直接切换
+        if len(filtered_models) == 1:
+            target_model: str = filtered_models[0]
+            if api_manager.set_current_model(target_model):
+                await switch_model_cmd.finish(f"已切换模型：{entry.model} → {target_model}\n当前 API 厂商：{current_api}")
+            else:
+                await switch_model_cmd.finish("切换模型失败")
+            return
+        
+        # 显示模型列表（过滤后的或全部）
+        prefix: str = f"包含「{keyword}」" if keyword else ""
+        lines: List[str] = [f"{current_api} {prefix}支持的模型（共 {len(filtered_models)} 个）："]
+        
+        # 只显示前 20 个
+        display_models: List[str] = filtered_models[:20]
+        for i, m in enumerate(display_models, 1):
+            mark: str = " (当前)" if m == entry.model else ""
+            lines.append(f"{i}. {m}{mark}")
+        if len(filtered_models) > 20:
+            lines.append(f"... 还有 {len(filtered_models) - 20} 个模型")
+        
+        if keyword and len(filtered_models) > 1:
+            lines.append(f"\n找到多个匹配项，请发送序号选择，或发送更精确的关键字")
+        else:
+            lines.append(f"\n请发送序号或模型名称进行切换，发送「取消」结束")
+        
+        await switch_model_cmd.send("\n".join(lines))
+        
+    except Exception as e:
+        logger.error(f"获取模型列表失败: {e}")
+        await switch_model_cmd.finish(f"获取模型列表失败\n当前配置模型：{entry.model}")
+
+@switch_model_cmd.got('model_input', prompt='请发送序号或模型名称')
+async def switch_model_got(bot: Bot, event: Event, state: T_State):
+    """接收用户输入的模型选择"""
+    model_input: str = str(state['model_input']).strip()
+    keyword: Optional[str] = state.get('keyword')
+    
+    # 检查取消
+    if model_input in ['取消', 'cancel', 'q', 'quit']:
+        await switch_model_cmd.finish("已取消切换模型")
         return
     
-    # 有参数：切换模型
-    model_input = args[1].strip()
-    old_model = entry.model
-    target_model = None
+    # 如果用户输入了新的关键字（不是序号），重新过滤
+    all_models: List[str] = state.get('all_models', [])
+    models: List[str] = state.get('models', [])
+    current_api: str = state.get('current_api', '')
+    old_model: str = state.get('old_model', '')
+    target_model: Optional[str] = None
     
-    # 尝试序号匹配
+    # 尝试序号匹配（在过滤后的列表中）
     try:
-        idx = int(model_input) - 1
-        models = await api_manager.get_available_models()
+        idx: int = int(model_input) - 1
         if models and 0 <= idx < len(models):
             target_model = models[idx]
     except ValueError:
         pass
     
-    # 序号匹配失败，使用输入的模型名
+    # 序号匹配失败，尝试作为模型名匹配
     if target_model is None:
-        target_model = model_input
+        # 先在当前过滤列表中精确匹配
+        for m in models:
+            if m.lower() == model_input.lower():
+                target_model = m
+                break
+        
+        # 如果失败，尝试在所有模型中模糊匹配（用户输入了新的关键字）
+        if target_model is None and all_models:
+            new_matches: List[str] = [m for m in all_models if model_input.lower() in m.lower()]
+            if len(new_matches) == 1:
+                target_model = new_matches[0]
+            elif len(new_matches) > 1:
+                # 更新过滤列表，重新提示
+                state['models'] = new_matches
+                state['keyword'] = model_input
+                lines: List[str] = [f"找到 {len(new_matches)} 个包含「{model_input}」的模型："]
+                for i, m in enumerate(new_matches[:20], 1):
+                    lines.append(f"{i}. {m}")
+                if len(new_matches) > 20:
+                    lines.append(f"... 还有 {len(new_matches) - 20} 个")
+                lines.append("\n请发送序号选择")
+                await switch_model_cmd.reject("\n".join(lines))
+                return
+    
+    if target_model is None:
+        await switch_model_cmd.finish(f"未找到模型「{model_input}」，请重新使用「切换模型」命令")
+        return
     
     if api_manager.set_current_model(target_model):
         await switch_model_cmd.finish(f"已切换模型：{old_model} → {target_model}\n当前 API 厂商：{current_api}")
