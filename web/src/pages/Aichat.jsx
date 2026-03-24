@@ -96,6 +96,12 @@ function Aichat() {
   const [importResult, setImportResult] = useState(null)
   const [uploadFileList, setUploadFileList] = useState([])
 
+  // 模型选择相关
+  const [availableModels, setAvailableModels] = useState([])
+  const [selectedModelName, setSelectedModelName] = useState(null)
+  const [switchingModel, setSwitchingModel] = useState(false)
+  const [loadingModels, setLoadingModels] = useState(false)
+
   useEffect(() => {
     fetchInitialData()
   }, [])
@@ -129,8 +135,47 @@ function Aichat() {
       if (currentData?.api) {
         setSelectedModel(currentData.api)
       }
+      // 同时获取可用模型列表，传入当前模型信息
+      await fetchAvailableModels(currentData?.model)
     } catch (error) {
       message.error('加载模型列表失败: ' + error.message)
+    }
+  }
+
+  const fetchAvailableModels = async (currentModelName = null) => {
+    setLoadingModels(true)
+    try {
+      const res = await aichatApi.getAvailableModels()
+      // 响应拦截器已解包，res 直接是模型数组
+      const models = Array.isArray(res) ? res : (res.data || [])
+      setAvailableModels(models)
+      // 如果有当前模型，默认选中
+      const modelToSelect = currentModelName || currentModel?.model
+      if (modelToSelect && models.includes(modelToSelect)) {
+        setSelectedModelName(modelToSelect)
+      }
+    } catch (error) {
+      message.error('获取可用模型列表失败: ' + error.message)
+      setAvailableModels([])
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  const handleSwitchModelByName = async () => {
+    if (!selectedModelName || selectedModelName === currentModel?.model) {
+      message.info('请选择不同的模型')
+      return
+    }
+    setSwitchingModel(true)
+    try {
+      const result = await aichatApi.switchModel(selectedModelName)
+      message.success(result.data || '切换模型成功')
+      await fetchModels()
+    } catch (error) {
+      message.error('切换模型失败: ' + error.message)
+    } finally {
+      setSwitchingModel(false)
     }
   }
 
@@ -332,17 +377,11 @@ function Aichat() {
   }
 
   const handleSetGlobalPersona = async () => {
-    console.log('[handleSetGlobalPersona] 开始设置全局人格')
     try {
       const result = await aichatApi.setGlobalPersona(globalPersona)
-      console.log('[handleSetGlobalPersona] 设置成功:', result)
-      console.log('[handleSetGlobalPersona] 设置成功:', result)
       message.success(result)
-      console.log('[handleSetGlobalPersona] 开始刷新personas')
       await fetchPersonas()
-      console.log('[handleSetGlobalPersona] 刷新完成')
     } catch (error) {
-      console.error('[handleSetGlobalPersona] 设置失败:', error.message)
       message.error('设置全局人格失败: ' + error.message)
     }
   }
@@ -596,6 +635,62 @@ function Aichat() {
                 切换 API 厂商
               </Button>
             </Space>
+          </Card>
+
+          <Card 
+            title="切换模型" 
+            style={{ marginTop: 16 }}
+            extra={
+              <Button 
+                icon={<ReloadOutlined />} 
+                size="small" 
+                onClick={() => fetchAvailableModels()}
+                loading={loadingModels}
+              >
+                刷新模型列表
+              </Button>
+            }
+          >
+            {currentModel?.api ? (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Alert
+                  message={`当前厂商: ${currentModel.api}，当前模型: ${currentModel.model}`}
+                  type="info"
+                  showIcon
+                />
+                <Space style={{ width: '100%' }}>
+                  <Select
+                    style={{ width: 400 }}
+                    value={selectedModelName}
+                    onChange={setSelectedModelName}
+                    placeholder={availableModels.length > 0 ? `请选择模型 (共 ${availableModels.length} 个)` : '暂无可用模型'}
+                    showSearch
+                    optionFilterProp="value"
+                    loading={loadingModels}
+                    disabled={availableModels.length === 0}
+                    virtual
+                    listHeight={256}
+                  >
+                    {availableModels.map(model => (
+                      <Option key={model} value={model}>
+                        {model}
+                        {model === currentModel?.model && ' [当前]'}
+                      </Option>
+                    ))}
+                  </Select>
+                  <Button
+                    type="primary"
+                    onClick={handleSwitchModelByName}
+                    disabled={!selectedModelName || selectedModelName === currentModel?.model}
+                    loading={switchingModel}
+                  >
+                    切换模型
+                  </Button>
+                </Space>
+              </Space>
+            ) : (
+              <Empty description="请先配置 API 厂商" />
+            )}
           </Card>
 
           {config && (

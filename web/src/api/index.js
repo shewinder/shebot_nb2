@@ -61,6 +61,9 @@ export const switchApi = (api) => request.post('/aichat/switch-api', { api })
 // 获取当前模型
 export const getCurrentModel = () => request.get('/aichat/current-model')
 
+// 获取当前厂商的可用模型列表
+export const getAvailableModels = () => request.get('/aichat/available-models')
+
 // 切换模型（在当前 API 下）
 export const switchModel = (model) => request.post('/aichat/switch-model', { model })
 

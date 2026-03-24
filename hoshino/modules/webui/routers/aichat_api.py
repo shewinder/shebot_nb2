@@ -33,8 +33,8 @@ class ApiInfo(BaseModel):
     model: str              # 模型名称
     api_base: str
     api_key: str
-    max_tokens: int
-    temperature: float
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
     is_current: bool        # 是否当前使用
     supports_multimodal: Optional[bool] = None
     supports_tools: Optional[bool] = None
@@ -142,6 +142,19 @@ async def get_current_model():
     api_name = api_manager.get_current_api()
     model = api_manager.get_current_model()
     return {"status": 200, "data": {"api": api_name, "model": model}}
+
+
+@router.get("/available-models")
+async def get_available_models():
+    """获取当前 API 厂商支持的可用模型列表"""
+    try:
+        models = await api_manager.get_available_models()
+        if not models:
+            return {"status": 200, "data": [], "message": "未获取到模型列表，请检查 API 配置"}
+        return {"status": 200, "data": models}
+    except Exception as e:
+        logger.error(f"获取可用模型列表失败: {e}")
+        return {"status": 500, "data": [], "message": f"获取模型列表失败: {str(e)}"}
 
 
 @router.post("/switch-model")
