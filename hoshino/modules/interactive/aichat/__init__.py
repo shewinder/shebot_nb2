@@ -588,8 +588,6 @@ async def switch_model_handle(bot: Bot, event: Event, state: T_State):
     args: List[str] = str(event.message).strip().split(maxsplit=1)
     keyword: Optional[str] = args[1].strip().lower() if len(args) >= 2 else None
     
-    await switch_model_cmd.send(f"正在获取 {current_api} 支持的模型列表...")
-    
     try:
         models: List[str] = await api_manager.get_available_models()
         if not models:
@@ -643,7 +641,7 @@ async def switch_model_handle(bot: Bot, event: Event, state: T_State):
         logger.error(f"获取模型列表失败: {e}")
         await switch_model_cmd.finish(f"获取模型列表失败\n当前配置模型：{entry.model}")
 
-@switch_model_cmd.got('model_input', prompt='请发送序号或模型名称')
+@switch_model_cmd.got('model_input', prompt='')
 async def switch_model_got(bot: Bot, event: Event, state: T_State):
     """接收用户输入的模型选择"""
     model_input: str = str(state['model_input']).strip()
@@ -696,7 +694,7 @@ async def switch_model_got(bot: Bot, event: Event, state: T_State):
                 return
     
     if target_model is None:
-        await switch_model_cmd.finish(f"未找到模型「{model_input}」，请重新使用「切换模型」命令")
+        await switch_model_cmd.reject(f"未找到模型「{model_input}」，请重新输入")
         return
     
     if api_manager.set_current_model(target_model):
