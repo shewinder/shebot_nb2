@@ -12,8 +12,8 @@ class ApiEntry(BaseModel):
     model: str = "deepseek-chat"
     supports_multimodal: Optional[bool] = None
     supports_tools: Optional[bool] = True
-    max_tokens: int = 8192
-    temperature: float = 0.7
+    max_tokens: Optional[int] = None  # None 表示不传给 API，使用模型默认值
+    temperature: Optional[float] = None  # None 表示不传给 API，使用模型默认值
 
 
 @configuration('aichat')
