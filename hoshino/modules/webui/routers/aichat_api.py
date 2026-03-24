@@ -29,8 +29,6 @@ router = APIRouter(prefix="/aichat")
 
 class ApiInfo(BaseModel):
     """API 厂商信息 - 兼容前端模型管理格式"""
-    id: str                 # 前端使用的唯一标识（同 api）
-    name: str               # 显示名称（同 api）
     api: str                # 厂商标识
     model: str              # 模型名称
     api_base: str
@@ -38,7 +36,6 @@ class ApiInfo(BaseModel):
     max_tokens: int
     temperature: float
     is_current: bool        # 是否当前使用
-    is_default: bool        # 是否默认（第一个且当前未设置时）
     supports_multimodal: Optional[bool] = None
     supports_tools: Optional[bool] = None
 
