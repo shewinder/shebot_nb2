@@ -1,13 +1,119 @@
 """
-AI 工具：图片生成
-根据文本描述生成图片
+AI 工具：图片生成与编辑
+根据文本描述生成图片或编辑已有图片
 """
-from typing import Any, Dict
+import base64
+import io
+from typing import Any, Dict, List, Optional
 from loguru import logger
+
+from aiohttp import ClientSession
+from aiohttp import FormData
+from PIL import Image
 
 from hoshino.util import aiohttpx
 
 from ..registry import tool_registry
+from ...config import Config, ApiEntry
+
+# 加载配置
+conf = Config.get_instance('aichat')
+
+
+def _get_api_config_by_model(model_name: str) -> Optional[ApiEntry]:
+    """
+    根据模型名称查找 API 配置
+    
+    1. 首先精确匹配 model 字段
+    2. 如果没找到，使用当前选中的 API
+    
+    Args:
+        model_name: 模型名称
+    
+    Returns:
+        ApiEntry 或 None
+    """
+    if not model_name:
+        return None
+    
+    # 1. 精确匹配 model 字段
+    for api in conf.get_apis():
+        if api.model == model_name:
+            return api
+    
+    # 2. 没找到，使用当前选中的 API
+    current_api_name = conf.get_current_api()
+    current_api = conf.get_api_by_name(current_api_name)
+    if current_api:
+        logger.info(f"未找到模型 {model_name} 的配置，使用当前 API: {current_api.api}")
+        return current_api
+    
+    return None
+
+
+async def _download_image(image_url: str) -> Optional[bytes]:
+    """下载图片并返回字节数据"""
+    try:
+        resp = await aiohttpx.get(image_url)
+        if not resp.ok:
+            logger.error(f"下载图片失败: {resp.status_code}, URL: {image_url}")
+            return None
+        return resp.content
+    except Exception as e:
+        logger.exception(f"下载图片失败: {e}, URL: {image_url}")
+        return None
+
+
+async def _get_image_bytes(image_url_or_data: str) -> Optional[bytes]:
+    """
+    获取图片字节数据
+    
+    支持两种格式：
+    1. 普通 URL: https://example.com/image.png
+    2. Data URL: data:image/png;base64,iVBORw0KGgo...
+    
+    Args:
+        image_url_or_data: 图片 URL 或 base64 data URL
+    
+    Returns:
+        图片字节数据，失败返回 None
+    """
+    if not image_url_or_data:
+        return None
+    
+    # 检查是否是 data URL
+    if image_url_or_data.startswith('data:image'):
+        try:
+            # data:image/png;base64,xxxxx
+            # data:image/jpeg;base64,xxxxx
+            if ',' in image_url_or_data:
+                base64_part = image_url_or_data.split(',')[1]
+                return base64.b64decode(base64_part)
+            else:
+                logger.error(f"无效的 data URL 格式: {image_url_or_data[:50]}...")
+                return None
+        except Exception as e:
+            logger.exception(f"解析 base64 data URL 失败: {e}")
+            return None
+    else:
+        # 普通 URL，下载图片
+        return await _download_image(image_url_or_data)
+
+
+def _convert_to_png(image_bytes: bytes) -> bytes:
+    """将图片转换为 PNG 格式"""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        # 转换为 RGB 模式（去除透明通道，兼容性好）
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        output = io.BytesIO()
+        img.save(output, format='PNG')
+        return output.getvalue()
+    except Exception as e:
+        logger.exception(f"图片格式转换失败: {e}")
+        # 转换失败返回原数据
+        return image_bytes
 
 
 @tool_registry.register(
@@ -20,21 +126,11 @@ from ..registry import tool_registry
                 "type": "string",
                 "description": "图片的详细描述，用于生成图片。描述应该尽可能详细，包括场景、风格、颜色、物体等元素。"
             },
-            "size": {
-                "type": "string",
-                "description": "图片尺寸，可选值：1024x1024 (方形), 1024x1792 (竖屏), 1792x1024 (横屏)。默认 1024x1024。",
-                "enum": ["1024x1024", "1024x1792", "1792x1024"]
-            },
-            "quality": {
-                "type": "string",
-                "description": "图片质量，可选值：standard (标准), hd (高清)。默认 standard。",
-                "enum": ["standard", "hd"]
-            },
             "n": {
                 "type": "integer",
-                "description": "生成图片数量，范围 1-4。默认 1。",
+                "description": "生成图片数量，范围 1-10。默认 1。",
                 "minimum": 1,
-                "maximum": 4
+                "maximum": 10
             }
         },
         "required": ["prompt"]
@@ -42,59 +138,294 @@ from ..registry import tool_registry
 )
 async def generate_image(
     prompt: str,
-    size: str = "1024x1024",
-    quality: str = "standard",
     n: int = 1,
-    provider: str = "pollinations"
 ) -> Dict[str, Any]:
     """
-    生成图片
+    生成图片（使用配置的图像生成模型）
     
     Args:
         prompt: 图片描述
-        size: 图片尺寸
-        quality: 图片质量
         n: 生成数量
-        provider: 生图服务提供商 (pollinations, pollinations-enhanced)
     
     Returns:
         {"success": bool, "urls": List[str], "error": str}
     """
     try:
-        # 解析尺寸
-        if "x" in size:
-            width, height = map(int, size.split("x"))
-        else:
-            width, height = 1024, 1024
+        target_model = conf.image_generation_model
         
-        urls = []
-        for i in range(n):
-            # 使用 Pollinations.ai（免费，无需 API Key）
-            # 添加随机种子确保不同图片
-            seed = i + 1
-            
-            if provider == "pollinations-enhanced":
-                # 使用增强版（质量更好）
-                encoded_prompt = prompt.replace(" ", "%20")
-                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&seed={seed}&nologo=true&enhance=true"
-            else:
-                # 使用标准版
-                encoded_prompt = prompt.replace(" ", "%20")
-                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&seed={seed}&nologo=true"
-            
-            urls.append(url)
-            logger.info(f"生成图片 URL: {url}")
+        # 获取 API 配置
+        api_config = _get_api_config_by_model(target_model)
+        
+        if not api_config:
+            error_msg = f"未找到图片生成模型 {target_model} 的配置，且当前未配置 API"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "urls": [],
+                "error": error_msg
+            }
+        
+        api_key = api_config.api_key
+        api_base = api_config.api_base.rstrip('/')
+        model = api_config.model
+        
+        if not api_key:
+            error_msg = f"图片生成模型 {model} 的 API Key 未配置"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "urls": [],
+                "error": error_msg
+            }
+        
+        # 构造请求
+        url = f"{api_base}/images/generations"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "n": min(max(n, 1), 10),  # 限制在 1-10 范围内
+            "response_format": "url"
+        }
+        
+        logger.info(f"调用图片生成 API: {url}, model: {model}, prompt: {prompt[:50]}...")
+        
+        # 发送请求
+        resp = await aiohttpx.post(url, headers=headers, json=payload)
+        
+        if not resp.ok:
+            error_text = resp.text
+            logger.error(f"图片生成 API 调用失败: {resp.status_code}, 响应: {error_text}")
+            return {
+                "success": False,
+                "urls": [],
+                "error": f"API 调用失败: HTTP {resp.status_code}, {error_text[:200]}"
+            }
+        
+        result = resp.json
+        if not result:
+            logger.error("图片生成 API 返回空结果")
+            return {
+                "success": False,
+                "urls": [],
+                "error": "API 返回空结果"
+            }
+        
+        # 提取图片 URL
+        data = result.get("data", [])
+        urls: List[str] = []
+        
+        for item in data:
+            if isinstance(item, dict):
+                # 优先使用 url 字段
+                image_url = item.get("url")
+                if image_url:
+                    urls.append(image_url)
+                    continue
+                
+                # 如果没有 url，尝试使用 b64_json
+                b64_data = item.get("b64_json")
+                if b64_data:
+                    # 将 base64 数据转换为 data URL
+                    data_url = f"data:image/png;base64,{b64_data}"
+                    urls.append(data_url)
+        
+        if not urls:
+            logger.error(f"无法从响应中提取图片 URL: {result}")
+            return {
+                "success": False,
+                "urls": [],
+                "error": "无法从 API 响应中提取图片 URL"
+            }
+        
+        logger.info(f"成功生成 {len(urls)} 张图片")
         
         return {
             "success": True,
             "urls": urls,
             "error": None,
-            "provider": provider,
+            "provider": model,
             "prompt": prompt,
-            "size": size
+            "n": len(urls)
         }
+        
     except Exception as e:
         logger.exception(f"生成图片失败: {e}")
+        return {
+            "success": False,
+            "urls": [],
+            "error": str(e)
+        }
+
+
+@tool_registry.register(
+    name="edit_image",
+    description="""编辑已有图片，根据描述修改图片的局部内容或风格。
+
+当用户要求修改图片时使用此工具。
+
+重要说明：
+- 如果用户在消息中上传了图片并要求编辑，请直接使用该图片的 base64 data URL 作为 image_url 参数
+- 用户上传的图片会以 data:image/xxx;base64,xxxxx 的格式出现在对话消息中
+- 不要编造占位符（如 <<uploaded_image>> 或 "刚才的图片"），必须使用实际的 base64 data URL
+- 如果你看到用户上传了图片，请在调用此工具时将该图片的完整 base64 data URL 填入 image_url 参数
+""",
+    parameters={
+        "type": "object",
+        "properties": {
+            "image_url": {
+                "type": "string",
+                "description": "原图片的 URL 地址或 base64 data URL（如 data:image/png;base64,xxxxx）。如果用户上传了图片，请使用该图片的 base64 data URL。"
+            },
+            "prompt": {
+                "type": "string",
+                "description": "编辑描述，说明如何修改图片。例如：\"把猫改成黑色的\"、\"添加一个太阳\"等"
+            }
+        },
+        "required": ["image_url", "prompt"]
+    }
+)
+async def edit_image(
+    image_url: str,
+    prompt: str,
+) -> Dict[str, Any]:
+    """
+    编辑已有图片（使用配置的图片编辑模型，如 DALL-E 2）
+    
+    Args:
+        image_url: 原图片 URL 或 base64 data URL
+        prompt: 编辑描述
+    
+    Returns:
+        {"success": bool, "urls": List[str], "error": str}
+    """
+    try:
+        target_model = conf.image_edit_model
+        
+        # 检查是否配置了编辑模型
+        if not target_model:
+            return {
+                "success": False,
+                "urls": [],
+                "error": "图片编辑功能未配置，请在 aichat 配置中设置 image_edit_model（如 dall-e-2）"
+            }
+        
+        # 获取 API 配置
+        api_config = _get_api_config_by_model(target_model)
+        
+        if not api_config:
+            error_msg = f"未找到图片编辑模型 {target_model} 的配置，且当前未配置 API"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "urls": [],
+                "error": error_msg
+            }
+        
+        api_key = api_config.api_key
+        api_base = api_config.api_base.rstrip('/')
+        model = api_config.model
+        
+        if not api_key:
+            error_msg = f"图片编辑模型 {model} 的 API Key 未配置"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "urls": [],
+                "error": error_msg
+            }
+        
+        # 获取原图
+        image_bytes = await _get_image_bytes(image_url)
+        if not image_bytes:
+            return {
+                "success": False,
+                "urls": [],
+                "error": "无法获取原图，请检查图片 URL 或 base64 数据是否有效"
+            }
+        
+        # 转换为 PNG 格式（DALL-E 要求）
+        image_bytes = _convert_to_png(image_bytes)
+        
+        # 构造 multipart 请求
+        url = f"{api_base}/images/edits"
+        
+        async with ClientSession() as session:
+            form = FormData()
+            form.add_field('image', image_bytes, filename='image.png', content_type='image/png')
+            form.add_field('prompt', prompt)
+            
+            # 可选参数
+            form.add_field('n', '1')
+            form.add_field('size', '1024x1024')
+            form.add_field('response_format', 'url')
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
+            
+            logger.info(f"调用图片编辑 API: {url}, model: {model}, prompt: {prompt[:50]}...")
+            
+            async with session.post(url, headers=headers, data=form) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    logger.error(f"图片编辑 API 调用失败: {resp.status}, 响应: {error_text}")
+                    return {
+                        "success": False,
+                        "urls": [],
+                        "error": f"API 调用失败: HTTP {resp.status}, {error_text[:200]}"
+                    }
+                
+                result = await resp.json()
+        
+        if not result:
+            logger.error("图片编辑 API 返回空结果")
+            return {
+                "success": False,
+                "urls": [],
+                "error": "API 返回空结果"
+            }
+        
+        # 提取图片 URL
+        data = result.get("data", [])
+        urls: List[str] = []
+        
+        for item in data:
+            if isinstance(item, dict):
+                image_url = item.get("url")
+                if image_url:
+                    urls.append(image_url)
+                    continue
+                
+                b64_data = item.get("b64_json")
+                if b64_data:
+                    data_url = f"data:image/png;base64,{b64_data}"
+                    urls.append(data_url)
+        
+        if not urls:
+            logger.error(f"无法从响应中提取图片 URL: {result}")
+            return {
+                "success": False,
+                "urls": [],
+                "error": "无法从 API 响应中提取图片 URL"
+            }
+        
+        logger.info(f"成功编辑图片，生成 {len(urls)} 张")
+        
+        return {
+            "success": True,
+            "urls": urls,
+            "error": None,
+            "provider": model,
+            "prompt": prompt,
+            "n": len(urls)
+        }
+        
+    except Exception as e:
+        logger.exception(f"编辑图片失败: {e}")
         return {
             "success": False,
             "urls": [],

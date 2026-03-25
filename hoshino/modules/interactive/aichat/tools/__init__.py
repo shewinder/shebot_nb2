@@ -31,7 +31,7 @@ from .registry import (
 )
 
 # 导入内置工具，使其自动注册
-from .builtin import generate_image, web_search
+from .builtin import generate_image
 
 __all__ = [
     # 核心类
