@@ -46,6 +46,43 @@ class Session:
         
         self.last_active = time.time()
     
+    def get_images(self) -> List[str]:
+        """
+        从消息历史中提取所有图片的 base64 URL
+        
+        Returns:
+            图片 base64 data URL 列表（按时间顺序）
+        """
+        images: List[str] = []
+        for msg in self.messages:
+            content = msg.get('content')
+            if isinstance(content, list):
+                # 多模态消息
+                for part in content:
+                    if isinstance(part, dict) and part.get('type') == 'image_url':
+                        image_url = part.get('image_url', {}).get('url', '')
+                        if image_url and image_url.startswith('data:image'):
+                            images.append(image_url)
+        return images
+    
+    def get_image_by_index(self, index: int = -1) -> Optional[str]:
+        """
+        获取指定索引的图片
+        
+        Args:
+            index: -1 表示最近一张，-2 表示倒数第二张，以此类推
+            
+        Returns:
+            base64 data URL 或 None
+        """
+        images = self.get_images()
+        if not images:
+            return None
+        try:
+            return images[index]
+        except IndexError:
+            return None
+    
     def is_expired(self) -> bool:
         """检查是否过期"""
         if conf.session_timeout <= 0:

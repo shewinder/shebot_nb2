@@ -45,7 +45,7 @@ class Config(BaseConfig):
 
     # 图片生成模型配置
     image_generation_model: str = "doubao-seedream-5-0-260128"  # 用于图片生成的模型名称
-    image_edit_model: str = "gpt-image-1"  # 用于图片编辑的模型名称（如 dall-e-2），空表示不支持编辑
+    image_edit_model: str = "grok-4-image"  # 用于图片编辑的模型名称（如 dall-e-2），空表示不支持编辑
 
     def get_apis(self) -> List[ApiEntry]:
         """获取厂商列表"""

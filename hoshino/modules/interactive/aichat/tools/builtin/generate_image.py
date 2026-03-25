@@ -4,7 +4,10 @@ AI 工具：图片生成与编辑
 """
 import base64
 import io
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from ...session import Session
 from loguru import logger
 
 from aiohttp import ClientSession
@@ -263,34 +266,42 @@ async def generate_image(
 
 @tool_registry.register(
     name="edit_image",
-    description="""编辑已有图片，根据描述修改图片的局部内容或风格。
+    description="""编辑用户上传的图片，根据描述修改图片内容或风格。
 
 当用户要求修改图片时使用此工具。
 
-重要说明：
-- 如果用户在消息中上传了图片并要求编辑，请直接使用该图片的 base64 data URL 作为 image_url 参数
-- 用户上传的图片会以 data:image/xxx;base64,xxxxx 的格式出现在对话消息中
-- 不要编造占位符（如 <<uploaded_image>> 或 "刚才的图片"），必须使用实际的 base64 data URL
-- 如果你看到用户上传了图片，请在调用此工具时将该图片的完整 base64 data URL 填入 image_url 参数
-""",
+图片选择方式：
+- 使用 image_index 指定要编辑的图片：-1 表示最近上传的图片（默认），-2 表示倒数第二张，以此类推
+- 如果提供了 image_url，则直接使用该 URL 编辑（优先级高于 image_index）
+
+编辑描述应尽可能详细，说明要修改的具体内容。""",
     parameters={
         "type": "object",
         "properties": {
-            "image_url": {
-                "type": "string",
-                "description": "原图片的 URL 地址或 base64 data URL（如 data:image/png;base64,xxxxx）。如果用户上传了图片，请使用该图片的 base64 data URL。"
-            },
             "prompt": {
                 "type": "string",
                 "description": "编辑描述，说明如何修改图片。例如：\"把猫改成黑色的\"、\"添加一个太阳\"等"
+            },
+            "image_index": {
+                "type": "integer",
+                "description": "图片索引，-1表示最近上传的图片，-2表示倒数第二张，默认-1",
+                "default": -1
+            },
+            "image_url": {
+                "type": "string",
+                "description": "可选：直接提供图片的 URL 或 base64 data URL，如果提供则优先使用",
+                "default": ""
             }
         },
-        "required": ["image_url", "prompt"]
-    }
+        "required": ["prompt"]
+    },
+    inject_session=True  # 启用 session 自动注入
 )
 async def edit_image(
-    image_url: str,
     prompt: str,
+    image_index: int = -1,
+    image_url: str = "",
+    session: Optional["Session"] = None,  # 由装饰器自动注入
 ) -> Dict[str, Any]:
     """
     编辑已有图片（使用配置的图片编辑模型，如 DALL-E 2）
@@ -339,6 +350,24 @@ async def edit_image(
             }
         
         # 获取原图
+        if not image_url:
+            # 未提供 URL，尝试通过 image_index 从 session 获取
+            if session is None:
+                return {
+                    "success": False,
+                    "urls": [],
+                    "error": "无法获取会话信息，请重试或提供图片 URL"
+                }
+            
+            image_url = session.get_image_by_index(image_index)
+            
+            if not image_url:
+                return {
+                    "success": False,
+                    "urls": [],
+                    "error": f"未找到索引为 {image_index} 的图片，请确认已上传图片或使用其他索引"
+                }
+        
         image_bytes = await _get_image_bytes(image_url)
         if not image_bytes:
             return {
@@ -361,7 +390,6 @@ async def edit_image(
             # 可选参数
             form.add_field('n', '1')
             form.add_field('size', '1024x1024')
-            form.add_field('response_format', 'url')
             
             headers = {
                 "Authorization": f"Bearer {api_key}"

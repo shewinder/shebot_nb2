@@ -1,10 +1,17 @@
 """
 AI Tool/Function Calling 工具注册器
-提供注册式工具管理，支持装饰器注册
+提供注册式工具管理，支持装饰器注册和 Session 自动注入
 """
-from typing import Any, Callable, Dict, List, Optional
+import functools
+import inspect
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel
+
+from .context import tool_call_context
+
+if TYPE_CHECKING:
+    from ..session import Session
 
 
 class Tool(BaseModel):
@@ -13,6 +20,7 @@ class Tool(BaseModel):
     description: str
     parameters: Dict[str, Any]
     function: Callable
+    inject_session: bool = False  # 是否自动注入 session
 
     class Config:
         arbitrary_types_allowed = True
@@ -39,7 +47,8 @@ class ToolRegistry:
         self,
         name: str,
         description: str,
-        parameters: Dict[str, Any]
+        parameters: Dict[str, Any],
+        inject_session: bool = False
     ) -> Callable[[Callable], Callable]:
         """
         装饰器：注册一个工具
@@ -48,6 +57,7 @@ class ToolRegistry:
             name: 工具名称（唯一标识）
             description: 工具描述，帮助 AI 理解工具用途
             parameters: JSON Schema 格式的参数定义
+            inject_session: 是否自动注入 session 参数（默认 False）
             
         Returns:
             装饰器函数
@@ -56,26 +66,59 @@ class ToolRegistry:
             @tool_registry.register(
                 name="web_search",
                 description="搜索网页获取信息",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "搜索关键词"}
-                    },
-                    "required": ["query"]
-                }
+                parameters={...}
             )
             async def web_search(query: str) -> Dict[str, Any]:
                 ...
+            
+            @tool_registry.register(
+                name="edit_image",
+                description="编辑图片",
+                parameters={...},
+                inject_session=True  # 自动注入 session
+            )
+            async def edit_image(prompt: str, session: Optional["Session"] = None):
+                ...
         """
         def decorator(func: Callable) -> Callable:
+            # 如果启用 session 注入，包装函数
+            if inject_session:
+                func = self._wrap_with_session_injection(func)
+            
             self._tools[name] = Tool(
                 name=name,
                 description=description,
                 parameters=parameters,
-                function=func
+                function=func,
+                inject_session=inject_session
             )
             return func
         return decorator
+    
+    def _wrap_with_session_injection(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        """
+        包装函数，自动注入 session 参数
+        
+        如果函数签名包含 `session` 参数且调用时未提供，
+        自动从 tool_call_context 获取并注入
+        """
+        sig = inspect.signature(func)
+        has_session_param = 'session' in sig.parameters
+        
+        if not has_session_param:
+            # 函数没有 session 参数，无需包装
+            return func
+        
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            if 'session' not in kwargs:
+                # 从 contextvars 获取 session
+                ctx = tool_call_context.get()
+                if ctx and 'session' in ctx:
+                    kwargs['session'] = ctx['session']
+            return await func(*args, **kwargs)
+        
+        return wrapper
     
     def get_schemas(self) -> List[Dict[str, Any]]:
         """

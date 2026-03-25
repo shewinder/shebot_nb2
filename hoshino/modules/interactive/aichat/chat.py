@@ -20,6 +20,7 @@ from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PA
 from .persona import persona_manager
 from .session import session_manager
 from .tools import get_available_tools, get_tool_function
+from .tools.context import tool_call_context
 
 # 加载配置
 conf = Config.get_instance('aichat')
@@ -268,7 +269,10 @@ async def call_ai_api(
         return {"error": str(e), "content": None}
 
 
-async def execute_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
+async def execute_tool_call(
+    tool_call: Dict[str, Any],
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     执行单个工具调用
     
@@ -281,6 +285,7 @@ async def execute_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
                 "arguments": str (JSON)
             }
         }
+        context: 工具调用上下文，包含 user_id, group_id 等信息
     
     Returns:
         {
@@ -320,6 +325,11 @@ async def execute_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
         }
     
     # 执行工具
+    # 设置 contextvars 上下文（用于 session 自动注入）
+    token = None
+    if context:
+        token = tool_call_context.set(context)
+    
     try:
         result = await tool_func(**arguments)
         return {
@@ -334,12 +344,17 @@ async def execute_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
             "role": "tool",
             "content": json.dumps({"error": str(e)})
         }
+    finally:
+        # 清理上下文
+        if token is not None:
+            tool_call_context.reset(token)
 
 
 async def call_ai_api_with_tools(
     messages: List[Dict[str, Any]], 
     api_config: Dict[str, Any],
-    max_tool_rounds: int = 5
+    max_tool_rounds: int = 5,
+    context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     调用 AI API 并处理 Tool Calling（支持多轮工具调用）
@@ -397,7 +412,7 @@ async def call_ai_api_with_tools(
         
         # 执行所有工具调用
         for tool_call in tool_calls:
-            tool_result = await execute_tool_call(tool_call)
+            tool_result = await execute_tool_call(tool_call, context=context)
             all_tool_results.append({
                 "tool_call": tool_call,
                 "result": tool_result
@@ -498,6 +513,8 @@ async def handle_ai_chat(bot: Bot, event: Event):
                         "url": base64_image,
                     },
                 })
+                # 图片会自动存储在 session.messages 中，供 edit_image 工具通过索引获取
+                logger.debug(f"处理用户上传的图片，用户: {user_id}, 群组: {group_id}")
             else:
                 logger.warning(f"图片处理失败，跳过: {img_url}")
         
@@ -528,6 +545,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
             return
         message_content = user_input
 
+    # 获取或创建 session，添加用户消息
     persona = persona_manager.get_persona(user_id, group_id)
     session = session_manager.get_session(user_id, group_id, persona)
     session.add_message("user", message_content)
@@ -541,7 +559,13 @@ async def handle_ai_chat(bot: Bot, event: Event):
         messages_for_api = session.messages
 
     # 调用 AI API（支持 Tool Calling）
-    api_result = await call_ai_api_with_tools(messages_for_api, api_config)
+    # 传递上下文信息（包含 session 对象），以便工具调用时自动注入
+    tool_context = {
+        "user_id": user_id,
+        "group_id": group_id,
+        "session": session,
+    }
+    api_result = await call_ai_api_with_tools(messages_for_api, api_config, context=tool_context)
     
     if api_result.get("error") and not api_result.get("content"):
         await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result['error']}")
