@@ -374,6 +374,18 @@ async def edit_image(
                     "error": f"未找到索引为 {image_index} 的图片，请确认已上传图片或使用其他索引"
                 }
         
+        # 检查是否是工具图片占位符（如 <<tool_img_1>>）
+        if image_url.startswith("<<tool_img_") and session:
+            base64_data = session.get_tool_image(image_url)
+            if base64_data:
+                image_url = base64_data
+            else:
+                return {
+                    "success": False,
+                    "urls": [],
+                    "error": f"未找到占位符对应的图片: {image_url}"
+                }
+        
         image_bytes = await _get_image_bytes(image_url)
         if not image_bytes:
             return {

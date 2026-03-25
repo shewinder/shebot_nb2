@@ -21,6 +21,8 @@ class Session:
         self.choice_mode_enabled = False  # 是否开启选项生成模式
         self.choice_guideline: Optional[str] = None  # 选项生成指导标准
         self.last_choices: Dict[int, str] = {}  # 上一次生成的选项 {1: "选项1", 2: "选项2", 3: "选项3"}
+        self._tool_images: Dict[str, str] = {}  # 工具生成的图片：占位符 -> base64
+        self._tool_image_counter: int = 0  # 工具图片计数器
         # 如果有人格，在初始化时添加system message
         if persona:
             self.messages.append({"role": "system", "content": persona})
@@ -82,6 +84,53 @@ class Session:
             return images[index]
         except IndexError:
             return None
+    
+    def store_tool_image(self, base64_data: str) -> str:
+        """
+        存储工具生成的图片，返回占位符
+        
+        Args:
+            base64_data: 图片的 base64 data URL
+            
+        Returns:
+            占位符，如 "<<tool_img_1>>"
+        """
+        self._tool_image_counter += 1
+        placeholder = f"<<tool_img_{self._tool_image_counter}>>"
+        self._tool_images[placeholder] = base64_data
+        self.last_active = time.time()
+        # 限制最多存储 20 张
+        if len(self._tool_images) > 20:
+            oldest = list(self._tool_images.keys())[0]
+            del self._tool_images[oldest]
+        return placeholder
+    
+    def get_tool_image(self, placeholder: str) -> Optional[str]:
+        """
+        根据占位符获取工具图片的 base64
+        
+        Args:
+            placeholder: 占位符，如 "<<tool_img_1>>"
+            
+        Returns:
+            base64 data URL 或 None
+        """
+        return self._tool_images.get(placeholder)
+    
+    def resolve_tool_image_placeholders(self, text: str) -> str:
+        """
+        将文本中的工具图片占位符替换为真实 base64
+        用于发送 QQ 消息前
+        
+        Args:
+            text: 包含占位符的文本
+            
+        Returns:
+            替换后的文本
+        """
+        for placeholder, base64_data in self._tool_images.items():
+            text = text.replace(placeholder, base64_data)
+        return text
     
     def is_expired(self) -> bool:
         """检查是否过期"""
