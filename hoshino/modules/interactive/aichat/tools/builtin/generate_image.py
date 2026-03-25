@@ -28,7 +28,7 @@ def _get_api_config_by_model(model_name: str) -> Optional[ApiEntry]:
     根据模型名称查找 API 配置
     
     1. 首先精确匹配 model 字段
-    2. 如果没找到，使用当前选中的 API
+    2. 如果没找到，使用当前选中的 API 的 base/key，但 model 保持为传入值
     
     Args:
         model_name: 模型名称
@@ -44,12 +44,18 @@ def _get_api_config_by_model(model_name: str) -> Optional[ApiEntry]:
         if api.model == model_name:
             return api
     
-    # 2. 没找到，使用当前选中的 API
+    # 2. 没找到，使用当前 API 的 base/key，但替换 model
     current_api_name = conf.get_current_api()
     current_api = conf.get_api_by_name(current_api_name)
     if current_api:
-        logger.info(f"未找到模型 {model_name} 的配置，使用当前 API: {current_api.api}")
-        return current_api
+        logger.info(f"未找到模型 {model_name} 的配置，使用当前 API ({current_api.api}) 的 base/key，但模型保持为 {model_name}")
+        # 创建新的配置，保持 model 为传入的模型名
+        return ApiEntry(
+            api=current_api.api,
+            api_key=current_api.api_key,
+            api_base=current_api.api_base,
+            model=model_name,  # 使用传入的模型名，而非当前 API 的 model
+        )
     
     return None
 
