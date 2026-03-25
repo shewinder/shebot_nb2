@@ -3,6 +3,7 @@ AI 聊天处理模块
 处理 AI 对话逻辑，包括图片处理和 API 调用
 """
 import base64
+import json
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -332,11 +333,39 @@ async def execute_tool_call(
     
     try:
         result = await tool_func(**arguments)
-        return {
+        full_image_urls = []
+        
+        # 检查工具返回结果中是否包含图片 base64
+        # 截断 base64 避免 token 超限（图片会由 handle_ai_chat 直接发送给用户）
+        result_str = json.dumps(result, ensure_ascii=False)
+        if "data:image" in result_str:
+            import re
+            # 先提取完整的图片 URL 供后续发送使用
+            pattern_full = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+'
+            full_image_urls = re.findall(pattern_full, result_str)
+            
+            # 匹配 base64 data URL，截断为提示信息（用于保存到对话历史）
+            # 注意：不要包含 _image_urls，否则会再次带入完整 base64 导致 token 超限
+            pattern = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}'
+            result_str = re.sub(
+                pattern,
+                lambda m: m.group(0)[:50] + "...[图片已生成并发送给用户]",
+                result_str
+            )
+            result = json.loads(result_str)
+        
+        final_content = json.dumps(result, ensure_ascii=False)
+        
+        # 构造返回结果：content 给大模型（截断版本），_image_urls 给 handle_ai_chat 发送图片
+        tool_result = {
             "tool_call_id": tool_id,
             "role": "tool",
-            "content": json.dumps(result, ensure_ascii=False)
+            "content": final_content
         }
+        if full_image_urls:
+            tool_result["_image_urls"] = full_image_urls
+        
+        return tool_result
     except Exception as e:
         logger.exception(f"工具执行失败: {e}")
         return {
@@ -567,6 +596,35 @@ async def handle_ai_chat(bot: Bot, event: Event):
     }
     api_result = await call_ai_api_with_tools(messages_for_api, api_config, context=tool_context)
     
+    # 发送工具生成的图片（如果有）
+    # 工具图片直接发送给用户，不等 AI 回复，避免 token 超限且确保用户能看到
+    for tool_result in api_result.get("tool_results", []):
+        try:
+            raw_content = tool_result["result"]["content"]
+            
+            # 优先从 tool_result["result"]["_image_urls"] 获取完整 URL（不消耗 token）
+            # 如果没有，则从 content 中解析 urls 字段（可能被截断）
+            image_urls = tool_result["result"].get("_image_urls") or []
+            if not image_urls:
+                result = json.loads(raw_content)
+                image_urls = result.get("urls", [])
+            
+            if image_urls:
+                for i, url in enumerate(image_urls):
+                    if url.startswith("data:image"):
+                        try:
+                            # 从 data URL 中提取 base64 数据
+                            base64_data = url.split(",", 1)[1]
+                            img_bytes = base64.b64decode(base64_data)
+                            
+                            # 使用 file 参数发送 bytes
+                            await bot.send(event, MessageSegment.image(file=img_bytes))
+                            logger.info(f"已发送工具生成的图片 [{i}], 大小: {len(img_bytes)} bytes")
+                        except Exception as e:
+                            logger.exception(f"发送工具图片失败 [{i}]: {e}")
+        except Exception as e:
+            logger.warning(f"处理工具结果图片失败: {e}")
+    
     if api_result.get("error") and not api_result.get("content"):
         await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result['error']}")
         # 移除刚才添加的用户消息
@@ -582,6 +640,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     # 解析选项（如果开启了选项模式）
     display_response = response
+    
     if choice_mode_enabled and in_continuous_mode:
         content, choices = parse_choices_from_response(response)
         if choices:
