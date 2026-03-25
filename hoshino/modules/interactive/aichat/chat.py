@@ -16,7 +16,7 @@ from hoshino.util.message_util import extract_images_from_reply
 
 from .api import api_manager
 from .config import Config
-from .md_render import render_text_if_markdown, strip_thinking_tags
+from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PATTERN
 from .persona import persona_manager
 from .session import session_manager
 from .tools import get_available_tools, get_tool_function
@@ -616,10 +616,8 @@ async def handle_ai_chat(bot: Bot, event: Event):
                     except Exception as img_err:
                         logger.error(f"发送图片失败: {url}, 错误: {img_err}")
                 
-                # 发送文本（去掉图片 URL 后的内容）
-                text_content = display_response
-                for url in image_urls:
-                    text_content = text_content.replace(url, "")
+                # 发送文本（去掉 Markdown 图片语法后的内容）
+                text_content = MD_IMAGE_PATTERN.sub('', display_response)
                 text_content = text_content.strip()
                 
                 if text_content:

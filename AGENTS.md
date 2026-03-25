@@ -204,6 +204,7 @@ async def got_choice(bot: Bot, event: Event, state: T_State):
 **NoneBot 异常处理：**
 - `FinishedException` - 调用 `matcher.finish()` 后抛出，用于结束命令流程，**不是错误**
 - 不要在 `except Exception` 中记录 `FinishedException` 为错误
+- **⚠️ 禁止在命令处理器外包裹大 try-except Exception**，会干扰 NoneBot 正常流程控制
 
 ```python
 from nonebot.exception import FinishedException
@@ -215,6 +216,22 @@ except FinishedException:
 except Exception as e:
     logger.error(f"真正错误: {e}")
 ```
+
+**错误示例（不要这样做）：**
+```python
+@cmd.handle()
+async def handler(bot: Bot, event: Event):
+    try:
+        # ... 整个处理逻辑
+        await cmd.finish("结果")  # 抛出 FinishedException 会被捕获
+    except Exception as e:  # ❌ 错误：捕获了 FinishedException
+        logger.error(f"失败: {e}")  # 把正常流程当错误记录
+```
+
+**正确做法：**
+- 只在需要的地方捕获特定异常
+- 让 `FinishedException` 自然抛出
+- 如果必须捕获，显式排除 `FinishedException`
 
 ### Playwright 浏览器自动化
 
