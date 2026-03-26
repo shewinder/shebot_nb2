@@ -143,11 +143,13 @@ def _convert_to_png(image_bytes: bytes) -> bytes:
             }
         },
         "required": ["prompt"]
-    }
+    },
+    inject_session=True  # 启用 session 自动注入
 )
 async def generate_image(
     prompt: str,
     n: int = 1,
+    session: Optional["Session"] = None,  # 由装饰器自动注入
 ) -> Dict[str, Any]:
     """
     生成图片（使用配置的图像生成模型）
@@ -170,8 +172,10 @@ async def generate_image(
             logger.error(error_msg)
             return {
                 "success": False,
-                "urls": [],
-                "error": error_msg
+                "content": error_msg,
+                "images": [],
+                "error": error_msg,
+                "metadata": {}
             }
         
         api_key = api_config.api_key
@@ -183,8 +187,10 @@ async def generate_image(
             logger.error(error_msg)
             return {
                 "success": False,
-                "urls": [],
-                "error": error_msg
+                "content": error_msg,
+                "images": [],
+                "error": error_msg,
+                "metadata": {}
             }
         
         # 构造请求
@@ -246,27 +252,54 @@ async def generate_image(
             logger.error(f"无法从响应中提取图片 URL: {result}")
             return {
                 "success": False,
-                "urls": [],
-                "error": "无法从 API 响应中提取图片 URL"
+                "content": "无法从 API 响应中提取图片 URL",
+                "images": [],
+                "error": "无法从 API 响应中提取图片 URL",
+                "metadata": {}
             }
         
         logger.info(f"成功生成 {len(urls)} 张图片")
         
+        # ===== 标准化返回格式 =====
+        # 将图片存入 AI 图片列表，获取统一标识符
+        identifiers = []
+        if session and urls:
+            for url in urls:
+                identifier = session.store_ai_image(url)
+                identifiers.append(identifier)
+                logger.info(f"generate_image: 存储 AI 图片 {identifier}")
+        
+        # 构造 content：告诉 AI 标识符
+        if identifiers:
+            if len(identifiers) == 1:
+                content = f"已成功生成图片 {identifiers[0]}。"
+            else:
+                id_str = ", ".join(identifiers)
+                content = f"已成功生成 {len(identifiers)} 张图片：{id_str}。"
+        else:
+            content = f"已成功生成 {len(urls)} 张图片"
+        
         return {
             "success": True,
-            "urls": urls,
+            "content": content,
+            "images": urls,  # 真实图片，用于发送
             "error": None,
-            "provider": model,
-            "prompt": prompt,
-            "n": len(urls)
+            "metadata": {
+                "identifiers": identifiers,  # AI 实际看到的标识符
+                "model": model,
+                "prompt": prompt,
+                "n": len(urls)
+            }
         }
         
     except Exception as e:
         logger.exception(f"生成图片失败: {e}")
         return {
             "success": False,
-            "urls": [],
-            "error": str(e)
+            "content": f"图片生成失败: {str(e)}",
+            "images": [],
+            "error": str(e),
+            "metadata": {}
         }
 
 
@@ -300,15 +333,15 @@ def _get_closest_size(width: int, height: int) -> str:
 
 @tool_registry.register(
     name="edit_image",
-    description="""编辑用户上传的图片，根据描述修改图片内容或风格。
+    description="""编辑已有图片。
 
-当用户要求修改图片时使用此工具。
+使用图片标识符指定要编辑的图片（从[当前可用图片]列表中选择）：
+- <我发的图片-1>, <我发的图片-2> ...（用户发送的图片）
+- <你发的图片-1>, <你发的图片-2> ...（你之前生成的图片）
+- <链接图片-1>, <链接图片-2> ...（引用消息中的图片）
 
-图片选择方式：
-- 使用 image_index 指定要编辑的图片：-1 表示最近上传的图片（默认），-2 表示倒数第二张，以此类推
-- 如果提供了 image_url，则直接使用该 URL 编辑（优先级高于 image_index）
-
-编辑描述应尽可能详细，说明要修改的具体内容。""",
+使用方法：将标识符（如 <你发的图片-1>）作为 image_identifier 参数传入。
+注意：标识符仅用于工具参数，不要输出在回复中给用户看。""",
     parameters={
         "type": "object",
         "properties": {
@@ -316,15 +349,9 @@ def _get_closest_size(width: int, height: int) -> str:
                 "type": "string",
                 "description": "编辑描述，说明如何修改图片。例如：\"把猫改成黑色的\"、\"添加一个太阳\"等"
             },
-            "image_index": {
-                "type": "integer",
-                "description": "图片索引，-1表示最近上传的图片，-2表示倒数第二张，默认-1",
-                "default": -1
-            },
-            "image_url": {
+            "image_identifier": {
                 "type": "string",
-                "description": "可选：直接提供图片的 URL 或 base64 data URL，如果提供则优先使用",
-                "default": ""
+                "description": "要编辑的图片标识符，如 <我发的图片-1>, <你发的图片-1> 等，从对话中的[当前可用图片]列表获取。如果不提供，将自动使用最近的一张图片。"
             }
         },
         "required": ["prompt"]
@@ -333,19 +360,18 @@ def _get_closest_size(width: int, height: int) -> str:
 )
 async def edit_image(
     prompt: str,
-    image_index: int = -1,
-    image_url: str = "",
+    image_identifier: str = "",
     session: Optional["Session"] = None,  # 由装饰器自动注入
 ) -> Dict[str, Any]:
     """
     编辑已有图片（使用配置的图片编辑模型，如 DALL-E 2）
     
     Args:
-        image_url: 原图片 URL 或 base64 data URL
         prompt: 编辑描述
+        image_identifier: 图片标识符（如 <我发的图片-1>, <你发的图片-1>）
     
     Returns:
-        {"success": bool, "urls": List[str], "error": str}
+        {"success": bool, "content": str, "images": List[str], "error": str, "metadata": Dict}
     """
     try:
         target_model = conf.image_edit_model
@@ -354,8 +380,10 @@ async def edit_image(
         if not target_model:
             return {
                 "success": False,
-                "urls": [],
-                "error": "图片编辑功能未配置，请在 aichat 配置中设置 image_edit_model（如 dall-e-2）"
+                "content": "图片编辑功能未配置，请在 aichat 配置中设置 image_edit_model（如 dall-e-2）",
+                "images": [],
+                "error": "图片编辑功能未配置，请在 aichat 配置中设置 image_edit_model（如 dall-e-2）",
+                "metadata": {}
             }
         
         # 获取 API 配置
@@ -366,8 +394,10 @@ async def edit_image(
             logger.error(error_msg)
             return {
                 "success": False,
-                "urls": [],
-                "error": error_msg
+                "content": error_msg,
+                "images": [],
+                "error": error_msg,
+                "metadata": {}
             }
         
         api_key = api_config.api_key
@@ -379,47 +409,72 @@ async def edit_image(
             logger.error(error_msg)
             return {
                 "success": False,
-                "urls": [],
-                "error": error_msg
+                "content": error_msg,
+                "images": [],
+                "error": error_msg,
+                "metadata": {}
             }
         
         # 获取原图
-        if not image_url:
-            # 未提供 URL，尝试通过 image_index 从 session 获取
+        image_data = None
+        
+        if not image_identifier:
+            # 未提供标识符，使用最近的一张图片
             if session is None:
+                logger.error("edit_image: session 为 None，无法获取图片")
                 return {
                     "success": False,
-                    "urls": [],
-                    "error": "无法获取会话信息，请重试或提供图片 URL"
+                    "content": "无法获取会话信息，请重试或提供图片标识符",
+                    "images": [],
+                    "error": "无法获取会话信息，请重试或提供图片标识符",
+                    "metadata": {}
                 }
             
-            image_url = session.get_image_by_index(image_index)
-            
-            if not image_url:
-                return {
-                    "success": False,
-                    "urls": [],
-                    "error": f"未找到索引为 {image_index} 的图片，请确认已上传图片或使用其他索引"
-                }
-        
-        # 检查是否是工具图片占位符（如 <<tool_img_1>>）
-        if image_url.startswith("<<tool_img_") and session:
-            base64_data = session.get_tool_image(image_url)
-            if base64_data:
-                image_url = base64_data
+            last_image = session.get_last_image()
+            if last_image:
+                identifier, image_data = last_image
+                logger.info(f"edit_image: 使用最近的图片 {identifier}")
             else:
+                logger.warning("edit_image: 未找到任何可用图片")
                 return {
                     "success": False,
-                    "urls": [],
-                    "error": f"未找到占位符对应的图片: {image_url}"
+                    "content": "未找到任何可用图片，请先上传图片或生成图片",
+                    "images": [],
+                    "error": "未找到任何可用图片",
+                    "metadata": {}
                 }
+        else:
+            # 解析标识符获取图片
+            if session is None:
+                logger.error("edit_image: session 为 None，无法解析标识符")
+                return {
+                    "success": False,
+                    "content": "无法获取会话信息，请重试",
+                    "images": [],
+                    "error": "无法获取会话信息",
+                    "metadata": {}
+                }
+            
+            image_data = session.resolve_image_identifier(image_identifier)
+            if not image_data:
+                logger.error(f"edit_image: 未找到标识符对应的图片: {image_identifier}")
+                return {
+                    "success": False,
+                    "content": f"未找到图片标识符: {image_identifier}，请确认标识符正确",
+                    "images": [],
+                    "error": f"未找到图片标识符: {image_identifier}",
+                    "metadata": {}
+                }
+            logger.info(f"edit_image: 解析标识符 {image_identifier} 成功")
         
-        image_bytes = await _get_image_bytes(image_url)
+        image_bytes = await _get_image_bytes(image_data)
         if not image_bytes:
             return {
                 "success": False,
-                "urls": [],
-                "error": "无法获取原图，请检查图片 URL 或 base64 数据是否有效"
+                "content": "无法获取原图，请检查图片标识符或数据是否有效",
+                "images": [],
+                "error": "无法获取原图，请检查图片标识符或数据是否有效",
+                "metadata": {}
             }
         
         # 获取原图尺寸并确定输出尺寸
@@ -441,7 +496,7 @@ async def edit_image(
         # 构造 multipart 请求
         url = f"{api_base}/images/edits"
         
-        async with ClientSession() as session:
+        async with ClientSession() as http_session:
             form = FormData()
             form.add_field('image', image_bytes, filename='image.png', content_type='image/png')
             form.add_field('prompt', prompt)
@@ -456,24 +511,36 @@ async def edit_image(
             
             logger.info(f"调用图片编辑 API: {url}, model: {model}, prompt: {prompt[:50]}...")
             
-            async with session.post(url, headers=headers, data=form) as resp:
+            async with http_session.post(url, headers=headers, data=form) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    logger.error(f"图片编辑 API 调用失败: {resp.status}, 响应: {error_text}")
+                    # 截断过长的错误信息用于日志
+                    error_text_for_log = error_text[:500] if len(error_text) > 500 else error_text
+                    logger.error(f"图片编辑 API 调用失败: {resp.status}, 响应: {error_text_for_log}")
                     return {
                         "success": False,
-                        "urls": [],
-                        "error": f"API 调用失败: HTTP {resp.status}, {error_text[:200]}"
+                        "content": f"API 调用失败: HTTP {resp.status}",
+                        "images": [],
+                        "error": f"API 调用失败: HTTP {resp.status}, {error_text[:200]}",
+                        "metadata": {}
                     }
                 
                 result = await resp.json()
+        
+        # 调试日志：记录 API 返回结果（截断可能的 base64 数据）
+        result_for_log = str(result)
+        if len(result_for_log) > 500:
+            result_for_log = result_for_log[:500] + "...[截断]"
+        logger.info(f"图片编辑 API 返回: {result_for_log}")
         
         if not result:
             logger.error("图片编辑 API 返回空结果")
             return {
                 "success": False,
-                "urls": [],
-                "error": "API 返回空结果"
+                "content": "API 返回空结果",
+                "images": [],
+                "error": "API 返回空结果",
+                "metadata": {}
             }
         
         # 提取图片 URL
@@ -493,28 +560,56 @@ async def edit_image(
                     urls.append(data_url)
         
         if not urls:
+            error_info = result.get("error", {})
+            error_msg = error_info.get("message", "无法从 API 响应中提取图片 URL") if error_info else "无法从 API 响应中提取图片 URL"
             logger.error(f"无法从响应中提取图片 URL: {result}")
             return {
                 "success": False,
-                "urls": [],
-                "error": "无法从 API 响应中提取图片 URL"
+                "content": f"图片编辑失败: {error_msg}",
+                "images": [],
+                "error": error_msg,
+                "metadata": {}
             }
         
         logger.info(f"成功编辑图片，生成 {len(urls)} 张")
         
+        # ===== 标准化返回格式 =====
+        # 存储新图片到 AI 图片列表
+        identifiers = []
+        if session:
+            for url in urls:
+                identifier = session.store_ai_image(url)
+                identifiers.append(identifier)
+                logger.info(f"edit_image: 存储新图片 {identifier}")
+        
+        if identifiers:
+            if len(identifiers) == 1:
+                content = f"已成功编辑图片，生成 {identifiers[0]}。"
+            else:
+                id_str = ", ".join(identifiers)
+                content = f"已成功编辑图片，生成 {len(identifiers)} 张：{id_str}。"
+        else:
+            content = f"已成功编辑图片，生成 {len(urls)} 张"
+        
         return {
             "success": True,
-            "urls": urls,
+            "content": content,
+            "images": urls,  # 编辑后的真实图片
             "error": None,
-            "provider": model,
-            "prompt": prompt,
-            "n": len(urls)
+            "metadata": {
+                "identifiers": identifiers,
+                "model": model,
+                "prompt": prompt,
+                "n": len(urls)
+            }
         }
         
     except Exception as e:
         logger.exception(f"编辑图片失败: {e}")
         return {
             "success": False,
-            "urls": [],
-            "error": str(e)
+            "content": f"图片编辑失败: {str(e)}",
+            "images": [],
+            "error": str(e),
+            "metadata": {}
         }

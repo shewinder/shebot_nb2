@@ -141,6 +141,72 @@ def build_messages_with_choice_mode(
     return messages
 
 
+def build_messages_for_api(
+    session: Any,
+    persona: Optional[str],
+    choice_mode: bool,
+    guideline: Optional[str]
+) -> List[Dict[str, Any]]:
+    """
+    构建用于 API 的消息列表（图片列表提示词附加到最后一条 user message）
+    
+    Args:
+        session: Session 对象
+        persona: 人格设定
+        choice_mode: 是否开启选项模式
+        guideline: 选项生成指导标准
+        
+    Returns:
+        构建好的消息列表
+    """
+    from .session import Session
+    
+    messages: List[Dict[str, Any]] = []
+    
+    # 获取图片列表提示词
+    image_list_prompt = session.build_image_list_prompt()
+    
+    # 构建 system content（仅包含人格和选项模式，不包含图片列表）
+    system_content = ""
+    
+    # 添加人格设定
+    if persona:
+        system_content = persona
+    
+    # 添加选项模式提示词（如果需要）
+    if choice_mode:
+        guideline_section = f"\n选项生成指导标准：{guideline}\n请根据以上指导标准生成合适的选项。" if guideline else ""
+        choice_prompt = CHOICE_MODE_PROMPT_TEMPLATE.format(guideline_section=guideline_section)
+        if system_content:
+            system_content += "\n\n" + choice_prompt
+        else:
+            system_content = choice_prompt
+    
+    # 添加 system message
+    if system_content:
+        messages.append({"role": "system", "content": system_content})
+    
+    # 添加其他消息（跳过原来的 system message）
+    for msg in session.messages:
+        if msg.get("role") != "system":
+            messages.append(msg)
+    
+    # 将图片列表提示词附加到最后一条 user message
+    if image_list_prompt:
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                content = msg.get("content")
+                if isinstance(content, list):
+                    # 多模态消息：添加文本部分
+                    content.append({"type": "text", "text": image_list_prompt})
+                elif isinstance(content, str):
+                    # 纯文本消息：拼接
+                    msg["content"] = content + image_list_prompt
+                break
+    
+    return messages
+
+
 async def download_image_to_base64(image_url: str) -> Optional[str]:
     """下载图片并转换为 base64 格式的 data URL"""
     try:
@@ -275,34 +341,26 @@ async def execute_tool_call(
     context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
-    执行单个工具调用
+    执行单个工具调用 - 标准化处理版本
     
-    Args:
-        tool_call: {
-            "id": str,
-            "type": "function",
-            "function": {
-                "name": str,
-                "arguments": str (JSON)
-            }
-        }
-        context: 工具调用上下文，包含 user_id, group_id 等信息
-    
-    Returns:
-        {
-            "tool_call_id": str,
-            "role": "tool",
-            "content": str (JSON)
-        }
+    工具返回格式要求：
+    {
+        "success": bool,
+        "content": str,        # 给 AI 看的描述
+        "images": List[str],   # 真实图片列表
+        "error": Optional[str],
+        "metadata": Dict
+    }
     """
     import json
+    import re
     
     tool_id = tool_call.get("id", "")
     function_info = tool_call.get("function", {})
     function_name = function_info.get("name", "")
     arguments_str = function_info.get("arguments", "{}")
     
-    logger.info(f"执行工具调用: {function_name}, args: {arguments_str}")
+    logger.info(f"执行工具: {function_name}, args: {arguments_str}")
     
     # 解析参数
     try:
@@ -312,69 +370,74 @@ async def execute_tool_call(
         return {
             "tool_call_id": tool_id,
             "role": "tool",
-            "content": json.dumps({"error": "参数解析失败"})
+            "content": json.dumps({"success": False, "error": "参数解析失败"}, ensure_ascii=False),
+            "_image_urls": []
         }
     
     # 获取工具函数
     tool_func = get_tool_function(function_name)
     if not tool_func:
-        logger.error(f"未找到工具函数: {function_name}")
+        logger.error(f"未找到工具: {function_name}")
         return {
             "tool_call_id": tool_id,
             "role": "tool",
-            "content": json.dumps({"error": f"未知工具: {function_name}"})
+            "content": json.dumps({"success": False, "error": f"未知工具: {function_name}"}, ensure_ascii=False),
+            "_image_urls": []
         }
     
-    # 执行工具
-    # 设置 contextvars 上下文（用于 session 自动注入）
+    # 设置上下文
     token = None
     if context:
         token = tool_call_context.set(context)
     
     try:
+        # 执行工具
         result = await tool_func(**arguments)
-        full_image_urls = []
         
-        # 检查工具返回结果中是否包含图片 base64
-        # 截断 base64 避免 token 超限（图片会由 handle_ai_chat 直接发送给用户）
-        result_str = json.dumps(result, ensure_ascii=False)
-        if "data:image" in result_str:
-            import re
-            # 先提取完整的图片 URL 供后续发送使用
-            pattern_full = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+'
-            full_image_urls = re.findall(pattern_full, result_str)
-            
-            # 匹配 base64 data URL，截断为提示信息（用于保存到对话历史）
-            # 注意：不要包含 _image_urls，否则会再次带入完整 base64 导致 token 超限
+        # 提取标准化字段
+        success = result.get("success", False)
+        content = result.get("content", "")
+        images = result.get("images", [])
+        error = result.get("error")
+        metadata = result.get("metadata", {})
+        
+        # content 截断：防止 token 超限
+        # 将 base64 数据截断为提示，保留占位符
+        if "data:image" in content:
             pattern = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}'
-            result_str = re.sub(
+            content = re.sub(
                 pattern,
-                lambda m: m.group(0)[:50] + "...[图片已生成并发送给用户]",
-                result_str
+                lambda m: m.group(0)[:50] + "...[图片数据已省略]",
+                content
             )
-            result = json.loads(result_str)
         
-        final_content = json.dumps(result, ensure_ascii=False)
+        # 构造返回给 AI 的内容（包含 metadata 如占位符）
+        content_for_ai = {
+            "success": success,
+            "content": content,
+            "error": error
+        }
+        # 如果有 metadata（如占位符），也传给 AI
+        if metadata:
+            content_for_ai["metadata"] = metadata
         
-        # 构造返回结果：content 给大模型（截断版本），_image_urls 给 handle_ai_chat 发送图片
-        tool_result = {
+        # 构造返回
+        return {
             "tool_call_id": tool_id,
             "role": "tool",
-            "content": final_content
+            "content": json.dumps(content_for_ai, ensure_ascii=False),
+            "_image_urls": images  # 真实图片，直接用于发送
         }
-        if full_image_urls:
-            tool_result["_image_urls"] = full_image_urls
         
-        return tool_result
     except Exception as e:
         logger.exception(f"工具执行失败: {e}")
         return {
             "tool_call_id": tool_id,
             "role": "tool",
-            "content": json.dumps({"error": str(e)})
+            "content": json.dumps({"success": False, "error": str(e)}, ensure_ascii=False),
+            "_image_urls": []
         }
     finally:
-        # 清理上下文
         if token is not None:
             tool_call_context.reset(token)
 
@@ -518,32 +581,46 @@ async def handle_ai_chat(bot: Bot, event: Event):
     # 构建消息内容（支持多模态）
     message_content: Union[str, List[Dict[str, Any]]]
     
-    # 如果模型不支持多模态，但有图片，则只发送文本并提示
+    # 提前获取 persona 和 session，确保图片存储和后续使用同一个 session 对象
+    persona = persona_manager.get_persona(user_id, group_id)
+    session = session_manager.get_session(user_id, group_id, persona)
+    
+    # 处理图片上传（无论模型是否支持多模态，都存储图片供工具使用）
     if image_urls and not supports_multimodal:
+        # 模型不支持多模态，但有图片
+        # 存储图片到 session，用户可以通过工具（如 edit_image）使用
+        for img_url in image_urls:
+            base64_image = await download_image_to_base64(img_url)
+            if base64_image:
+                identifier = session.store_user_image(base64_image)
+                logger.info(f"存储用户图片: {identifier} (模型不支持多模态，可通过工具使用)")
+            else:
+                logger.warning(f"图片处理失败，跳过: {img_url}")
+        
         if user_input:
-            # 有文本内容，只发送文本，忽略图片
-            logger.info(f"模型 {api_config.get('model')} 不支持多模态，忽略图片，只发送文本")
+            # 有文本内容，只发送文本（content 必须是 str）
+            logger.debug(f"模型 {api_config.get('model')} 不支持多模态，图片已存储，仅发送文本")
             message_content = user_input
         else:
-            # 只有图片没有文本，提示用户
-            await bot.send(event, f"当前模型 {api_config.get('model')} 不支持图片识别，请发送文本内容")
+            # 只有图片没有文本，提示用户图片已存储，可以通过工具使用
+            await bot.send(event, f"图片已接收并保存。当前模型不支持直接识别图片，你可以通过工具（如 #编辑图片）来处理这些图片。")
             return
     elif image_urls and supports_multimodal:
         # 有多模态内容：图片 + 文本
         content_parts: List[Dict[str, Any]] = []
         
-        # 处理所有图片
         for img_url in image_urls:
             base64_image = await download_image_to_base64(img_url)
             if base64_image:
+                # 存储到 session 并获取标识符
+                identifier = session.store_user_image(base64_image)
                 content_parts.append({
                     "type": "image_url",
                     "image_url": {
                         "url": base64_image,
                     },
                 })
-                # 图片会自动存储在 session.messages 中，供 edit_image 工具通过索引获取
-                logger.debug(f"处理用户上传的图片，用户: {user_id}, 群组: {group_id}")
+                logger.info(f"存储用户图片: {identifier}, 用户: {user_id}, 群组: {group_id}")
             else:
                 logger.warning(f"图片处理失败，跳过: {img_url}")
         
@@ -574,18 +651,13 @@ async def handle_ai_chat(bot: Bot, event: Event):
             return
         message_content = user_input
 
-    # 获取或创建 session，添加用户消息
-    persona = persona_manager.get_persona(user_id, group_id)
-    session = session_manager.get_session(user_id, group_id, persona)
+    # 添加用户消息到 session
     session.add_message("user", message_content)
 
-    # 如果开启了选项模式，构建带提示词的消息列表
-    if choice_mode_enabled and in_continuous_mode:
-        messages_for_api = build_messages_with_choice_mode(
-            session.messages, persona, choice_guideline
-        )
-    else:
-        messages_for_api = session.messages
+    # 构建用于 API 的消息列表（包含图片列表提示词）
+    messages_for_api = build_messages_for_api(
+        session, persona, choice_mode_enabled and in_continuous_mode, choice_guideline
+    )
 
     # 调用 AI API（支持 Tool Calling）
     # 传递上下文信息（包含 session 对象），以便工具调用时自动注入
@@ -597,37 +669,34 @@ async def handle_ai_chat(bot: Bot, event: Event):
     api_result = await call_ai_api_with_tools(messages_for_api, api_config, context=tool_context)
     
     # 发送工具生成的图片（如果有）
-    # 工具图片直接发送给用户，不等 AI 回复，避免 token 超限且确保用户能看到
+    # 工具返回标准化格式：images 字段包含真实图片数据
     for tool_result in api_result.get("tool_results", []):
         try:
-            raw_content = tool_result["result"]["content"]
+            image_urls = tool_result["result"].get("_image_urls", [])
             
-            # 优先从 tool_result["result"]["_image_urls"] 获取完整 URL（不消耗 token）
-            # 如果没有，则从 content 中解析 urls 字段（可能被截断）
-            image_urls = tool_result["result"].get("_image_urls") or []
-            if not image_urls:
-                result = json.loads(raw_content)
-                image_urls = result.get("urls", [])
-            
-            if image_urls:
-                for i, url in enumerate(image_urls):
-                    try:
-                        if url.startswith("data:image"):
-                            # Base64 图片：直接解码
-                            base64_data = url.split(",", 1)[1]
-                            img_bytes = base64.b64decode(base64_data)
-                            await bot.send(event, MessageSegment.image(file=img_bytes))
-                            logger.info(f"已发送工具生成的图片 [{i}], 大小: {len(img_bytes)} bytes")
-                        elif url.startswith("http://") or url.startswith("https://"):
-                            # HTTP URL：下载后发送
-                            from hoshino.sres import Res
-                            img_seg = await Res.image_from_url(url)
-                            await bot.send(event, img_seg)
-                            logger.info(f"已发送工具生成的图片 [{i}], URL: {url[:50]}...")
-                    except Exception as e:
-                        logger.exception(f"发送工具图片失败 [{i}]: {e}")
+            for i, url in enumerate(image_urls):
+                try:
+                    if url.startswith("data:image"):
+                        # 存储到 AI 图片列表
+                        identifier = session.store_ai_image(url)
+                        logger.info(f"存储 AI 图片: {identifier}")
+                        
+                        # Base64 图片：直接解码发送
+                        base64_data = url.split(",", 1)[1]
+                        img_bytes = base64.b64decode(base64_data)
+                        await bot.send(event, MessageSegment.image(file=img_bytes))
+                        logger.info(f"已发送工具图片 [{i}], 大小: {len(img_bytes)} bytes")
+                    elif url.startswith("http://") or url.startswith("https://"):
+                        # HTTP URL：下载后发送
+                        from hoshino.sres import Res
+                        img_seg = await Res.image_from_url(url)
+                        await bot.send(event, img_seg)
+                        logger.info(f"已发送工具图片 [{i}], URL: {url[:50]}...")
+                except Exception as e:
+                    logger.exception(f"发送工具图片失败 [{i}]: {e}")
+                    
         except Exception as e:
-            logger.warning(f"处理工具结果图片失败: {e}")
+            logger.warning(f"处理工具图片失败: {e}")
     
     if api_result.get("error") and not api_result.get("content"):
         await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result['error']}")
