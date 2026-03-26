@@ -270,6 +270,33 @@ async def generate_image(
         }
 
 
+def _get_closest_size(width: int, height: int) -> str:
+    """
+    根据原图分辨率获取最接近的标准尺寸
+    
+    OpenAI 图片编辑 API 支持的标准尺寸:
+    - 1024x1024 (正方形)
+    - 1792x1024 (横屏)
+    - 1024x1792 (竖屏)
+    
+    根据宽高比选择最接近的标准尺寸
+    """
+    # 计算宽高比
+    aspect_ratio = width / height
+    
+    # 标准尺寸的宽高比
+    # 正方形: 1.0, 横屏: 1.75, 竖屏: 0.57
+    if aspect_ratio >= 1.3:
+        # 横屏图片，使用 1792x1024
+        return "1792x1024"
+    elif aspect_ratio <= 0.7:
+        # 竖屏图片，使用 1024x1792
+        return "1024x1792"
+    else:
+        # 接近正方形，使用 1024x1024
+        return "1024x1024"
+
+
 @tool_registry.register(
     name="edit_image",
     description="""编辑用户上传的图片，根据描述修改图片内容或风格。
@@ -394,6 +421,19 @@ async def edit_image(
                 "error": "无法获取原图，请检查图片 URL 或 base64 数据是否有效"
             }
         
+        # 获取原图尺寸并确定输出尺寸
+        original_width, original_height = 1024, 1024  # 默认正方形
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                original_width, original_height = img.size
+                logger.info(f"原图尺寸: {original_width}x{original_height}")
+        except Exception as e:
+            logger.warning(f"无法获取原图尺寸，使用默认尺寸: {e}")
+        
+        # 根据原图比例选择最接近的标准尺寸
+        target_size = _get_closest_size(original_width, original_height)
+        logger.info(f"选择输出尺寸: {target_size}")
+        
         # 转换为 PNG 格式（DALL-E 要求）
         image_bytes = _convert_to_png(image_bytes)
         
@@ -407,7 +447,7 @@ async def edit_image(
             
             # 可选参数
             form.add_field('n', '1')
-            form.add_field('size', '1024x1024')
+            form.add_field('size', target_size)
             
             headers = {
                 "Authorization": f"Bearer {api_key}"
