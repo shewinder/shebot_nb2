@@ -611,17 +611,21 @@ async def handle_ai_chat(bot: Bot, event: Event):
             
             if image_urls:
                 for i, url in enumerate(image_urls):
-                    if url.startswith("data:image"):
-                        try:
-                            # 从 data URL 中提取 base64 数据
+                    try:
+                        if url.startswith("data:image"):
+                            # Base64 图片：直接解码
                             base64_data = url.split(",", 1)[1]
                             img_bytes = base64.b64decode(base64_data)
-                            
-                            # 使用 file 参数发送 bytes
                             await bot.send(event, MessageSegment.image(file=img_bytes))
                             logger.info(f"已发送工具生成的图片 [{i}], 大小: {len(img_bytes)} bytes")
-                        except Exception as e:
-                            logger.exception(f"发送工具图片失败 [{i}]: {e}")
+                        elif url.startswith("http://") or url.startswith("https://"):
+                            # HTTP URL：下载后发送
+                            from hoshino.sres import Res
+                            img_seg = await Res.image_from_url(url)
+                            await bot.send(event, img_seg)
+                            logger.info(f"已发送工具生成的图片 [{i}], URL: {url[:50]}...")
+                    except Exception as e:
+                        logger.exception(f"发送工具图片失败 [{i}]: {e}")
         except Exception as e:
             logger.warning(f"处理工具结果图片失败: {e}")
     
