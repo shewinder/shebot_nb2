@@ -197,7 +197,7 @@ async def generate_image(
             "model": model,
             "prompt": prompt,
             "n": min(max(n, 1), 10),  # 限制在 1-10 范围内
-            "response_format": "url"
+            "response_format": "b64_json"
         }
         
         logger.info(f"调用图片生成 API: {url}, model: {model}, prompt: {prompt[:50]}...")

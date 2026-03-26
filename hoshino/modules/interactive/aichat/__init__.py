@@ -661,7 +661,17 @@ async def current_model(bot: Bot, event: Event):
     """查看当前使用的模型"""
     api_name = api_manager.get_current_api()
     model_name = api_manager.get_current_model()
-    await current_model_cmd.finish(f"当前 API 厂商：{api_name}\n当前模型：{model_name}")
+    image_gen_model = conf.image_generation_model
+    image_edit_model = conf.image_edit_model
+    
+    lines = [
+        f"🤖 当前 API 厂商：{api_name}",
+        f"💬 对话模型：{model_name}",
+        f"🎨 绘图模型：{image_gen_model}",
+        f"✏️ 图片编辑模型：{image_edit_model}",
+    ]
+    
+    await current_model_cmd.finish("\n".join(lines))
 
 
 # ========== 全局预设人格管理命令（仅超级用户） ==========
