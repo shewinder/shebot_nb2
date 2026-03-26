@@ -274,10 +274,11 @@ def _get_closest_size(width: int, height: int) -> str:
     """
     根据原图分辨率获取最接近的标准尺寸
     
-    OpenAI 图片编辑 API 支持的标准尺寸:
+    gpt-image-1 支持的标准尺寸:
     - 1024x1024 (正方形)
-    - 1792x1024 (横屏)
-    - 1024x1792 (竖屏)
+    - 1536x1024 (横屏)
+    - 1024x1536 (竖屏)
+    - auto (自动选择)
     
     根据宽高比选择最接近的标准尺寸
     """
@@ -285,13 +286,13 @@ def _get_closest_size(width: int, height: int) -> str:
     aspect_ratio = width / height
     
     # 标准尺寸的宽高比
-    # 正方形: 1.0, 横屏: 1.75, 竖屏: 0.57
+    # 正方形: 1.0, 横屏: 1.5, 竖屏: 0.67
     if aspect_ratio >= 1.3:
-        # 横屏图片，使用 1792x1024
-        return "1792x1024"
+        # 横屏图片，使用 1536x1024
+        return "1536x1024"
     elif aspect_ratio <= 0.7:
-        # 竖屏图片，使用 1024x1792
-        return "1024x1792"
+        # 竖屏图片，使用 1024x1536
+        return "1024x1536"
     else:
         # 接近正方形，使用 1024x1024
         return "1024x1024"
