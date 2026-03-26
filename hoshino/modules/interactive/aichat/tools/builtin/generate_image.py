@@ -336,11 +336,11 @@ def _get_closest_size(width: int, height: int) -> str:
     description="""编辑已有图片。
 
 使用图片标识符指定要编辑的图片（从[当前可用图片]列表中选择）：
-- <我发的图片-1>, <我发的图片-2> ...（用户发送的图片）
-- <你发的图片-1>, <你发的图片-2> ...（你之前生成的图片）
-- <链接图片-1>, <链接图片-2> ...（引用消息中的图片）
+- <user_image_1>, <user_image_2> ...（用户发送的图片）
+- <ai_image_1>, <ai_image_2> ...（你之前生成的图片）
+- <url_image_1>, <url_image_2> ...（引用消息中的图片）
 
-使用方法：将标识符（如 <你发的图片-1>）作为 image_identifier 参数传入。
+使用方法：将标识符（如 <ai_image_1>）作为 image_identifier 参数传入。
 注意：标识符仅用于工具参数，不要输出在回复中给用户看。""",
     parameters={
         "type": "object",
@@ -351,7 +351,7 @@ def _get_closest_size(width: int, height: int) -> str:
             },
             "image_identifier": {
                 "type": "string",
-                "description": "要编辑的图片标识符，如 <我发的图片-1>, <你发的图片-1> 等，从对话中的[当前可用图片]列表获取。如果不提供，将自动使用最近的一张图片。"
+                "description": "要编辑的图片标识符，如 <user_image_1>, <ai_image_1> 等，从对话中的[当前可用图片]列表获取。如果不提供，将自动使用最近的一张图片。"
             }
         },
         "required": ["prompt"]

@@ -104,7 +104,7 @@ class Session:
             标识符，如 "<我发的图片-1>"
         """
         self._user_image_counter += 1
-        identifier = f"<我发的图片-{self._user_image_counter}>"
+        identifier = f"<user_image_{self._user_image_counter}>"
         self._user_images[identifier] = image_data
         self.last_active = time.time()
         
@@ -126,7 +126,7 @@ class Session:
             标识符，如 "<你发的图片-1>"
         """
         self._ai_image_counter += 1
-        identifier = f"<你发的图片-{self._ai_image_counter}>"
+        identifier = f"<ai_image_{self._ai_image_counter}>"
         self._ai_images[identifier] = image_data
         self.last_active = time.time()
         
@@ -148,7 +148,7 @@ class Session:
             标识符，如 "<链接图片-1>"
         """
         self._url_image_counter += 1
-        identifier = f"<链接图片-{self._url_image_counter}>"
+        identifier = f"<url_image_{self._url_image_counter}>"
         self._url_images[identifier] = url
         self.last_active = time.time()
         

@@ -294,7 +294,48 @@ async def call_ai_api(
             payload["tool_choice"] = tool_choice
         logger.debug(f"启用 Tool Calling，工具数量: {len(tools)}")
 
-    logger.debug(f"调用 AI API: URL={url}, Payload: {payload}")
+    # 构建用于日志的 payload 副本（截断图片数据）
+    def _truncate_image_in_content(content):
+        """递归截断 content 中的图片数据"""
+        if isinstance(content, str):
+            # 截断 base64 data URL
+            if content.startswith("data:image") and len(content) > 100:
+                return content[:50] + "...[图片数据截断]..."
+            return content
+        elif isinstance(content, list):
+            result = []
+            for item in content:
+                if isinstance(item, dict):
+                    item_copy = dict(item)
+                    if item.get("type") == "image_url" and "image_url" in item:
+                        # 截断多模态图片 URL
+                        url = item["image_url"].get("url", "")
+                        if url and len(url) > 100:
+                            item_copy["image_url"] = {"url": url[:50] + "...[图片数据截断]..."}
+                    result.append(item_copy)
+                else:
+                    result.append(item)
+            return result
+        return content
+    
+    log_payload = {
+        "model": payload["model"],
+        "messages": [
+            {
+                "role": msg.get("role"),
+                "content": _truncate_image_in_content(msg.get("content"))
+            }
+            for msg in messages
+        ]
+    }
+    if "max_tokens" in payload:
+        log_payload["max_tokens"] = payload["max_tokens"]
+    if "temperature" in payload:
+        log_payload["temperature"] = payload["temperature"]
+    if "tools" in payload:
+        log_payload["tools"] = f"[{len(payload['tools'])} 个工具]"
+    
+    logger.info(f"调用 AI API: URL={url}, Payload: {log_payload}")
 
     try:
         resp = await aiohttpx.post(url, headers=headers, json=payload)
@@ -677,11 +718,8 @@ async def handle_ai_chat(bot: Bot, event: Event):
             for i, url in enumerate(image_urls):
                 try:
                     if url.startswith("data:image"):
-                        # 存储到 AI 图片列表
-                        identifier = session.store_ai_image(url)
-                        logger.info(f"存储 AI 图片: {identifier}")
-                        
                         # Base64 图片：直接解码发送
+                        # 注意：图片已在工具内部存储，这里只负责发送
                         base64_data = url.split(",", 1)[1]
                         img_bytes = base64.b64decode(base64_data)
                         await bot.send(event, MessageSegment.image(file=img_bytes))
