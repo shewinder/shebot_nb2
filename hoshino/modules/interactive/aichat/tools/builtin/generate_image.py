@@ -144,18 +144,18 @@ def _convert_to_png(image_bytes: bytes) -> bytes:
         },
         "required": ["prompt"]
     },
-    inject_session=True  # 启用 session 自动注入
 )
 async def generate_image(
     prompt: str,
+    session: "Session",
     n: int = 1,
-    session: Optional["Session"] = None,  # 由装饰器自动注入
 ) -> Dict[str, Any]:
     """
     生成图片（使用配置的图像生成模型）
     
     Args:
         prompt: 图片描述
+        session: 会话对象（自动注入）
         n: 生成数量
     
     Returns:
@@ -263,11 +263,10 @@ async def generate_image(
         # ===== 标准化返回格式 =====
         # 将图片存入 AI 图片列表，获取统一标识符
         identifiers = []
-        if session and urls:
-            for url in urls:
-                identifier = session.store_ai_image(url)
-                identifiers.append(identifier)
-                logger.info(f"generate_image: 存储 AI 图片 {identifier}")
+        for url in urls:
+            identifier = session.store_ai_image(url)
+            identifiers.append(identifier)
+            logger.info(f"generate_image: 存储 AI 图片 {identifier}")
         
         # 构造 content：告诉 AI 标识符
         if identifiers:
@@ -356,18 +355,18 @@ def _get_closest_size(width: int, height: int) -> str:
         },
         "required": ["prompt"]
     },
-    inject_session=True  # 启用 session 自动注入
 )
 async def edit_image(
     prompt: str,
+    session: "Session",
     image_identifier: str = "",
-    session: Optional["Session"] = None,  # 由装饰器自动注入
 ) -> Dict[str, Any]:
     """
     编辑已有图片（使用配置的图片编辑模型，如 DALL-E 2）
     
     Args:
         prompt: 编辑描述
+        session: 会话对象（自动注入）
         image_identifier: 图片标识符（如 <我发的图片-1>, <你发的图片-1>）
     
     Returns:
@@ -420,16 +419,6 @@ async def edit_image(
         
         if not image_identifier:
             # 未提供标识符，使用最近的一张图片
-            if session is None:
-                logger.error("edit_image: session 为 None，无法获取图片")
-                return {
-                    "success": False,
-                    "content": "无法获取会话信息，请重试或提供图片标识符",
-                    "images": [],
-                    "error": "无法获取会话信息，请重试或提供图片标识符",
-                    "metadata": {}
-                }
-            
             last_image = session.get_last_image()
             if last_image:
                 identifier, image_data = last_image
@@ -445,16 +434,6 @@ async def edit_image(
                 }
         else:
             # 解析标识符获取图片
-            if session is None:
-                logger.error("edit_image: session 为 None，无法解析标识符")
-                return {
-                    "success": False,
-                    "content": "无法获取会话信息，请重试",
-                    "images": [],
-                    "error": "无法获取会话信息",
-                    "metadata": {}
-                }
-            
             image_data = session.resolve_image_identifier(image_identifier)
             if not image_data:
                 logger.error(f"edit_image: 未找到标识符对应的图片: {image_identifier}")
@@ -576,11 +555,10 @@ async def edit_image(
         # ===== 标准化返回格式 =====
         # 存储新图片到 AI 图片列表
         identifiers = []
-        if session:
-            for url in urls:
-                identifier = session.store_ai_image(url)
-                identifiers.append(identifier)
-                logger.info(f"edit_image: 存储新图片 {identifier}")
+        for url in urls:
+            identifier = session.store_ai_image(url)
+            identifiers.append(identifier)
+            logger.info(f"edit_image: 存储新图片 {identifier}")
         
         if identifiers:
             if len(identifiers) == 1:

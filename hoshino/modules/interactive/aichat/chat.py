@@ -21,7 +21,7 @@ from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PA
 from .persona import persona_manager
 from .session import session_manager
 from .tools import get_available_tools, get_tool_function
-from .tools.context import tool_call_context
+from .tools.registry import get_injectable_params
 
 # 加载配置
 conf = Config.get_instance('aichat')
@@ -379,10 +379,10 @@ async def call_ai_api(
 
 async def execute_tool_call(
     tool_call: Dict[str, Any],
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    执行单个工具调用 - 标准化处理版本
+    执行单个工具调用 - 支持基于类型注解的参数注入
     
     工具返回格式要求：
     {
@@ -392,9 +392,11 @@ async def execute_tool_call(
         "error": Optional[str],
         "metadata": Dict
     }
+    
+    参数注入：
+        如果工具函数的参数类型注解为 Session、Bot 或 Event，
+        且 AI 未提供该参数，则自动注入对应的对象
     """
-    import json
-    import re
     
     tool_id = tool_call.get("id", "")
     function_info = tool_call.get("function", {})
@@ -426,13 +428,25 @@ async def execute_tool_call(
             "_image_urls": []
         }
     
-    # 设置上下文
-    token = None
+    # 基于类型注解注入参数（统一从 context 获取）
     if context:
-        token = tool_call_context.set(context)
+        injectable = get_injectable_params(tool_func)
+        for param_name, type_name in injectable.items():
+            if param_name in arguments:
+                continue  # AI 已提供，跳过
+            
+            if type_name == 'Session':
+                arguments[param_name] = context.get('session')
+                logger.debug(f"注入 Session 到参数 '{param_name}'")
+            elif type_name == 'Bot':
+                arguments[param_name] = context.get('bot')
+                logger.debug(f"注入 Bot 到参数 '{param_name}'")
+            elif type_name == 'Event':
+                arguments[param_name] = context.get('event')
+                logger.debug(f"注入 Event 到参数 '{param_name}'")
     
+    # 执行工具
     try:
-        # 执行工具
         result = await tool_func(**arguments)
         
         # 提取标准化字段
@@ -478,16 +492,13 @@ async def execute_tool_call(
             "content": json.dumps({"success": False, "error": str(e)}, ensure_ascii=False),
             "_image_urls": []
         }
-    finally:
-        if token is not None:
-            tool_call_context.reset(token)
 
 
 async def call_ai_api_with_tools(
     messages: List[Dict[str, Any]], 
     api_config: Dict[str, Any],
     max_tool_rounds: int = 5,
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     调用 AI API 并处理 Tool Calling（支持多轮工具调用）
@@ -496,6 +507,7 @@ async def call_ai_api_with_tools(
         messages: 消息列表
         api_config: API 配置
         max_tool_rounds: 最大工具调用轮数，防止无限循环
+        context: 工具调用上下文，包含 session、bot、event 等可注入对象
     
     Returns:
         {
@@ -701,13 +713,17 @@ async def handle_ai_chat(bot: Bot, event: Event):
     )
 
     # 调用 AI API（支持 Tool Calling）
-    # 传递上下文信息（包含 session 对象），以便工具调用时自动注入
+    # 构建工具调用上下文（包含所有可注入对象）
     tool_context = {
-        "user_id": user_id,
-        "group_id": group_id,
         "session": session,
+        "bot": bot,
+        "event": event,
     }
-    api_result = await call_ai_api_with_tools(messages_for_api, api_config, context=tool_context)
+    api_result = await call_ai_api_with_tools(
+        messages_for_api, 
+        api_config, 
+        context=tool_context,
+    )
     
     # 发送工具生成的图片（如果有）
     # 工具返回标准化格式：images 字段包含真实图片数据
