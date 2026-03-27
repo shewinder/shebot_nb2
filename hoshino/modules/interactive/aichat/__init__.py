@@ -46,8 +46,12 @@ API/模型管理：
   切换API [厂商名]  切换API厂商，无参数时列出可用厂商（超管）
   切换模型  进入模型切换流程，自动获取可用模型列表（超管）
 工具功能（需要模型支持 Tool Calling）：
-  支持画图、搜索等工具调用
+  支持画图、搜索、定时任务等工具调用
   注意：在 config 中设置 supports_tools=true 启用
+定时任务（通过AI对话创建）：
+  说"帮我创建一个定时任务，每天早上8点..."即可
+  AI会自动调用 schedule_task 工具创建
+  支持：创建/查看/暂停/删除任务
 角色卡：
   导入角色卡 [图片]  从PNG角色卡导入人格
   导入全局角色卡 [图片]  导入全局预设人格（超管）
@@ -915,3 +919,4 @@ async def import_global_persona(bot: Bot, event: Event):
         success_count, fail_count, skip_count, imported_names, fail_reasons, total_images, is_global=True
     )
     await import_global_persona_cmd.finish(msg)
+
