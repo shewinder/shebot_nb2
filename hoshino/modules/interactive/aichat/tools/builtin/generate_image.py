@@ -16,7 +16,7 @@ from PIL import Image
 
 from hoshino.util import aiohttpx
 
-from ..registry import tool_registry
+from ..registry import tool_registry, ok, fail
 from ...config import Config, ApiEntry, ImageModelEntry
 
 # 加载配置
@@ -197,13 +197,7 @@ async def generate_image(
         if not model_entry:
             error_msg = "未找到可用的图片生成模型"
             logger.error(error_msg)
-            return {
-                "success": False,
-                "content": error_msg,
-                "images": [],
-                "error": error_msg,
-                "metadata": {}
-            }
+            return fail(error_msg)
         
         target_model = model_entry.model
         api_format = model_entry.api_format
@@ -214,13 +208,7 @@ async def generate_image(
         if not api_config:
             error_msg = f"未找到模型 {target_model} 的 API 配置"
             logger.error(error_msg)
-            return {
-                "success": False,
-                "content": error_msg,
-                "images": [],
-                "error": error_msg,
-                "metadata": {}
-            }
+            return fail(error_msg)
         
         api_key = api_config.api_key
         api_base = api_config.api_base.rstrip('/')
@@ -228,13 +216,7 @@ async def generate_image(
         if not api_key:
             error_msg = f"模型 {target_model} 的 API Key 未配置"
             logger.error(error_msg)
-            return {
-                "success": False,
-                "content": error_msg,
-                "images": [],
-                "error": error_msg,
-                "metadata": {}
-            }
+            return fail(error_msg)
         
         # 根据图片数量和 API 格式调用不同接口
         if image_count == 0:
@@ -248,13 +230,7 @@ async def generate_image(
                 if not image_data:
                     error_msg = f"未找到图片标识符: {identifier}"
                     logger.error(error_msg)
-                    return {
-                        "success": False,
-                        "content": error_msg,
-                        "images": [],
-                        "error": error_msg,
-                        "metadata": {}
-                    }
+                    return fail(error_msg)
                 # 获取图片 URL（如果是 base64，需要上传或处理）
                 image_urls.append(image_data)
             
@@ -266,19 +242,13 @@ async def generate_image(
             result = await _call_edit_api(api_base, api_key, target_model, api_format, prompt, image_urls)
         
         if not result.get("success"):
-            return result
+            return fail(result.get("error", "API 调用失败"))
         
         urls = result.get("urls", [])
         if not urls:
             error_msg = "无法从 API 响应中获取图片"
             logger.error(error_msg)
-            return {
-                "success": False,
-                "content": error_msg,
-                "images": [],
-                "error": error_msg,
-                "metadata": {}
-            }
+            return fail(error_msg)
         
         logger.info(f"成功生成/编辑 {len(urls)} 张图片")
         
@@ -299,28 +269,20 @@ async def generate_image(
         else:
             content = f"已成功生成 {len(urls)} 张图片"
         
-        return {
-            "success": True,
-            "content": content,
-            "images": urls,  # 真实图片，用于发送
-            "error": None,
-            "metadata": {
-                "identifiers": identifiers,  # AI 实际看到的标识符
+        return ok(
+            content,
+            images=urls,
+            metadata={
+                "identifiers": identifiers,
                 "model": target_model,
                 "prompt": prompt,
                 "n": len(urls)
             }
-        }
+        )
         
     except Exception as e:
         logger.exception(f"生成图片失败: {e}")
-        return {
-            "success": False,
-            "content": f"图片生成失败: {str(e)}",
-            "images": [],
-            "error": str(e),
-            "metadata": {}
-        }
+        return fail(f"图片生成失败: {str(e)}", error=str(e))
 
 
 async def _call_generate_api(

@@ -5,7 +5,7 @@ AI Tool: 定时任务管理
 from typing import Any, Dict, Optional, TYPE_CHECKING
 from loguru import logger
 
-from ..registry import tool_registry
+from ..registry import tool_registry, ok, fail
 from ...scheduler_core import scheduler_manager, generate_task_summary
 
 if TYPE_CHECKING:
@@ -185,13 +185,7 @@ async def schedule_task(
                 pass
     
     if not user_id:
-        return {
-            "success": False,
-            "content": "无法获取用户信息，创建任务失败",
-            "images": [],
-            "error": "Missing user context",
-            "metadata": {}
-        }
+        return fail("无法获取用户信息，创建任务失败", error="Missing user context")
     
     action = action.lower().strip()
     
@@ -226,23 +220,11 @@ async def schedule_task(
             return _resume_task(user_id, task_id)
         
         else:
-            return {
-                "success": False,
-                "content": f"未知操作: {action}。支持: create/list/delete/pause/resume",
-                "images": [],
-                "error": "Invalid action",
-                "metadata": {}
-            }
+            return fail(f"未知操作: {action}。支持: create/list/delete/pause/resume", error="Invalid action")
     
     except Exception as e:
         logger.exception(f"schedule_task 执行失败: {e}")
-        return {
-            "success": False,
-            "content": f"操作失败: {str(e)}",
-            "images": [],
-            "error": str(e),
-            "metadata": {}
-        }
+        return fail(f"操作失败: {str(e)}", error=str(e))
 
 
 async def _create_task(
@@ -264,22 +246,13 @@ async def _create_task(
     
     # 检查 silent 参数（必须显式提供）
     if silent is None:
-        return {
-            "success": False,
-            "content": "创建任务时必须提供 silent 参数。请根据任务类型判断：问候/提醒类任务设为 true，搜索/查询类任务设为 false。",
-            "images": [],
-            "error": "Missing silent parameter",
-            "metadata": {}
-        }
+        return fail(
+            "创建任务时必须提供 silent 参数。请根据任务类型判断：问候/提醒类任务设为 true，搜索/查询类任务设为 false。",
+            error="Missing silent parameter"
+        )
     
     if not task_description:
-        return {
-            "success": False,
-            "content": "请提供任务描述，说明要执行什么操作",
-            "images": [],
-            "error": "Missing task_description",
-            "metadata": {}
-        }
+        return fail("请提供任务描述，说明要执行什么操作", error="Missing task_description")
     
     # 判断是否是一次性任务
     is_one_time = one_time if one_time is not None else False
@@ -304,41 +277,32 @@ async def _create_task(
                 execute_datetime = datetime.fromisoformat(execute_at.replace('Z', '+00:00'))
                 cron_expr = "一次性任务"
             except ValueError:
-                return {
-                    "success": False,
-                    "content": f"无效的执行时间格式: {execute_at}。请使用 ISO8601 格式，如 '2024-12-25T08:00:00'",
-                    "images": [],
-                    "error": "Invalid execute_at format",
-                    "metadata": {}
-                }
+                return fail(
+                    f"无效的执行时间格式: {execute_at}。请使用 ISO8601 格式，如 '2024-12-25T08:00:00'",
+                    error="Invalid execute_at format"
+                )
         else:
-            return {
-                "success": False,
-                "content": "一次性任务必须提供 delay_minutes（延迟分钟数）或 execute_at（执行时间）。\n示例：delay_minutes=30 或 execute_at='2024-12-25T08:00:00'",
-                "images": [],
-                "error": "Missing time parameter for one-time task",
-                "metadata": {}
-            }
+            return fail(
+                "一次性任务必须提供 delay_minutes（延迟分钟数）或 execute_at（执行时间）。\n"
+                "示例：delay_minutes=30 或 execute_at='2024-12-25T08:00:00'",
+                error="Missing time parameter for one-time task"
+            )
         
         # 检查时间是否已过
         if execute_datetime < datetime.now():
-            return {
-                "success": False,
-                "content": f"执行时间 {execute_datetime.strftime('%Y-%m-%d %H:%M')} 已过，请设置未来的时间",
-                "images": [],
-                "error": "Execute time in the past",
-                "metadata": {}
-            }
+            return fail(
+                f"执行时间 {execute_datetime.strftime('%Y-%m-%d %H:%M')} 已过，请设置未来的时间",
+                error="Execute time in the past"
+            )
     else:
         # 循环任务：验证 cron 参数
         if not all([minute, hour, day, month, day_of_week]):
-            return {
-                "success": False,
-                "content": "循环任务必须提供完整的 cron 参数 (minute, hour, day, month, day_of_week)。\n示例：每天8点 → minute='0', hour='8', day='*', month='*', day_of_week='*'\n或设置 one_time=true 创建一次性任务",
-                "images": [],
-                "error": "Missing cron parameters",
-                "metadata": {}
-            }
+            return fail(
+                "循环任务必须提供完整的 cron 参数 (minute, hour, day, month, day_of_week)。\n"
+                "示例：每天8点 → minute='0', hour='8', day='*', month='*', day_of_week='*'\n"
+                "或设置 one_time=true 创建一次性任务",
+                error="Missing cron parameters"
+            )
         
         # 构建 cron 表达式
         cron_expr = f"{minute} {hour} {day} {month} {day_of_week}"
@@ -346,13 +310,10 @@ async def _create_task(
         # 验证 cron 格式（简单验证）
         parts = cron_expr.split()
         if len(parts) != 5:
-            return {
-                "success": False,
-                "content": f"无效的 cron 表达式: {cron_expr}。需要5个字段: minute hour day month day_of_week",
-                "images": [],
-                "error": "Invalid cron expression",
-                "metadata": {}
-            }
+            return fail(
+                f"无效的 cron 表达式: {cron_expr}。需要5个字段: minute hour day month day_of_week",
+                error="Invalid cron expression"
+            )
     
     # 生成任务摘要
     task_summary = generate_task_summary(task_description)
@@ -405,12 +366,9 @@ async def _create_task(
             f"使用「schedule_task list」查看所有任务",
         ]
     
-    return {
-        "success": True,
-        "content": "\n".join(content_lines),
-        "images": [],
-        "error": None,
-        "metadata": {
+    return ok(
+        "\n".join(content_lines),
+        metadata={
             "task_id": task.id,
             "cron_expression": cron_expr if not is_one_time else None,
             "execute_at": execute_datetime.isoformat() if is_one_time and execute_datetime else None,
@@ -418,7 +376,7 @@ async def _create_task(
             "mention_user": should_mention,
             "task_summary": task_summary
         }
-    }
+    )
 
 
 def _list_tasks(user_id: int) -> Dict[str, Any]:
@@ -427,13 +385,7 @@ def _list_tasks(user_id: int) -> Dict[str, Any]:
     tasks = scheduler_manager.get_user_tasks(user_id)
     
     if not tasks:
-        return {
-            "success": True,
-            "content": "您还没有创建定时任务。使用 schedule_task create 来创建。",
-            "images": [],
-            "error": None,
-            "metadata": {"count": 0}
-        }
+        return ok("您还没有创建定时任务。使用 schedule_task create 来创建。", metadata={"count": 0})
     
     lines = [f"📋 您的定时任务列表（共 {len(tasks)} 个）：\n"]
     
@@ -470,106 +422,49 @@ def _list_tasks(user_id: int) -> Dict[str, Any]:
     lines.append("• schedule_task pause task_id=xxx - 暂停任务")
     lines.append("• schedule_task resume task_id=xxx - 恢复任务")
     
-    return {
-        "success": True,
-        "content": "\n".join(lines),
-        "images": [],
-        "error": None,
-        "metadata": {"count": len(tasks), "task_ids": [t.id for t in tasks]}
-    }
+    return ok(
+        "\n".join(lines),
+        metadata={"count": len(tasks), "task_ids": [t.id for t in tasks]}
+    )
 
 
 def _delete_task(user_id: int, task_id: str) -> Dict[str, Any]:
     """删除任务"""
     
     if not task_id:
-        return {
-            "success": False,
-            "content": "请提供任务ID，使用 schedule_task list 查看",
-            "images": [],
-            "error": "Missing task_id",
-            "metadata": {}
-        }
+        return fail("请提供任务ID，使用 schedule_task list 查看", error="Missing task_id")
     
     success, msg = scheduler_manager.delete_task(task_id, user_id)
     
     if success:
-        return {
-            "success": True,
-            "content": f"✅ {msg}",
-            "images": [],
-            "error": None,
-            "metadata": {"task_id": task_id}
-        }
+        return ok(f"✅ {msg}", metadata={"task_id": task_id})
     else:
-        return {
-            "success": False,
-            "content": f"❌ {msg}",
-            "images": [],
-            "error": msg,
-            "metadata": {}
-        }
+        return fail(f"❌ {msg}", error=msg)
 
 
 def _pause_task(user_id: int, task_id: str) -> Dict[str, Any]:
     """暂停任务"""
     
     if not task_id:
-        return {
-            "success": False,
-            "content": "请提供任务ID",
-            "images": [],
-            "error": "Missing task_id",
-            "metadata": {}
-        }
+        return fail("请提供任务ID", error="Missing task_id")
     
     success, msg = scheduler_manager.pause_task(task_id, user_id)
     
     if success:
-        return {
-            "success": True,
-            "content": f"⏸️ {msg}",
-            "images": [],
-            "error": None,
-            "metadata": {"task_id": task_id}
-        }
+        return ok(f"⏸️ {msg}", metadata={"task_id": task_id})
     else:
-        return {
-            "success": False,
-            "content": f"❌ {msg}",
-            "images": [],
-            "error": msg,
-            "metadata": {}
-        }
+        return fail(f"❌ {msg}", error=msg)
 
 
 def _resume_task(user_id: int, task_id: str) -> Dict[str, Any]:
     """恢复任务"""
     
     if not task_id:
-        return {
-            "success": False,
-            "content": "请提供任务ID",
-            "images": [],
-            "error": "Missing task_id",
-            "metadata": {}
-        }
+        return fail("请提供任务ID", error="Missing task_id")
     
     success, msg = scheduler_manager.resume_task(task_id, user_id)
     
     if success:
-        return {
-            "success": True,
-            "content": f"▶️ {msg}",
-            "images": [],
-            "error": None,
-            "metadata": {"task_id": task_id}
-        }
+        return ok(f"▶️ {msg}", metadata={"task_id": task_id})
     else:
-        return {
-            "success": False,
-            "content": f"❌ {msg}",
-            "images": [],
-            "error": msg,
-            "metadata": {}
-        }
+        return fail(f"❌ {msg}", error=msg)

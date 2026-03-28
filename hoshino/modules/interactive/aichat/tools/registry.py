@@ -1,23 +1,71 @@
-"""
-AI Tool/Function Calling 工具注册器
-提供注册式工具管理，支持装饰器注册
-
-使用方法:
-    @tool_registry.register(
-        name="my_tool",
-        description="工具描述",
-        parameters={...}
-    )
-    async def my_tool(
-        prompt: str,
-        session: Optional[Session] = None,  # 通过类型注解自动注入
-    ) -> Dict[str, Any]:
-        ...
-"""
 import inspect
-from typing import Any, Callable, Dict, List, Optional, ForwardRef
+from typing import Any, Callable, Dict, List, Optional, ForwardRef, TypedDict
 
 from pydantic import BaseModel
+
+
+class ToolResult(TypedDict, total=False):
+    """工具返回结果标准格式
+    
+    使用辅助函数 ok() 和 fail() 创建，避免手写重复字典
+    
+    Example:
+        return ok("图片已生成", images=[url], metadata={"id": 1})
+        return fail("API 调用失败")
+    """
+    success: bool
+    content: str
+    images: List[str]
+    error: Optional[str]
+    metadata: Dict[str, Any]
+
+
+def ok(content: str, images: Optional[List[str]] = None, metadata: Optional[Dict[str, Any]] = None) -> ToolResult:
+    """创建成功的工具返回结果
+    
+    Args:
+        content: 给 AI 看的结果描述
+        images: 图片 URL 列表（可选）
+        metadata: 额外元数据（可选）
+        
+    Returns:
+        ToolResult 字典
+        
+    Example:
+        return ok("已成功生成图片 <ai_image_1>")
+        return ok("任务已创建", metadata={"task_id": "xxx"})
+    """
+    return {
+        "success": True,
+        "content": content,
+        "images": images or [],
+        "error": None,
+        "metadata": metadata or {}
+    }
+
+
+def fail(content: str, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> ToolResult:
+    """创建失败的工具返回结果
+    
+    Args:
+        content: 给 AI 看的错误描述
+        error: 技术错误信息（可选，默认使用 content）
+        metadata: 额外元数据（可选）
+        
+    Returns:
+        ToolResult 字典
+        
+    Example:
+        return fail("未找到图片模型")
+        return fail("API 调用失败", error="HTTP 500")
+    """
+    return {
+        "success": False,
+        "content": content,
+        "images": [],
+        "error": error or content,
+        "metadata": metadata or {}
+    }
 
 
 class Tool(BaseModel):
