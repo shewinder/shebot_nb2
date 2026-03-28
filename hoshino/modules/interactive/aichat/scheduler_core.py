@@ -15,7 +15,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from hoshino.schedule import scheduler, add_job
-from hoshino.util import aiohttpx
+from hoshino import get_bot_list, MessageSegment
 
 from .config import Config
 from .api import api_manager
@@ -47,6 +47,8 @@ class ScheduledTask(BaseModel):
     # 一次性任务字段
     is_one_time: bool = False                 # 是否为一次性任务
     execute_at: Optional[datetime] = None     # 执行时间（一次性任务用）
+    # @ 提醒字段
+    mention_user: bool = False                # 执行时是否 @ 任务创建者
 
 
 class TaskManager:
@@ -79,6 +81,9 @@ class TaskManager:
                     for field in ['created_at', 'updated_at', 'last_execution', 'execute_at']:
                         if task_data.get(field):
                             task_data[field] = datetime.fromisoformat(task_data[field])
+                    # 向后兼容：如果 mention_user 不存在，默认为 False
+                    if 'mention_user' not in task_data:
+                        task_data['mention_user'] = False
                     tasks.append(ScheduledTask(**task_data))
                 except Exception as e:
                     logger.warning(f"加载任务失败: {e}, 数据: {task_data}")
@@ -260,7 +265,6 @@ class TaskManager:
         """发送执行结果给用户"""
         try:
             # 延迟导入避免循环导入问题
-            from hoshino import get_bot_list
             bots = get_bot_list()
             if not bots:
                 logger.warning("没有可用的 Bot，无法发送结果")
@@ -282,6 +286,13 @@ class TaskManager:
                 ]
                 message = "\n".join(msg_lines)
             
+            # 如果需要 @ 用户，在消息开头添加 at（仅在群聊中有效）
+            if task.mention_user and task.group_id:
+                try:
+                    message = MessageSegment.at(task.user_id) + " " + message
+                except Exception as e:
+                    logger.warning(f"构造 @ 消息失败: {e}")
+            
             if task.group_id:
                 # 群聊场景：发送到群
                 await bot.send_group_msg(group_id=task.group_id, message=message)
@@ -301,7 +312,8 @@ class TaskManager:
         cron_expression: str,
         silent: bool = False,
         is_one_time: bool = False,
-        execute_at: Optional[datetime] = None
+        execute_at: Optional[datetime] = None,
+        mention_user: bool = False
     ) -> ScheduledTask:
         """创建新任务"""
         now = datetime.now()
@@ -318,7 +330,8 @@ class TaskManager:
             created_at=now,
             updated_at=now,
             is_one_time=is_one_time,
-            execute_at=execute_at
+            execute_at=execute_at,
+            mention_user=mention_user
         )
         
         self.tasks[task.id] = task
@@ -407,53 +420,17 @@ class TaskManager:
 scheduler_manager = TaskManager()
 
 
-async def generate_task_summary(description: str) -> str:
+def generate_task_summary(description: str) -> str:
     """
-    使用 AI 生成任务摘要
+    生成任务摘要（直接截取前20字）
     """
-    try:
-        api_config = api_manager.get_api_config()
-        if not api_config:
-            return description[:100]
-        
-        messages = [
-            {
-                "role": "system",
-                "content": "将用户的任务描述总结为简短的任务摘要（20字以内），去除时间信息和闲聊内容，只保留核心任务。"
-            },
-            {
-                "role": "user",
-                "content": f"描述: {description}"
-            }
-        ]
-        
-        url = f"{api_config['api_base'].rstrip('/')}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_config['api_key']}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": api_config["model"],
-            "messages": messages,
-            "max_tokens": 50,
-            "temperature": 0.3
-        }
-        
-        resp = await aiohttpx.post(url, headers=headers, json=payload)
-        if not resp.ok:
-            return description[:50]
-        
-        result = resp.json
-        summary = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        
-        # 清理可能的引号
-        summary = summary.strip('"\'')
-        
-        return summary if summary else description[:50]
-        
-    except Exception as e:
-        logger.warning(f"生成任务摘要失败: {e}")
-        return description[:50]
+    if not description:
+        return "未命名任务"
+    
+    # 截取前20字，超长时添加省略号
+    if len(description) <= 20:
+        return description
+    return description[:20] + "..."
 
 
 # ============ 模块导入时自动加载并调度所有任务 ============

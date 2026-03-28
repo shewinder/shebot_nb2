@@ -57,9 +57,19 @@ if TYPE_CHECKING:
 - silent=false（默认）: 执行结果会包装在 "📋 定时任务执行结果\n任务: xxx\n\n[内容]" 中
 - silent=true: 直接发送执行结果，不添加报告框架
 
-**设置建议：**
-- 问候、提醒、打招呼类任务 → silent=true（直接说"早上好！"更自然）
-- 搜索、生成、查询、报告类任务 → silent=false（带说明更清晰）
+## mention_user 参数说明
+控制任务执行时是否 @ 任务创建者：
+
+- mention_user=false（默认）: 正常发送消息
+- mention_user=true: 在消息开头 @ 任务创建者（仅在群聊中有效）
+
+**使用建议：**
+- 个人提醒类任务 → mention_user=true, silent=true（直接 @你 + 提醒内容）
+- 群公告类任务 → mention_user=false, silent=false（带报告框架，不@个人）
+- 搜索/报告类任务 → mention_user=false, silent=false
+
+**示例：**
+- "30分钟后提醒我该开会了，要@我" → mention_user=true, silent=true, delay_minutes=30
 
 任务创建后，到时间会调用AI自动执行，可以链式调用其他工具完成复杂任务。""",
     parameters={
@@ -113,6 +123,10 @@ if TYPE_CHECKING:
             "delay_minutes": {
                 "type": "integer",
                 "description": "延迟多少分钟后执行，如 30 表示30分钟后。one_time=true时与execute_at二选一，优先使用delay_minutes。"
+            },
+            "mention_user": {
+                "type": "boolean",
+                "description": "执行时是否 @ 任务创建者。适合提醒类任务，如'30分钟后提醒我'时设为 true，会在消息开头 @ 创建者。仅在群聊中有效。"
             }
         },
         "required": ["action"]
@@ -131,6 +145,7 @@ async def schedule_task(
     one_time: Optional[bool] = None,
     execute_at: str = "",
     delay_minutes: int = 0,
+    mention_user: Optional[bool] = None,
     session: Optional["Session"] = None,
     event: Optional["Event"] = None,
 ) -> Dict[str, Any]:
@@ -194,7 +209,8 @@ async def schedule_task(
                 silent=silent,
                 one_time=one_time,
                 execute_at=execute_at,
-                delay_minutes=delay_minutes
+                delay_minutes=delay_minutes,
+                mention_user=mention_user
             )
         
         elif action == "list":
@@ -241,7 +257,8 @@ async def _create_task(
     silent: Optional[bool],
     one_time: Optional[bool],
     execute_at: str,
-    delay_minutes: int
+    delay_minutes: int,
+    mention_user: Optional[bool]
 ) -> Dict[str, Any]:
     """创建新任务"""
     
@@ -266,6 +283,9 @@ async def _create_task(
     
     # 判断是否是一次性任务
     is_one_time = one_time if one_time is not None else False
+    
+    # 判断是否 @ 用户
+    should_mention = mention_user if mention_user is not None else False
     
     # 处理一次性任务的时间参数
     execute_datetime = None
@@ -335,7 +355,7 @@ async def _create_task(
             }
     
     # 生成任务摘要
-    task_summary = await generate_task_summary(task_description)
+    task_summary = generate_task_summary(task_description)
     
     # 创建任务
     task = scheduler_manager.create_task(
@@ -346,7 +366,8 @@ async def _create_task(
         cron_expression=cron_expr,
         silent=silent,
         is_one_time=is_one_time,
-        execute_at=execute_datetime
+        execute_at=execute_datetime,
+        mention_user=should_mention
     )
     
     # 构建返回消息
@@ -362,6 +383,7 @@ async def _create_task(
             f"⏰ 执行时间: {time_str} (一次性)",
             f"📍 创建位置: {location}",
             f"🔇 静默模式: {'是' if silent else '否'}",
+            f"🔔 @提醒: {'是' if should_mention else '否'}",
             f"🆔 任务ID: {task.id}",
             f"",
             f"任务将在指定时间执行一次，执行后自动删除。",
@@ -376,6 +398,7 @@ async def _create_task(
             f"⏰ 执行时间: {cron_expr}",
             f"📍 创建位置: {location}",
             f"🔇 静默模式: {'是' if silent else '否'}",
+            f"🔔 @提醒: {'是' if should_mention else '否'}",
             f"🆔 任务ID: {task.id}",
             f"",
             f"到时间后我会自动执行这个任务，并调用需要的工具来完成。",
@@ -392,6 +415,7 @@ async def _create_task(
             "cron_expression": cron_expr if not is_one_time else None,
             "execute_at": execute_datetime.isoformat() if is_one_time and execute_datetime else None,
             "is_one_time": is_one_time,
+            "mention_user": should_mention,
             "task_summary": task_summary
         }
     }
@@ -419,8 +443,10 @@ def _list_tasks(user_id: int) -> Dict[str, Any]:
         
         # 一次性任务标记
         one_time_mark = " [一次性]" if task.is_one_time else ""
+        # @提醒标记
+        mention_mark = " [@提醒]" if task.mention_user else ""
         
-        lines.append(f"{i}. {status} {task.task_summary}{one_time_mark}")
+        lines.append(f"{i}. {status} {task.task_summary}{one_time_mark}{mention_mark}")
         lines.append(f"   ID: {task.id}")
         
         # 显示时间信息
