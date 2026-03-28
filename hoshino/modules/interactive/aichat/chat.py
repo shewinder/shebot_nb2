@@ -12,7 +12,7 @@ from loguru import logger
 from io import BytesIO
 
 from hoshino import Bot, Event, MessageSegment
-from hoshino.util import aiohttpx, get_event_imageurl
+from hoshino.util import aiohttpx, get_event_imageurl, truncate_log, log_json
 from hoshino.util.message_util import extract_images_from_reply
 
 from .api import api_manager
@@ -295,35 +295,12 @@ async def call_ai_api(
         logger.debug(f"启用 Tool Calling，工具数量: {len(tools)}")
 
     # 构建用于日志的 payload 副本（截断图片数据）
-    def _truncate_image_in_content(content):
-        """递归截断 content 中的图片数据"""
-        if isinstance(content, str):
-            # 截断 base64 data URL
-            if content.startswith("data:image") and len(content) > 100:
-                return content[:50] + "...[图片数据截断]..."
-            return content
-        elif isinstance(content, list):
-            result = []
-            for item in content:
-                if isinstance(item, dict):
-                    item_copy = dict(item)
-                    if item.get("type") == "image_url" and "image_url" in item:
-                        # 截断多模态图片 URL
-                        url = item["image_url"].get("url", "")
-                        if url and len(url) > 100:
-                            item_copy["image_url"] = {"url": url[:50] + "...[图片数据截断]..."}
-                    result.append(item_copy)
-                else:
-                    result.append(item)
-            return result
-        return content
-    
     log_payload = {
         "model": payload["model"],
         "messages": [
             {
                 "role": msg.get("role"),
-                "content": _truncate_image_in_content(msg.get("content"))
+                "content": truncate_log(msg.get("content"))
             }
             for msg in messages
         ]
@@ -335,12 +312,13 @@ async def call_ai_api(
     if "tools" in payload:
         log_payload["tools"] = f"[{len(payload['tools'])} 个工具]"
     
-    logger.info(f"调用 AI API: URL={url}, Payload: {log_payload}")
+    logger.info(f"调用 AI API: URL={url}, Payload: {log_json(log_payload)}")
 
     try:
         resp = await aiohttpx.post(url, headers=headers, json=payload)
         if not resp.ok:
-            logger.error(f"AI API 调用失败: {resp.status_code}, 响应: {resp.text}")
+            error_text = truncate_log(resp.text) if hasattr(resp, 'text') else 'unknown'
+            logger.error(f"AI API 调用失败: {resp.status_code}, 响应: {error_text}")
             return {"error": f"HTTP {resp.status_code}", "content": None}
 
         result = resp.json
@@ -348,7 +326,7 @@ async def call_ai_api(
             logger.error("AI API 返回空结果")
             return {"error": "返回空结果", "content": None}
 
-        logger.info(f"AI API 响应: {str(result)}")
+        logger.info(f"AI API 响应: {log_json(result)}")
 
         if "choices" in result and len(result["choices"]) > 0:
             choice = result["choices"][0]
@@ -369,7 +347,7 @@ async def call_ai_api(
         
         error_info = result.get("error", {})
         error_msg = error_info.get("message", "未知错误") if error_info else "返回格式错误"
-        logger.error(f"AI API 返回错误: {error_msg}, 完整响应: {result}")
+        logger.error(f"AI API 返回错误: {error_msg}, 完整响应: {log_json(result)}")
         return {"error": error_msg, "content": None}
         
     except Exception as e:
@@ -403,7 +381,7 @@ async def execute_tool_call(
     function_name = function_info.get("name", "")
     arguments_str = function_info.get("arguments", "{}")
     
-    logger.info(f"执行工具: {function_name}, args: {arguments_str}")
+    logger.info(f"执行工具: {function_name}, args: {truncate_log(arguments_str)}")
     
     # 解析参数
     try:
@@ -563,7 +541,7 @@ async def call_ai_api_with_tools(
                 "result": tool_result
             })
             current_messages.append(tool_result)
-            logger.info(f"工具调用结果: {tool_result['content'][:200]}...")
+            logger.info(f"工具调用结果: {truncate_log(tool_result['content'])}")
     
     # 达到最大轮数限制
     logger.warning(f"达到最大工具调用轮数限制: {max_tool_rounds}")
@@ -839,5 +817,5 @@ async def handle_ai_chat(bot: Bot, event: Event):
                 sent = True
             
     except Exception as e:
-        logger.error(str(display_response))
+        logger.error(truncate_log(str(display_response)))
         logger.error(f"发送AI回复失败: {e}")

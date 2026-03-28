@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Type
+from typing import List, Optional, Tuple, Type, TypeVar
 from io import BytesIO
 from collections import defaultdict
 from PIL import Image, ImageDraw, ImageFont
@@ -196,3 +196,78 @@ async def _strip_cmd(bot: "Bot", event: "Event", state: T_State):
     )  # type: ignore
     for new_segment in reversed(new_message):
         message.insert(0, new_segment)
+
+
+_T = TypeVar("_T")
+
+def truncate_log(
+    data: _T,
+    max_length: int = 200,
+    head_length: int = 50,
+    tail_length: int = 50,
+    placeholder: str = "...[{length} chars]..."
+) -> _T:
+    """
+    递归截断数据中的超长字符串，用于日志打印
+    
+    Args:
+        data: 要处理的数据（可以是 dict、list、str 或其他类型）
+        max_length: 字符串最大长度，超过则截断
+        head_length: 截断后保留的开头字符数
+        tail_length: 截断后保留的结尾字符数
+        placeholder: 截断占位符模板，{length} 会被替换为实际截断的字符数
+    
+    Returns:
+        处理后的数据，结构与输入相同，但超长字符串已被截断
+    
+    Examples:
+        >>> data = {"msg": "a" * 1000, "nested": {"text": "b" * 300}}
+        >>> truncate_log(data)
+        {'msg': 'aaaa...[900 chars]...aaaa', 'nested': {'text': 'bbbb...[200 chars]...bbbb'}}
+    """
+    if isinstance(data, str):
+        if len(data) <= max_length:
+            return data
+        truncated_len = len(data) - head_length - tail_length
+        placeholder_str = placeholder.format(length=truncated_len)
+        return data[:head_length] + placeholder_str + data[-tail_length:]
+    
+    elif isinstance(data, dict):
+        return {key: truncate_log(value, max_length, head_length, tail_length, placeholder) 
+                for key, value in data.items()}
+    
+    elif isinstance(data, list):
+        return [truncate_log(item, max_length, head_length, tail_length, placeholder) 
+                for item in data]
+    
+    else:
+        return data
+
+
+def log_json(
+    data: object,
+    max_length: int = 200,
+    head_length: int = 50,
+    tail_length: int = 50,
+    ensure_ascii: bool = False,
+    indent: Optional[int] = None
+) -> str:
+    """
+    将数据格式化为 JSON 字符串，自动截断超长字段
+    
+    Args:
+        data: 要格式化的数据
+        max_length: 字符串最大长度
+        head_length: 保留的开头字符数
+        tail_length: 保留的结尾字符数
+        ensure_ascii: 是否转义非 ASCII 字符
+        indent: 缩进空格数，None 表示不格式化
+    
+    Returns:
+        格式化后的 JSON 字符串
+    
+    Examples:
+        >>> logger.info(f"API响应: {log_json(response_data)}")
+    """
+    truncated = truncate_log(data, max_length, head_length, tail_length)
+    return json.dumps(truncated, ensure_ascii=ensure_ascii, indent=indent, default=str)

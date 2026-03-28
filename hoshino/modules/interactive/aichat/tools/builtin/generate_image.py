@@ -14,7 +14,7 @@ from aiohttp import ClientSession
 from aiohttp import FormData
 from PIL import Image
 
-from hoshino.util import aiohttpx
+from hoshino.util import aiohttpx, truncate_log, log_json
 
 from ..registry import tool_registry, ok, fail
 from ...config import Config, ApiEntry, ImageModelEntry
@@ -326,15 +326,16 @@ async def _call_generate_api(
             "response_format": "b64_json"
         }
     
-    logger.info(f"调用生成 API: {url}, model: {model}")
+    logger.info(f"调用生成 API: {url}, model: {model}, prompt: {truncate_log(prompt)}")
     resp = await aiohttpx.post(url, headers=headers, json=payload)
     
     if not resp.ok:
-        error_text = resp.text if hasattr(resp, 'text') else str(resp)
+        error_text = truncate_log(resp.text) if hasattr(resp, 'text') else str(resp)
         logger.error(f"API 调用失败: {resp.status_code if hasattr(resp, 'status_code') else 'unknown'}, {error_text}")
         return {"success": False, "error": f"HTTP {getattr(resp, 'status_code', 'unknown')}: {str(error_text)[:200]}"}
     
     result = resp.json if hasattr(resp, 'json') else resp.json()
+    logger.info(f"生成 API 响应: {log_json(result)}")
     if not result:
         return {"success": False, "error": "API 返回空结果"}
     
@@ -412,15 +413,16 @@ async def _call_edit_api(
             }
         }
         
-        logger.info(f"调用 Gemini 编辑 API: {url}, 图片数: {len(image_urls)}")
+        logger.info(f"调用 Gemini 编辑 API: {url}, 图片数: {len(image_urls)}, prompt: {truncate_log(prompt)}")
         resp = await aiohttpx.post(url, headers=headers, json=payload)
         
         if not resp.ok:
-            error_text = resp.text if hasattr(resp, 'text') else str(resp)
+            error_text = truncate_log(resp.text) if hasattr(resp, 'text') else str(resp)
             logger.error(f"API 调用失败: {getattr(resp, 'status_code', 'unknown')}, {error_text}")
             return {"success": False, "error": f"HTTP {getattr(resp, 'status_code', 'unknown')}: {str(error_text)[:200]}"}
         
         result = resp.json if hasattr(resp, 'json') else resp.json()
+        logger.info(f"Gemini 编辑 API 响应: {log_json(result)}")
         urls = []
         candidates = result.get("candidates", [])
         if candidates:
@@ -462,10 +464,11 @@ async def _call_edit_api(
             logger.info(f"调用 OpenAI 编辑 API: {url}")
             async with http_session.post(url, headers=headers, data=form) as resp:
                 if resp.status != 200:
-                    error_text = await resp.text()
+                    error_text = truncate_log(await resp.text())
                     logger.error(f"API 调用失败: {resp.status}, {error_text}")
                     return {"success": False, "error": f"HTTP {resp.status}: {error_text[:200]}"}
                 result = await resp.json()
+                logger.info(f"OpenAI 编辑 API 响应: {log_json(result)}")
                 
                 urls = []
                 for item in result.get("data", []):
