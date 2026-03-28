@@ -24,23 +24,32 @@ if TYPE_CHECKING:
 - pause: 暂停指定任务（需要 task_id）
 - resume: 恢复指定任务（需要 task_id）
 
-## 时间参数说明（根据用户描述生成 cron 字段）
-生成标准5字段 cron 表达式: minute hour day month day_of_week
+## 任务类型
+### 1. 循环任务（使用 cron 表达式）
+适合定期执行的任务，如"每天早上8点"。
 
+生成标准5字段 cron 表达式: minute hour day month day_of_week
 - minute: 分钟 (0-59 或 *)，如 "8点整" → "0"
 - hour: 小时 (0-23 或 *)，如 "早上8点" → "8"，"晚上8点" → "20"
 - day: 日期 (1-31 或 *)，每天用 "*"
 - month: 月份 (1-12 或 *)，每月用 "*"
 - day_of_week: 星期 (0-6 或 *, 0=周日, 1=周一)，每天用 "*"
 
-## 常用时间示例
+**循环任务示例：**
 - "每天8点" → minute="0", hour="8", day="*", month="*", day_of_week="*"
-- "每天早上8点30分" → minute="30", hour="8", day="*", month="*", day_of_week="*"
 - "每周一早上9点" → minute="0", hour="9", day="*", month="*", day_of_week="1"
-- "每周一三五晚上8点" → minute="0", hour="20", day="*", month="*", day_of_week="1,3,5"
-- "每小时整点" → minute="0", hour="*", day="*", month="*", day_of_week="*"
 - "每30分钟" → minute="*/30", hour="*", day="*", month="*", day_of_week="*"
-- "每月1号0点" → minute="0", hour="0", day="1", month="*", day_of_week="*"
+
+### 2. 一次性任务（使用 one_time 参数）
+适合只执行一次的任务，如"30分钟后提醒我"。
+- one_time=true 表示任务只执行一次，执行后自动删除
+- delay_minutes: 相对时间，如 "30分钟后" → delay_minutes=30
+- execute_at: 绝对时间，ISO8601格式，如 "2024-12-25T08:00:00"
+
+**一次性任务示例：**
+- "30分钟后提醒我该开会了" → one_time=true, delay_minutes=30
+- "5分钟后发送一条消息" → one_time=true, delay_minutes=5
+- "明天早上8点叫我起床" → one_time=true, execute_at="2024-12-25T08:00:00"
 
 ## silent 参数说明（重要）
 控制任务执行时是否添加"任务报告"框架：
@@ -92,6 +101,18 @@ if TYPE_CHECKING:
             "silent": {
                 "type": "boolean",
                 "description": "【重要】是否静默执行（不添加任务报告框架）。必须根据任务类型判断：问候/提醒/打招呼类任务设为 true；搜索/生成/查询/报告类任务设为 false。"
+            },
+            "one_time": {
+                "type": "boolean",
+                "description": "是否为一次性任务，true表示任务只执行一次后自动删除。create时使用。"
+            },
+            "execute_at": {
+                "type": "string",
+                "description": "一次性任务的执行时间，ISO8601格式，如 '2024-12-25T08:00:00'。one_time=true时与delay_minutes二选一。"
+            },
+            "delay_minutes": {
+                "type": "integer",
+                "description": "延迟多少分钟后执行，如 30 表示30分钟后。one_time=true时与execute_at二选一，优先使用delay_minutes。"
             }
         },
         "required": ["action"]
@@ -107,6 +128,9 @@ async def schedule_task(
     day_of_week: str = "",
     task_id: str = "",
     silent: Optional[bool] = None,
+    one_time: Optional[bool] = None,
+    execute_at: str = "",
+    delay_minutes: int = 0,
     session: Optional["Session"] = None,
     event: Optional["Event"] = None,
 ) -> Dict[str, Any]:
@@ -167,7 +191,10 @@ async def schedule_task(
                 day=day,
                 month=month,
                 day_of_week=day_of_week,
-                silent=silent
+                silent=silent,
+                one_time=one_time,
+                execute_at=execute_at,
+                delay_minutes=delay_minutes
             )
         
         elif action == "list":
@@ -211,7 +238,10 @@ async def _create_task(
     day: str,
     month: str,
     day_of_week: str,
-    silent: Optional[bool]
+    silent: Optional[bool],
+    one_time: Optional[bool],
+    execute_at: str,
+    delay_minutes: int
 ) -> Dict[str, Any]:
     """创建新任务"""
     
@@ -234,29 +264,75 @@ async def _create_task(
             "metadata": {}
         }
     
-    # 验证时间参数
-    if not all([minute, hour, day, month, day_of_week]):
-        return {
-            "success": False,
-            "content": "请提供完整的时间参数 (minute, hour, day, month, day_of_week)。\n示例：每天8点 → minute='0', hour='8', day='*', month='*', day_of_week='*'",
-            "images": [],
-            "error": "Missing time parameters",
-            "metadata": {}
-        }
+    # 判断是否是一次性任务
+    is_one_time = one_time if one_time is not None else False
     
-    # 构建 cron 表达式
-    cron_expr = f"{minute} {hour} {day} {month} {day_of_week}"
+    # 处理一次性任务的时间参数
+    execute_datetime = None
+    cron_expr = ""
     
-    # 验证 cron 格式（简单验证）
-    parts = cron_expr.split()
-    if len(parts) != 5:
-        return {
-            "success": False,
-            "content": f"无效的 cron 表达式: {cron_expr}。需要5个字段: minute hour day month day_of_week",
-            "images": [],
-            "error": "Invalid cron expression",
-            "metadata": {}
-        }
+    if is_one_time:
+        # 一次性任务：优先使用 delay_minutes，其次使用 execute_at
+        if delay_minutes > 0:
+            from datetime import datetime, timedelta
+            execute_datetime = datetime.now() + timedelta(minutes=delay_minutes)
+            cron_expr = "一次性任务"
+        elif execute_at:
+            from datetime import datetime
+            try:
+                # 尝试解析 ISO8601 格式
+                execute_datetime = datetime.fromisoformat(execute_at.replace('Z', '+00:00'))
+                cron_expr = "一次性任务"
+            except ValueError:
+                return {
+                    "success": False,
+                    "content": f"无效的执行时间格式: {execute_at}。请使用 ISO8601 格式，如 '2024-12-25T08:00:00'",
+                    "images": [],
+                    "error": "Invalid execute_at format",
+                    "metadata": {}
+                }
+        else:
+            return {
+                "success": False,
+                "content": "一次性任务必须提供 delay_minutes（延迟分钟数）或 execute_at（执行时间）。\n示例：delay_minutes=30 或 execute_at='2024-12-25T08:00:00'",
+                "images": [],
+                "error": "Missing time parameter for one-time task",
+                "metadata": {}
+            }
+        
+        # 检查时间是否已过
+        if execute_datetime < datetime.now():
+            return {
+                "success": False,
+                "content": f"执行时间 {execute_datetime.strftime('%Y-%m-%d %H:%M')} 已过，请设置未来的时间",
+                "images": [],
+                "error": "Execute time in the past",
+                "metadata": {}
+            }
+    else:
+        # 循环任务：验证 cron 参数
+        if not all([minute, hour, day, month, day_of_week]):
+            return {
+                "success": False,
+                "content": "循环任务必须提供完整的 cron 参数 (minute, hour, day, month, day_of_week)。\n示例：每天8点 → minute='0', hour='8', day='*', month='*', day_of_week='*'\n或设置 one_time=true 创建一次性任务",
+                "images": [],
+                "error": "Missing cron parameters",
+                "metadata": {}
+            }
+        
+        # 构建 cron 表达式
+        cron_expr = f"{minute} {hour} {day} {month} {day_of_week}"
+        
+        # 验证 cron 格式（简单验证）
+        parts = cron_expr.split()
+        if len(parts) != 5:
+            return {
+                "success": False,
+                "content": f"无效的 cron 表达式: {cron_expr}。需要5个字段: minute hour day month day_of_week",
+                "images": [],
+                "error": "Invalid cron expression",
+                "metadata": {}
+            }
     
     # 生成任务摘要
     task_summary = await generate_task_summary(task_description)
@@ -268,25 +344,43 @@ async def _create_task(
         raw_description=task_description,
         task_summary=task_summary,
         cron_expression=cron_expr,
-        silent=silent
+        silent=silent,
+        is_one_time=is_one_time,
+        execute_at=execute_datetime
     )
     
     # 构建返回消息
     location = f"群{group_id}" if group_id else "私聊"
     
-    content_lines = [
-        f"✅ 定时任务创建成功！",
-        f"",
-        f"📋 任务摘要: {task_summary}",
-        f"📝 任务描述: {task_description[:80]}{'...' if len(task_description) > 80 else ''}",
-        f"⏰ 执行时间: {cron_expr}",
-        f"📍 创建位置: {location}",
-        f"🔇 静默模式: {'是' if silent else '否'}",
-        f"🆔 任务ID: {task.id}",
-        f"",
-        f"到时间后我会自动执行这个任务，并调用需要的工具来完成。",
-        f"使用「schedule_task list」查看所有任务",
-    ]
+    if is_one_time:
+        time_str = execute_datetime.strftime('%Y-%m-%d %H:%M')
+        content_lines = [
+            f"✅ 一次性任务创建成功！",
+            f"",
+            f"📋 任务摘要: {task_summary}",
+            f"📝 任务描述: {task_description[:80]}{'...' if len(task_description) > 80 else ''}",
+            f"⏰ 执行时间: {time_str} (一次性)",
+            f"📍 创建位置: {location}",
+            f"🔇 静默模式: {'是' if silent else '否'}",
+            f"🆔 任务ID: {task.id}",
+            f"",
+            f"任务将在指定时间执行一次，执行后自动删除。",
+            f"使用「schedule_task list」查看所有任务",
+        ]
+    else:
+        content_lines = [
+            f"✅ 定时任务创建成功！",
+            f"",
+            f"📋 任务摘要: {task_summary}",
+            f"📝 任务描述: {task_description[:80]}{'...' if len(task_description) > 80 else ''}",
+            f"⏰ 执行时间: {cron_expr}",
+            f"📍 创建位置: {location}",
+            f"🔇 静默模式: {'是' if silent else '否'}",
+            f"🆔 任务ID: {task.id}",
+            f"",
+            f"到时间后我会自动执行这个任务，并调用需要的工具来完成。",
+            f"使用「schedule_task list」查看所有任务",
+        ]
     
     return {
         "success": True,
@@ -295,7 +389,9 @@ async def _create_task(
         "error": None,
         "metadata": {
             "task_id": task.id,
-            "cron_expression": cron_expr,
+            "cron_expression": cron_expr if not is_one_time else None,
+            "execute_at": execute_datetime.isoformat() if is_one_time and execute_datetime else None,
+            "is_one_time": is_one_time,
             "task_summary": task_summary
         }
     }
@@ -321,9 +417,18 @@ def _list_tasks(user_id: int) -> Dict[str, Any]:
         status = "🟢" if task.is_active else "⏸️"
         location = f"群{task.group_id}" if task.group_id else "私聊"
         
-        lines.append(f"{i}. {status} {task.task_summary}")
+        # 一次性任务标记
+        one_time_mark = " [一次性]" if task.is_one_time else ""
+        
+        lines.append(f"{i}. {status} {task.task_summary}{one_time_mark}")
         lines.append(f"   ID: {task.id}")
-        lines.append(f"   时间: {task.cron_expression}")
+        
+        # 显示时间信息
+        if task.is_one_time and task.execute_at:
+            lines.append(f"   执行时间: {task.execute_at.strftime('%Y-%m-%d %H:%M')} (一次性)")
+        else:
+            lines.append(f"   时间: {task.cron_expression}")
+        
         lines.append(f"   位置: {location}")
         
         if task.execution_count > 0:

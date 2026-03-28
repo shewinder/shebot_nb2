@@ -19,12 +19,14 @@ from hoshino.util import aiohttpx
 
 from .config import Config
 from .api import api_manager
+from hoshino import userdata_dir
 
 # 加载配置
 conf = Config.get_instance('aichat')
 
-# 任务存储文件路径
-TASKS_FILE = Path("data/aichat_scheduled_tasks.json")
+# 任务存储文件路径（与 aichat 其他配置放在一起）
+aichat_data_dir: Path = userdata_dir.joinpath('aichat')
+TASKS_FILE = aichat_data_dir.joinpath('aichat_scheduled_tasks.json')
 
 
 class ScheduledTask(BaseModel):
@@ -34,7 +36,7 @@ class ScheduledTask(BaseModel):
     group_id: Optional[int]   # 群组ID（私聊为null）
     raw_description: str      # 用户原始描述
     task_summary: str         # AI整理后的执行摘要
-    cron_expression: str      # cron表达式
+    cron_expression: str      # cron表达式（循环任务用）
     is_active: bool = True    # 是否激活
     silent: bool = False      # 静默模式：True时不添加任务报告框架
     execution_count: int = 0  # 执行次数
@@ -42,6 +44,9 @@ class ScheduledTask(BaseModel):
     updated_at: datetime      # 更新时间
     last_execution: Optional[datetime] = None  # 上次执行时间
     last_result: Optional[str] = None          # 上次执行结果摘要
+    # 一次性任务字段
+    is_one_time: bool = False                 # 是否为一次性任务
+    execute_at: Optional[datetime] = None     # 执行时间（一次性任务用）
 
 
 class TaskManager:
@@ -71,7 +76,7 @@ class TaskManager:
             for task_data in data.get('tasks', []):
                 try:
                     # 处理 datetime 字符串
-                    for field in ['created_at', 'updated_at', 'last_execution']:
+                    for field in ['created_at', 'updated_at', 'last_execution', 'execute_at']:
                         if task_data.get(field):
                             task_data[field] = datetime.fromisoformat(task_data[field])
                     tasks.append(ScheduledTask(**task_data))
@@ -97,7 +102,7 @@ class TaskManager:
             for task in self.tasks.values():
                 task_dict = task.dict()
                 # 处理 datetime 对象
-                for field in ['created_at', 'updated_at', 'last_execution']:
+                for field in ['created_at', 'updated_at', 'last_execution', 'execute_at']:
                     if task_dict.get(field):
                         task_dict[field] = task_dict[field].isoformat()
                 data["tasks"].append(task_dict)
@@ -122,16 +127,30 @@ class TaskManager:
     def _schedule_task_sync(self, task: ScheduledTask):
         """将任务添加到 APScheduler（同步版本）"""
         try:
-            job = add_job(
-                self._execute_task_wrapper,
-                trigger='cron',
-                kwargs={'task_id': task.id},
-                id=f"aichat_task_{task.id}",
-                replace_existing=True,
-                **self._cron_to_kwargs(task.cron_expression)
-            )
-            self._job_ids[task.id] = job.id
-            logger.info(f"已调度任务 {task.id}: {task.cron_expression}")
+            if task.is_one_time and task.execute_at:
+                # 一次性任务使用 date trigger
+                job = add_job(
+                    self._execute_task_wrapper,
+                    trigger='date',
+                    kwargs={'task_id': task.id},
+                    run_date=task.execute_at,
+                    id=f"aichat_task_{task.id}",
+                    replace_existing=True
+                )
+                self._job_ids[task.id] = job.id
+                logger.info(f"已调度一次性任务 {task.id}: {task.execute_at}")
+            else:
+                # 循环任务使用 cron trigger
+                job = add_job(
+                    self._execute_task_wrapper,
+                    trigger='cron',
+                    kwargs={'task_id': task.id},
+                    id=f"aichat_task_{task.id}",
+                    replace_existing=True,
+                    **self._cron_to_kwargs(task.cron_expression)
+                )
+                self._job_ids[task.id] = job.id
+                logger.info(f"已调度循环任务 {task.id}: {task.cron_expression}")
         except Exception as e:
             logger.exception(f"调度任务失败 {task.id}: {e}")
     
@@ -172,14 +191,24 @@ class TaskManager:
         # 动态导入避免循环依赖
         from .chat import call_ai_api_with_tools
         from .tools import get_available_tools
+        from .persona import persona_manager
+        
+        # 获取任务创建者的当前人格
+        persona = persona_manager.get_persona(task.user_id, task.group_id)
+        
+        # 构建 system content
+        if persona:
+            system_content = f"{persona}\n\n你正在执行一个定时任务。请根据用户的任务描述执行操作，"
+            system_content += "你可以调用任何可用工具来完成任务。请尽可能详细地完成任务，并在完成后总结执行结果。"
+        else:
+            system_content = "你是一个任务执行助手。请根据用户的任务描述执行操作。\n"
+            system_content += "你可以调用任何可用工具来完成任务。请尽可能详细地完成任务，并在完成后总结执行结果。"
         
         # 构建执行消息
         messages = [
             {
                 "role": "system",
-                "content": """你是一个任务执行助手。请根据用户的任务描述执行操作。
-你可以调用任何可用工具来完成任务。
-请尽可能详细地完成任务，并在完成后总结执行结果。"""
+                "content": system_content
             },
             {
                 "role": "user",
@@ -208,13 +237,20 @@ class TaskManager:
             task.last_execution = datetime.now()
             task.last_result = result.get("content", "")[:500] if result.get("content") else None
             task.updated_at = datetime.now()
-            self.save_tasks()
+            
+            # 一次性任务执行后自动删除
+            if task.is_one_time:
+                self.delete_task(task_id, task.user_id)
+                logger.info(f"一次性任务 {task_id} 执行完成并已自动删除")
+            else:
+                self.save_tasks()
             
             # 发送结果
             content = result.get("content", "任务执行完成，但没有返回内容")
             await self._send_result(task, content)
             
-            logger.info(f"任务 {task_id} 执行完成")
+            if not task.is_one_time:
+                logger.info(f"任务 {task_id} 执行完成")
             
         except Exception as e:
             logger.exception(f"任务 {task_id} 执行异常: {e}")
@@ -263,7 +299,9 @@ class TaskManager:
         raw_description: str,
         task_summary: str,
         cron_expression: str,
-        silent: bool = False
+        silent: bool = False,
+        is_one_time: bool = False,
+        execute_at: Optional[datetime] = None
     ) -> ScheduledTask:
         """创建新任务"""
         now = datetime.now()
@@ -278,7 +316,9 @@ class TaskManager:
             silent=silent,
             execution_count=0,
             created_at=now,
-            updated_at=now
+            updated_at=now,
+            is_one_time=is_one_time,
+            execute_at=execute_at
         )
         
         self.tasks[task.id] = task
