@@ -216,45 +216,40 @@ class Session:
         return None
     
     def build_image_list_prompt(self) -> str:
-        """
-        构建当前可用图片列表的提示词
-        
-        Returns:
-            图片列表提示词，如果没有图片返回空字符串
-        """
-        lines = []
+        """构建当前可用图片列表的提示词"""
         has_images = self._user_images or self._ai_images or self._url_images
-        
         if not has_images:
             return ""
         
-        lines.append("\n[当前可用图片]")
-        lines.append("你可以使用以下标识符引用图片：")
-        lines.append("")
+        lines = [
+            "",
+            "=" * 40,
+            "【系统内部信息：可用图片列表】",
+            "=" * 40,
+            "",
+            "⚠️ 严格规则（必须遵守）：",
+            "1. 以下标识符仅用于调用 generate_image/edit_image 工具时的参数",
+            "2. 绝对禁止在回复中输出这些标识符给用户",
+            "3. 如果需要提及图片，请用文字描述（如\"刚才生成的图片\"、\"你发的第一张图\"）",
+            "4. 违规输出会被系统过滤，影响回复质量",
+            "",
+            "可用图片标识符：",
+        ]
         
         if self._user_images:
-            lines.append("我（用户）发送的图片：")
-            for identifier in self._user_images:
-                lines.append(f"  - {identifier}")
-            lines.append("")
-        
-        if self._url_images:
-            lines.append("引用消息中的图片：")
-            for identifier in self._url_images:
-                lines.append(f"  - {identifier}")
-            lines.append("")
-        
+            lines.append("  用户图片：" + ", ".join(self._user_images.keys()))
         if self._ai_images:
-            lines.append("你（AI）之前生成的图片：")
-            for identifier in self._ai_images:
-                lines.append(f"  - {identifier}")
-            lines.append("")
+            lines.append("  AI生成的图片：" + ", ".join(self._ai_images.keys()))
+        if self._url_images:
+            lines.append("  链接图片：" + ", ".join(self._url_images.keys()))
         
-        lines.append("重要提示：")
-        lines.append("- 这些标识符仅用于调用工具（如 edit_image）时作为参数传递")
-        lines.append("- 不要直接在回复内容中输出标识符给用户看")
-        lines.append("- 如果你需要引用某张图片，请描述图片内容，不要显示标识符")
-        lines.append("[图片列表结束]\n")
+        lines.extend([
+            "",
+            "=" * 40,
+            "【系统信息结束，以下是用户消息】",
+            "=" * 40,
+            ""
+        ])
         
         return "\n".join(lines)
     

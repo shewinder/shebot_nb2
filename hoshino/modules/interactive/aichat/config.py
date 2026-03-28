@@ -16,6 +16,13 @@ class ApiEntry(BaseModel):
     temperature: Optional[float] = None  # None 表示不传给 API，使用模型默认值
 
 
+class ImageModelEntry(BaseModel):
+    """图像模型配置"""
+    model: str = "gemini-3-pro-image-preview"                     # 模型名称
+    api_format: str = "gemini"      # API格式: openai, gemini
+    capabilities: List[str] = ["generate", "edit", "multi_edit"]    # 能力列表: generate, edit, multi_edit
+
+
 @configuration('aichat')
 class Config(BaseConfig):
     """AI Chat插件配置"""
@@ -43,9 +50,10 @@ class Config(BaseConfig):
     enable_markdown_render: bool = False
     markdown_min_length: int = 100
 
-    # 图片生成模型配置
-    image_generation_model: str = "doubao-seedream-5-0-260128"  # 用于图片生成的模型名称
-    image_edit_model: str = "grok-4-image"  # 用于图片编辑的模型名称（如 dall-e-2），空表示不支持编辑
+    # 图片生成模型配置列表（按优先级排序）
+    image_models: List[ImageModelEntry] = [
+        ImageModelEntry()
+    ]
 
     def get_apis(self) -> List[ApiEntry]:
         """获取厂商列表"""

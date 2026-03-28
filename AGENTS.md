@@ -140,13 +140,36 @@ from hoshino.config import get_plugin_config_by_name
 conf = get_plugin_config_by_name('plugin_name')
 ```
 
-**⚠️ 重要：不要在代码库中编写配置迁移代码**
+**⚠️ 重要：配置变更策略**
 
-- ❌ 禁止编写 `_migrate_config()` 等配置迁移逻辑
-- ❌ 禁止在代码中检测旧配置格式并自动转换
-- ✅ 配置变更时直接更新 Pydantic 模型，利用默认值处理
-- ✅ 在 CHANGELOG 或文档中注明配置变更即可
-- 理由：迁移代码会增加复杂度，成为长期技术债务，维护成本高于收益
+1. **不兼容历史配置，保持代码简洁**
+   - 重构导致配置变更时，直接替换为新配置结构
+   - 不保留旧配置字段、不做向后兼容处理
+   - 由用户手动处理配置迁移（通过文档/CHANGELOG说明）
+   - 理由：技术债务 > 用户迁移成本，简洁代码更易维护
+
+2. **不要编写配置迁移代码**
+   - ❌ 禁止编写 `_migrate_config()` 等自动迁移逻辑
+   - ❌ 禁止在代码中检测旧配置格式并转换
+   - ✅ 直接更新 Pydantic 模型，利用默认值
+   - ✅ 在 CHANGELOG 中清晰注明配置变更
+
+**示例：**
+```python
+# ❌ 错误：保留旧配置做兼容
+class Config(BaseConfig):
+    image_generation_model: str = ""  # 旧配置
+    image_models: List[ImageModelEntry] = []  # 新配置
+    
+    def get_model(self):
+        if self.image_models:  # 兼容逻辑
+            return self.image_models[0]
+        return self.image_generation_model  # 兼容旧配置
+
+# ✅ 正确：直接替换
+class Config(BaseConfig):
+    image_models: List[ImageModelEntry] = []  # 只有新配置
+```
 
 ### 资源访问
 
@@ -171,6 +194,43 @@ font_path = R.font('msyh.ttf')                # 字体路径
   ```
 - **导入顺序**：标准库 → 第三方 → 本地
 - **异步**：处理器必须是 async 函数
+
+#### 注释规范
+
+**核心原则：注释解释"为什么"，而非"是什么"**
+
+代码本身应该通过良好的命名自解释。注释用于解释：
+- 业务意图或设计决策
+- 非显而易见的边界情况
+- 临时解决方案（TODO/FIXME）
+
+**示例：**
+
+```python
+# ❌ 错误：解释代码在做什么（无价值）
+def _is_nano_banana(api_base: str, api_format: str = "auto") -> bool:
+    """检测是否为 Nano Banana API 格式。优先使用 api_format 配置，auto 模式通过 URL 检测。"""
+    if api_format == "nano_banana":
+        return True
+    if api_format == "openai":
+        return False
+    return "nano-banana" in api_base.lower()
+
+# ✅ 正确：函数名自解释，无需注释
+def _is_nano_banana(api_base: str, api_format: str = "auto") -> bool:
+    if api_format == "nano_banana":
+        return True
+    if api_format == "openai":
+        return False
+    return "nano-banana" in api_base.lower()
+
+# ✅ 正确：解释业务意图
+def calculate_price(raw_price: float) -> float:
+    # 会员日折扣，每月18号生效
+    if datetime.now().day == 18:
+        return raw_price * 0.8
+    return raw_price
+```
 
 ### 权限常量
 
