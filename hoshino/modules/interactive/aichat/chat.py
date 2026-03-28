@@ -294,25 +294,44 @@ async def call_ai_api(
             payload["tool_choice"] = tool_choice
         logger.debug(f"启用 Tool Calling，工具数量: {len(tools)}")
 
-    # 构建用于日志的 payload 副本（截断图片数据）
+    # 构建精简版 payload 用于日志（messages 只保留最后 2 条）
+    MAX_LOG_MESSAGES = 2
+    total_msgs = len(payload["messages"])
+    if total_msgs > MAX_LOG_MESSAGES:
+        log_messages = [{"role": "system", "content": f"...[省略 {total_msgs - MAX_LOG_MESSAGES} 条历史消息]..."}] + payload["messages"][-MAX_LOG_MESSAGES:]
+    else:
+        log_messages = payload["messages"]
+    
     log_payload = {
         "model": payload["model"],
-        "messages": [
-            {
-                "role": msg.get("role"),
-                "content": truncate_log(msg.get("content"))
-            }
-            for msg in messages
-        ]
+        "messages": log_messages,
     }
     if "max_tokens" in payload:
         log_payload["max_tokens"] = payload["max_tokens"]
     if "temperature" in payload:
         log_payload["temperature"] = payload["temperature"]
     if "tools" in payload:
-        log_payload["tools"] = f"[{len(payload['tools'])} 个工具]"
+        log_payload["tools"] = [t.get("function", {}).get("name") for t in payload["tools"]]
+    if "tool_choice" in payload:
+        log_payload["tool_choice"] = payload["tool_choice"]
     
-    logger.info(f"调用 AI API: URL={url}, Payload: {log_json(log_payload)}")
+    logger.info(f"调用 AI API: URL={url}, Payload: {log_json(truncate_log(log_payload))}")
+    
+    # debug 模式：每条消息单独打印
+    logger.debug(f"API 请求详情 - model: {payload['model']}, messages: {len(payload['messages'])} 条")
+    for i, msg in enumerate(payload["messages"]):
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            # 多模态消息，提取文本部分
+            texts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    texts.append(item.get("text", ""))
+            content_str = " | ".join(texts) if texts else "[multimodal content]"
+        else:
+            content_str = str(content)
+        logger.debug(f"  [{i}] {role}: {truncate_log(content_str, 300, 100, 100)}")
 
     try:
         resp = await aiohttpx.post(url, headers=headers, json=payload)
@@ -542,6 +561,17 @@ async def call_ai_api_with_tools(
             })
             current_messages.append(tool_result)
             logger.info(f"工具调用结果: {truncate_log(tool_result['content'])}")
+        
+        # 工具调用后，如果有生成图片，添加系统提示让 AI 知道可用标识符
+        if context and context.get('session'):
+            session = context.get('session')
+            image_list_prompt = session.build_image_list_prompt()
+            if image_list_prompt:
+                current_messages.append({
+                    "role": "system",
+                    "content": image_list_prompt
+                })
+                logger.debug("已添加图片列表系统提示到对话")
     
     # 达到最大轮数限制
     logger.warning(f"达到最大工具调用轮数限制: {max_tool_rounds}")
