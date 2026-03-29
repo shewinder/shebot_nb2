@@ -40,28 +40,6 @@ class Session:
         
         self.last_active = time.time()
     
-    def get_images(self) -> List[str]:
-        images: List[str] = []
-        for msg in self.messages:
-            content = msg.get('content')
-            if isinstance(content, list):
-                # 多模态消息
-                for part in content:
-                    if isinstance(part, dict) and part.get('type') == 'image_url':
-                        image_url = part.get('image_url', {}).get('url', '')
-                        if image_url and image_url.startswith('data:image'):
-                            images.append(image_url)
-        return images
-    
-    def get_image_by_index(self, index: int = -1) -> Optional[str]:
-        images = self.get_images()
-        if not images:
-            return None
-        try:
-            return images[index]
-        except IndexError:
-            return None
-    
     def store_user_image(self, image_data: str) -> str:
         identifier = f"<user_image_{len(self._user_images) + 1}>"
         self._user_images[identifier] = image_data
@@ -96,25 +74,6 @@ class Session:
         if identifier in self._ai_images:
             return self._ai_images[identifier]
         
-        return None
-    
-    def get_last_user_image(self) -> Optional[Tuple[str, str]]:
-        if not self._user_images:
-            return None
-        identifier = list(self._user_images.keys())[-1]
-        return identifier, self._user_images[identifier]
-    
-    def get_last_ai_image(self) -> Optional[Tuple[str, str]]:
-        if not self._ai_images:
-            return None
-        identifier = list(self._ai_images.keys())[-1]
-        return identifier, self._ai_images[identifier]
-    
-    def get_last_image(self) -> Optional[Tuple[str, str]]:
-        if self._user_images:
-            return self.get_last_user_image()
-        if self._ai_images:
-            return self.get_last_ai_image()
         return None
     
     def build_image_list_prompt(self) -> str:
