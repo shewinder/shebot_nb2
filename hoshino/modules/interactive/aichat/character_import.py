@@ -1,8 +1,4 @@
-"""
-角色卡导入模块
-支持从 PNG 图片中导入角色卡（TavernAI / SillyTavern 格式）
-PNG 图片中包含 base64 编码的 JSON 元数据
-"""
+"""角色卡导入模块"""
 import json
 import base64
 from pathlib import Path
@@ -18,12 +14,9 @@ except ImportError:
 
 
 class CharacterCard:
-    """角色卡数据类"""
     def __init__(self, data: Dict[str, Any]):
         self.raw_data = data
         
-        # 处理嵌套结构 (chara_card_v2 格式)
-        # 有些 JSON 的数据在 'data' 字段中
         if 'data' in data and isinstance(data['data'], dict):
             card_data = data['data']
         else:
@@ -40,34 +33,22 @@ class CharacterCard:
         self.version = card_data.get('character_version', '')
     
     def to_persona_text(self) -> str:
-        """
-        将角色卡转换为 AI 人格文本
-        
-        整合各种字段成连贯的人格描述
-        """
         parts = []
         
-        # 基本信息
         if self.name:
             parts.append(f"你的名字是{self.name}。")
         
-        # 描述（最详细的字段，通常包含角色设定）
         if self.description:
-            # 清理描述中的某些格式标记
             desc = self._clean_text(self.description)
             parts.append(desc)
         
-        # 性格特点
         if self.personality:
             parts.append(f"你的性格特点：{self.personality}")
         
-        # 场景设定
         if self.scenario:
             parts.append(f"当前场景：{self.scenario}")
         
-        # 示例对话作为参考
         if self.mes_example:
-            # 截取部分示例对话作为参考
             example = self._clean_text(self.mes_example)
             if len(example) > 500:
                 example = example[:500] + "..."
@@ -76,10 +57,8 @@ class CharacterCard:
         return "\n\n".join(parts)
     
     def _clean_text(self, text: str) -> str:
-        """清理文本中的某些格式标记"""
         if not text:
             return ""
-        # 移除 {{user}} 和 {{char}} 等占位符，替换为通用描述
         text = text.replace('{{user}}', '用户')
         text = text.replace('{{char}}', self.name or '助手')
         # 移除多余的空行
@@ -87,7 +66,6 @@ class CharacterCard:
         return '\n'.join(lines)
     
     def get_info_text(self) -> str:
-        """获取角色卡信息文本"""
         lines = [f"角色名称：{self.name}"]
         
         if self.creator:
@@ -109,37 +87,23 @@ class CharacterCard:
 
 
 def parse_character_png(image_data: bytes) -> Tuple[bool, Optional[CharacterCard], str]:
-    """
-    从 PNG 图片字节数据中解析角色卡
-    
-    PNG 图片的元数据中会包含名为 "chara" 的字段，其值为 base64 编码的 JSON 数据
-    
-    Args:
-        image_data: PNG 图片字节数据
-        
-    Returns:
-        (是否成功, 角色卡对象, 消息)
-    """
     if not PIL_AVAILABLE:
         return False, None, "未安装 Pillow 库，无法解析 PNG 图片"
     
     try:
         img = Image.open(BytesIO(image_data))
         
-        # 获取图片中的文本元数据
         text_chunks = img.text
         
         if "chara" not in text_chunks:
             return False, None, "PNG 图片中未找到角色卡元数据（chara 字段），这可能不是有效的角色卡图片"
         
-        # 解码 base64
         chara_b64 = text_chunks["chara"]
         try:
             json_str = base64.b64decode(chara_b64).decode("utf-8")
         except Exception as e:
             return False, None, f"解码角色卡数据失败：{e}"
         
-        # 解析 JSON
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
@@ -148,7 +112,6 @@ def parse_character_png(image_data: bytes) -> Tuple[bool, Optional[CharacterCard
         if not isinstance(data, dict):
             return False, None, "角色卡数据格式错误"
         
-        # 检查必要字段
         if 'name' not in data:
             return False, None, "角色卡数据中未找到 'name' 字段"
         
@@ -163,15 +126,6 @@ def parse_character_png(image_data: bytes) -> Tuple[bool, Optional[CharacterCard
 
 
 def parse_character_png_file(file_path: Path) -> Tuple[bool, Optional[CharacterCard], str]:
-    """
-    从 PNG 文件路径解析角色卡
-    
-    Args:
-        file_path: PNG 文件路径
-        
-    Returns:
-        (是否成功, 角色卡对象, 消息)
-    """
     try:
         with open(file_path, 'rb') as f:
             image_data = f.read()

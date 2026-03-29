@@ -1,7 +1,4 @@
-"""
-Markdown 渲染为图片模块
-使用 Playwright 将 Markdown 文本渲染为美观的图片
-"""
+"""Markdown 渲染为图片模块"""
 import os
 import re
 from io import BytesIO
@@ -9,7 +6,6 @@ from typing import List, Optional
 
 from loguru import logger
 
-# 尝试导入 playwright
 try:
     from hoshino.util.playwright_util import get_page, check_browser_health
     PLAYWRIGHT_AVAILABLE = True
@@ -17,7 +13,6 @@ except ImportError:
     PLAYWRIGHT_AVAILABLE = False
     logger.warning("Playwright 未安装，Markdown 渲染功能不可用")
 
-# Markdown 解析
 try:
     import markdown
     from markdown.extensions import fenced_code, tables, nl2br
@@ -27,7 +22,6 @@ except ImportError:
     logger.warning("Markdown 库未安装")
 
 
-# Markdown 特征检测正则
 MD_PATTERNS = [
     r'#{1,6}\s+',  # 标题
     r'\*\*.*?\*\*',  # 粗体
@@ -45,7 +39,6 @@ MD_PATTERNS = [
 
 
 def is_markdown(text: str, min_features: int = 2) -> bool:
-    """检测文本是否包含 Markdown 格式"""
     if not text or len(text) < 50:
         return False
     
@@ -59,31 +52,20 @@ def is_markdown(text: str, min_features: int = 2) -> bool:
     return False
 
 
-# Markdown 图片格式正则
 MD_IMAGE_PATTERN = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
-# 纯文本图片 URL 正则
 PLAIN_IMAGE_URL_PATTERN = re.compile(r'https?://[^\s<>"\']+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<>"\']*)?', re.IGNORECASE)
 
 
 def extract_image_urls(text: str) -> List[str]:
-    """
-    从文本中提取图片 URL
-    支持 Markdown 图片格式 ![alt](url) 和纯文本 URL
-    
-    Returns:
-        图片 URL 列表
-    """
     urls = []
     if not text:
         return urls
     
-    # 提取 Markdown 图片格式
     for match in MD_IMAGE_PATTERN.finditer(text):
         url = match.group(2).strip()
         if url:
             urls.append(url)
     
-    # 提取纯文本图片 URL
     for match in PLAIN_IMAGE_URL_PATTERN.finditer(text):
         url = match.group(0)
         if url and url not in urls:  # 去重
@@ -93,25 +75,18 @@ def extract_image_urls(text: str) -> List[str]:
 
 
 def strip_thinking_tags(text: str) -> str:
-    """去除 <think>...</think> 标签内容"""
     text = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE)
     text = re.sub(r'<thinking>[\s\S]*?</thinking>', '', text, flags=re.IGNORECASE)
     return text.strip()
 
 
 def markdown_to_html(md_text: str) -> str:
-    """
-    将 Markdown 转换为 HTML
-    使用 Python-Markdown 库，支持标准 Markdown + 扩展
-    """
-    # 去除 think 标签
     text = strip_thinking_tags(md_text)
     
     if not MARKDOWN_AVAILABLE:
         # 降级：简单处理
         return f"<p>{text.replace(chr(10), '<br>')}</p>"
     
-    # 配置 Markdown 扩展
     md = markdown.Markdown(extensions=[
         'fenced_code',      # 代码块 ```
         'tables',           # 表格
@@ -123,7 +98,6 @@ def markdown_to_html(md_text: str) -> str:
     return html
 
 
-# HTML 模板
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -280,9 +254,6 @@ HTML_TEMPLATE = """
 
 
 async def render_markdown_to_image(md_text: str, ws_url: Optional[str] = None) -> Optional[bytes]:
-    """
-    将 Markdown 文本渲染为图片
-    """
     if not PLAYWRIGHT_AVAILABLE:
         logger.warning("Playwright 不可用，无法渲染 Markdown")
         return None
@@ -292,11 +263,9 @@ async def render_markdown_to_image(md_text: str, ws_url: Optional[str] = None) -
             logger.warning("浏览器服务不可用")
             return None
         
-        # 转换为 HTML
         html_content = markdown_to_html(md_text)
         full_html = HTML_TEMPLATE.replace('{{content}}', html_content)
         
-        # 使用 Playwright 截图
         browser_url = ws_url or os.getenv(
             "BROWSER_WS_URL", 
             "ws://browser:3000/chromium?launch={\"headless\":false}"
@@ -305,15 +274,9 @@ async def render_markdown_to_image(md_text: str, ws_url: Optional[str] = None) -
         async with get_page(browser_url, viewport={"width": 800, "height": 600}) as page:
             await page.set_content(full_html, wait_until="networkidle")
             await page.wait_for_timeout(300)
-            
-            # 获取内容实际高度
             body_height = await page.evaluate('document.body.scrollHeight')
-            
-            # 设置视口高度
             await page.set_viewport_size({"width": 800, "height": body_height + 50})
             await page.wait_for_timeout(100)
-            
-            # 截图
             img_bytes = await page.screenshot(full_page=False, type="png")
             return img_bytes
             
@@ -327,9 +290,6 @@ async def render_text_if_markdown(
     min_length: int = 100,
     ws_url: Optional[str] = None
 ) -> Optional[bytes]:
-    """
-    如果文本是 Markdown 格式则渲染为图片
-    """
     if not text or len(text) < min_length:
         return None
     

@@ -1,7 +1,4 @@
-"""
-AI Chat 定时任务核心管理器
-负责任务的加载、保存、调度和执行
-"""
+"""AI Chat 定时任务核心管理器"""
 import asyncio
 import json
 import os
@@ -21,16 +18,12 @@ from .config import Config
 from .api import api_manager
 from hoshino import userdata_dir
 
-# 加载配置
 conf = Config.get_instance('aichat')
-
-# 任务存储文件路径（与 aichat 其他配置放在一起）
 aichat_data_dir: Path = userdata_dir.joinpath('aichat')
 TASKS_FILE = aichat_data_dir.joinpath('aichat_scheduled_tasks.json')
 
 
 class ScheduledTask(BaseModel):
-    """定时任务数据模型"""
     id: str                    # UUID
     user_id: int              # 创建者QQ
     group_id: Optional[int]   # 群组ID（私聊为null）
@@ -52,19 +45,15 @@ class ScheduledTask(BaseModel):
 
 
 class TaskManager:
-    """定时任务管理器"""
-    
     def __init__(self):
         self.tasks: Dict[str, ScheduledTask] = {}
         self._job_ids: Dict[str, str] = {}  # task_id -> job_id 映射
     
     def _get_tasks_file(self) -> Path:
-        """获取任务文件路径"""
         TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
         return TASKS_FILE
     
     def load_tasks(self) -> List[ScheduledTask]:
-        """从 JSON 文件加载任务"""
         file_path = self._get_tasks_file()
         if not file_path.exists():
             logger.info("定时任务文件不存在，创建空任务列表")
@@ -77,11 +66,9 @@ class TaskManager:
             tasks = []
             for task_data in data.get('tasks', []):
                 try:
-                    # 处理 datetime 字符串
                     for field in ['created_at', 'updated_at', 'last_execution', 'execute_at']:
                         if task_data.get(field):
                             task_data[field] = datetime.fromisoformat(task_data[field])
-                    # 向后兼容：如果 mention_user 不存在，默认为 False
                     if 'mention_user' not in task_data:
                         task_data['mention_user'] = False
                     tasks.append(ScheduledTask(**task_data))
@@ -95,7 +82,6 @@ class TaskManager:
             return []
     
     def save_tasks(self):
-        """保存任务到 JSON 文件"""
         file_path = self._get_tasks_file()
         try:
             data = {
@@ -106,7 +92,6 @@ class TaskManager:
             
             for task in self.tasks.values():
                 task_dict = task.dict()
-                # 处理 datetime 对象
                 for field in ['created_at', 'updated_at', 'last_execution', 'execute_at']:
                     if task_dict.get(field):
                         task_dict[field] = task_dict[field].isoformat()
@@ -120,7 +105,6 @@ class TaskManager:
             logger.exception(f"保存定时任务失败: {e}")
     
     def load_and_schedule(self):
-        """启动时加载并调度所有激活的任务（同步方式，模块导入时调用）"""
         tasks = self.load_tasks()
         for task in tasks:
             self.tasks[task.id] = task
@@ -130,10 +114,8 @@ class TaskManager:
         logger.info(f"定时任务管理器初始化完成，已调度 {len([t for t in tasks if t.is_active])} 个任务")
     
     def _schedule_task_sync(self, task: ScheduledTask):
-        """将任务添加到 APScheduler（同步版本）"""
         try:
             if task.is_one_time and task.execute_at:
-                # 一次性任务使用 date trigger
                 job = add_job(
                     self._execute_task_wrapper,
                     trigger='date',
@@ -145,7 +127,6 @@ class TaskManager:
                 self._job_ids[task.id] = job.id
                 logger.info(f"已调度一次性任务 {task.id}: {task.execute_at}")
             else:
-                # 循环任务使用 cron trigger
                 job = add_job(
                     self._execute_task_wrapper,
                     trigger='cron',
@@ -160,7 +141,6 @@ class TaskManager:
             logger.exception(f"调度任务失败 {task.id}: {e}")
     
     def _cron_to_kwargs(self, cron_expr: str) -> Dict[str, Any]:
-        """将 cron 表达式转换为 APScheduler kwargs"""
         parts = cron_expr.split()
         if len(parts) != 5:
             raise ValueError(f"无效的 cron 表达式: {cron_expr}")
@@ -174,14 +154,12 @@ class TaskManager:
         }
     
     async def _execute_task_wrapper(self, task_id: str):
-        """任务执行包装器（处理异常）"""
         try:
             await self.execute_task(task_id)
         except Exception as e:
             logger.exception(f"执行任务 {task_id} 失败: {e}")
     
     async def execute_task(self, task_id: str):
-        """执行指定任务"""
         task = self.tasks.get(task_id)
         if not task:
             logger.error(f"任务不存在: {task_id}")
@@ -193,15 +171,12 @@ class TaskManager:
         
         logger.info(f"开始执行任务 {task_id}: {task.task_summary}")
         
-        # 动态导入避免循环依赖
         from .chat import call_ai_api_with_tools
         from .tools import get_available_tools
         from .persona import persona_manager
         
-        # 获取任务创建者的当前人格
         persona = persona_manager.get_persona(task.user_id, task.group_id)
         
-        # 构建 system content
         if persona:
             system_content = f"{persona}\n\n你正在执行一个定时任务。请根据用户的任务描述执行操作，"
             system_content += "你可以调用任何可用工具来完成任务。请尽可能详细地完成任务，并在完成后总结执行结果。"
@@ -209,7 +184,6 @@ class TaskManager:
             system_content = "你是一个任务执行助手。请根据用户的任务描述执行操作。\n"
             system_content += "你可以调用任何可用工具来完成任务。请尽可能详细地完成任务，并在完成后总结执行结果。"
         
-        # 构建执行消息
         messages = [
             {
                 "role": "system",
@@ -221,14 +195,12 @@ class TaskManager:
             }
         ]
         
-        # 获取 API 配置
         api_config = api_manager.get_api_config()
         if not api_config:
             logger.error("API 未配置，无法执行任务")
             await self._send_result(task, "任务执行失败：API 未配置")
             return
         
-        # 调用 AI 执行任务
         try:
             result = await call_ai_api_with_tools(
                 messages=messages,
@@ -237,20 +209,17 @@ class TaskManager:
                 context={"scheduled_task": task}
             )
             
-            # 更新任务状态
             task.execution_count += 1
             task.last_execution = datetime.now()
             task.last_result = result.get("content", "")[:500] if result.get("content") else None
             task.updated_at = datetime.now()
             
-            # 一次性任务执行后自动删除
             if task.is_one_time:
                 self.delete_task(task_id, task.user_id)
                 logger.info(f"一次性任务 {task_id} 执行完成并已自动删除")
             else:
                 self.save_tasks()
             
-            # 发送结果
             content = result.get("content", "任务执行完成，但没有返回内容")
             await self._send_result(task, content)
             
@@ -262,9 +231,7 @@ class TaskManager:
             await self._send_result(task, f"任务执行异常: {str(e)[:200]}")
     
     async def _send_result(self, task: ScheduledTask, content: str):
-        """发送执行结果给用户"""
         try:
-            # 延迟导入避免循环导入问题
             bots = get_bot_list()
             if not bots:
                 logger.warning("没有可用的 Bot，无法发送结果")
@@ -272,12 +239,9 @@ class TaskManager:
             
             bot = bots[0]
             
-            # 根据 silent 标记决定是否添加报告框架
             if task.silent:
-                # 静默模式：直接发送内容（适合问候、提醒类任务）
                 message = content[:1000]
             else:
-                # 正常模式：添加任务报告框架
                 msg_lines = [
                     "📋 定时任务执行结果",
                     f"任务: {task.task_summary[:50]}{'...' if len(task.task_summary) > 50 else ''}",
@@ -286,7 +250,6 @@ class TaskManager:
                 ]
                 message = "\n".join(msg_lines)
             
-            # 如果需要 @ 用户，在消息开头添加 at（仅在群聊中有效）
             if task.mention_user and task.group_id:
                 try:
                     message = MessageSegment.at(task.user_id) + " " + message
@@ -315,7 +278,6 @@ class TaskManager:
         execute_at: Optional[datetime] = None,
         mention_user: bool = False
     ) -> ScheduledTask:
-        """创建新任务"""
         now = datetime.now()
         task = ScheduledTask(
             id=str(uuid.uuid4())[:8],  # 短ID便于用户使用
@@ -337,23 +299,19 @@ class TaskManager:
         self.tasks[task.id] = task
         self.save_tasks()
         
-        # 立即调度（同步方式）
         self._schedule_task_sync(task)
         
         return task
     
     def delete_task(self, task_id: str, user_id: int) -> tuple[bool, str]:
-        """删除任务"""
         task = self.tasks.get(task_id)
         if not task:
             return False, f"任务 {task_id} 不存在"
         
-        # 检查权限（只能删除自己的任务，超管除外）
         if task.user_id != user_id:
             # TODO: 检查是否是超级用户
             return False, "只能删除自己创建的任务"
         
-        # 移除调度
         if task_id in self._job_ids:
             try:
                 scheduler.remove_job(self._job_ids[task_id])
@@ -368,7 +326,6 @@ class TaskManager:
         return True, f"已删除任务 {task_id}"
     
     def pause_task(self, task_id: str, user_id: int) -> tuple[bool, str]:
-        """暂停任务"""
         task = self.tasks.get(task_id)
         if not task:
             return False, f"任务 {task_id} 不存在"
@@ -379,7 +336,6 @@ class TaskManager:
         task.is_active = False
         task.updated_at = datetime.now()
         
-        # 移除调度
         if task_id in self._job_ids:
             try:
                 scheduler.remove_job(self._job_ids[task_id])
@@ -390,7 +346,6 @@ class TaskManager:
         return True, f"已暂停任务 {task_id}"
     
     def resume_task(self, task_id: str, user_id: int) -> tuple[bool, str]:
-        """恢复任务"""
         task = self.tasks.get(task_id)
         if not task:
             return False, f"任务 {task_id} 不存在"
@@ -402,17 +357,14 @@ class TaskManager:
         task.updated_at = datetime.now()
         self.save_tasks()
         
-        # 重新调度（同步方式）
         self._schedule_task_sync(task)
         
         return True, f"已恢复任务 {task_id}"
     
     def get_user_tasks(self, user_id: int) -> List[ScheduledTask]:
-        """获取用户的所有任务"""
         return [t for t in self.tasks.values() if t.user_id == user_id]
     
     def get_task(self, task_id: str) -> Optional[ScheduledTask]:
-        """获取单个任务"""
         return self.tasks.get(task_id)
 
 
@@ -421,9 +373,6 @@ scheduler_manager = TaskManager()
 
 
 def generate_task_summary(description: str) -> str:
-    """
-    生成任务摘要（直接截取前20字）
-    """
     if not description:
         return "未命名任务"
     

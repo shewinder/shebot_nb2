@@ -1,7 +1,4 @@
-"""
-API 管理模块
-管理大模型 API 配置和选择
-"""
+"""API 管理模块"""
 from typing import Any, Dict, List, Optional
 from loguru import logger
 
@@ -9,17 +6,11 @@ from hoshino.config import save_plugin_config
 from .config import Config
 import httpx
 
-# 加载配置
 conf = Config.get_instance('aichat')
 
 async def fetch_available_models(api_base: str, api_key: str) -> List[str]:
-    """从 API 厂商获取可用模型列表
-    
-    尝试访问 OpenAI 格式的 /v1/models 端点
-    """
     headers = {"Authorization": f"Bearer {api_key}"}
     
-    # 尝试可能的端点
     base = api_base.rstrip('/')
     urls_to_try = [
         f"{base}/v1/models",
@@ -51,7 +42,6 @@ async def fetch_available_models(api_base: str, api_key: str) -> List[str]:
 
 
 def _build_api_config_dict(api_entry) -> Dict[str, Any]:
-    """从 ApiEntry 构建完整 API 调用参数字典"""
     config_dict = {
         "api_base": api_entry.api_base,
         "api_key": api_entry.api_key,
@@ -59,7 +49,6 @@ def _build_api_config_dict(api_entry) -> Dict[str, Any]:
         "supports_multimodal": api_entry.supports_multimodal if api_entry.supports_multimodal is not None else False,
         "supports_tools": api_entry.supports_tools if api_entry.supports_tools is not None else False,
     }
-    # 仅当值不为 None 时才添加到配置，让 API 使用模型默认值
     if api_entry.max_tokens is not None:
         config_dict["max_tokens"] = api_entry.max_tokens
     if api_entry.temperature is not None:
@@ -68,27 +57,21 @@ def _build_api_config_dict(api_entry) -> Dict[str, Any]:
 
 
 class ApiManager:
-    """管理当前使用的大模型 API（全局唯一）"""
-    
     def get_current_api(self) -> str:
-        """获取当前厂商"""
         return conf.get_current_api()
     
     def set_current_api(self, api: str) -> bool:
-        """切换厂商"""
         if not conf.set_current_api(api):
             return False
         save_plugin_config("aichat", conf)
         return True
     
     def get_current_model(self) -> str:
-        """获取当前厂商使用的模型"""
         api = self.get_current_api()
         entry = conf.get_api_by_name(api)
         return entry.model if entry else ""
     
     def set_current_model(self, model: str) -> bool:
-        """修改当前厂商的模型"""
         api = self.get_current_api()
         entry = conf.get_api_by_name(api)
         if not entry:
@@ -98,7 +81,6 @@ class ApiManager:
         return True
     
     def get_api_config(self) -> Optional[Dict[str, Any]]:
-        """获取当前应使用的 API 配置"""
         api = self.get_current_api()
         entry = conf.get_api_by_name(api)
         if not entry:
@@ -106,7 +88,6 @@ class ApiManager:
         return _build_api_config_dict(entry)
     
     async def get_available_models(self) -> List[str]:
-        """获取当前 API 支持的所有模型"""
         config = self.get_api_config()
         if not config:
             return []
