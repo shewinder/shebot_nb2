@@ -485,6 +485,10 @@ async def call_ai_api_with_tools(
         assistant_message = result.get("raw_response", {}).get("choices", [{}])[0].get("message", {})
         current_messages.append(assistant_message)
         
+        # 同步 assistant 的 tool_calls 消息到 session
+        if context and context.get('session'):
+            context['session'].messages.append(assistant_message)
+        
         for tool_call in tool_calls:
             tool_result = await execute_tool_call(tool_call, context=context)
             all_tool_results.append({
@@ -492,6 +496,11 @@ async def call_ai_api_with_tools(
                 "result": tool_result
             })
             current_messages.append(tool_result)
+            
+            # 同步 tool 结果到 session
+            if context and context.get('session'):
+                context['session'].messages.append(tool_result)
+            
             logger.info(f"工具调用结果: {truncate_log(tool_result['content'])}")
         
         if context and context.get('session'):

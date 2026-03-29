@@ -20,7 +20,8 @@ import {
   Form,
   Switch,
   InputNumber,
-  Upload
+  Upload,
+  Table
 } from 'antd'
 import {
   SaveOutlined,
@@ -41,7 +42,9 @@ import {
   FileImageOutlined,
   PictureOutlined,
   ArrowUpOutlined,
-  ArrowDownOutlined
+  ArrowDownOutlined,
+  BugOutlined,
+  CodeOutlined
 } from '@ant-design/icons'
 import * as aichatApi from '../api'
 
@@ -111,6 +114,13 @@ function Aichat() {
   const [imageModelModalMode, setImageModelModalMode] = useState('add') // 'add' 或 'edit'
   const [editingImageModelIndex, setEditingImageModelIndex] = useState(null)
   const [imageModelForm] = Form.useForm()
+
+  // Session 调试相关
+  const [sessions, setSessions] = useState([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [sessionDetailVisible, setSessionDetailVisible] = useState(false)
+  const [sessionDetail, setSessionDetail] = useState(null)
+  const [sessionDetailLoading, setSessionDetailLoading] = useState(false)
 
   useEffect(() => {
     fetchInitialData()
@@ -657,6 +667,53 @@ function Aichat() {
       await fetchImageModels()
     } catch (error) {
       message.error('排序更新失败: ' + error.message)
+    }
+  }
+
+  // ===== Session 调试相关函数 =====
+  const fetchSessions = async () => {
+    setSessionsLoading(true)
+    try {
+      const res = await aichatApi.getSessions()
+      setSessions(res?.sessions || [])
+    } catch (error) {
+      message.error('获取 Session 列表失败: ' + error.message)
+    } finally {
+      setSessionsLoading(false)
+    }
+  }
+
+  const handleViewSessionDetail = async (sessionId) => {
+    setSessionDetailLoading(true)
+    setSessionDetailVisible(true)
+    try {
+      const res = await aichatApi.getSessionDetail(sessionId)
+      setSessionDetail(res)
+    } catch (error) {
+      message.error('获取 Session 详情失败: ' + error.message)
+      setSessionDetailVisible(false)
+    } finally {
+      setSessionDetailLoading(false)
+    }
+  }
+
+  const handleDeleteSession = async (sessionId) => {
+    try {
+      await aichatApi.deleteSession(sessionId)
+      message.success('Session 已删除')
+      await fetchSessions()
+    } catch (error) {
+      message.error('删除失败: ' + error.message)
+    }
+  }
+
+  const handleCleanupExpired = async () => {
+    try {
+      const res = await aichatApi.cleanupExpiredSessions()
+      message.success(res)
+      await fetchSessions()
+    } catch (error) {
+      message.error('清理失败: ' + error.message)
     }
   }
 
@@ -1635,6 +1692,218 @@ function Aichat() {
               )}
             </Space>
           </Card>
+        </TabPane>
+
+        <TabPane
+          tab={<span><BugOutlined /> Session 调试</span>}
+          key="session-debug"
+        >
+          <Card
+            title="活跃 Session 列表"
+            extra={
+              <Space>
+                <Button icon={<ReloadOutlined />} onClick={fetchSessions} loading={sessionsLoading}>
+                  刷新
+                </Button>
+                <Popconfirm
+                  title="确定要清理所有过期 Session 吗？"
+                  onConfirm={handleCleanupExpired}
+                  okText="确定"
+                  cancelText="取消"
+                >
+                  <Button>清理过期</Button>
+                </Popconfirm>
+              </Space>
+            }
+          >
+            <Alert
+              message="Session 调试"
+              description="查看当前所有活跃的对话 Session。过期的 Session 会自动清理，也可以手动删除。"
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+            <Table
+              dataSource={sessions}
+              rowKey="session_id"
+              loading={sessionsLoading}
+              pagination={{ pageSize: 10 }}
+              columns={[
+                {
+                  title: 'Session ID',
+                  dataIndex: 'session_id',
+                  key: 'session_id',
+                  width: 280,
+                  render: (text) => <code style={{ fontSize: 12 }}>{text}</code>
+                },
+                {
+                  title: '类型',
+                  dataIndex: 'type',
+                  key: 'type',
+                  width: 80,
+                  render: (type) => type === 'group' ? <Tag color="blue">群聊</Tag> : <Tag>私聊</Tag>
+                },
+                {
+                  title: '消息数',
+                  dataIndex: 'message_count',
+                  key: 'message_count',
+                  width: 80
+                },
+                {
+                  title: '图片',
+                  key: 'images',
+                  width: 120,
+                  render: (_, record) => (
+                    <Space>
+                      <Tag>用户:{record.user_images}</Tag>
+                      <Tag>AI:{record.ai_images}</Tag>
+                    </Space>
+                  )
+                },
+                {
+                  title: '连续对话',
+                  dataIndex: 'continuous_mode',
+                  key: 'continuous_mode',
+                  width: 90,
+                  render: (v) => v ? <Tag color="green">开启</Tag> : <Tag>关闭</Tag>
+                },
+                {
+                  title: '选项模式',
+                  dataIndex: 'choice_mode',
+                  key: 'choice_mode',
+                  width: 90,
+                  render: (v) => v ? <Tag color="purple">开启</Tag> : <Tag>关闭</Tag>
+                },
+                {
+                  title: '最后活跃',
+                  dataIndex: 'last_active',
+                  key: 'last_active',
+                  width: 150
+                },
+                {
+                  title: '状态',
+                  dataIndex: 'is_expired',
+                  key: 'is_expired',
+                  width: 80,
+                  render: (v) => v ? <Tag color="red">已过期</Tag> : <Tag color="green">活跃</Tag>
+                },
+                {
+                  title: '操作',
+                  key: 'action',
+                  render: (_, record) => (
+                    <Space>
+                      <Button
+                        type="link"
+                        icon={<EyeOutlined />}
+                        onClick={() => handleViewSessionDetail(record.session_id)}
+                      >
+                        详情
+                      </Button>
+                      <Popconfirm
+                        title="确定要删除这个 Session 吗？"
+                        onConfirm={() => handleDeleteSession(record.session_id)}
+                        okText="确定"
+                        cancelText="取消"
+                      >
+                        <Button type="link" danger icon={<DeleteOutlined />}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    </Space>
+                  )
+                }
+              ]}
+            />
+          </Card>
+
+          {/* Session 详情弹窗 */}
+          <Modal
+            title="Session 详情"
+            open={sessionDetailVisible}
+            onCancel={() => setSessionDetailVisible(false)}
+            width={800}
+            footer={[
+              <Button key="close" onClick={() => setSessionDetailVisible(false)}>
+                关闭
+              </Button>
+            ]}
+          >
+            {sessionDetailLoading ? (
+              <div style={{ textAlign: 'center', padding: 40 }}>
+                <Spin />
+              </div>
+            ) : sessionDetail ? (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Descriptions bordered size="small" column={2}>
+                  <Descriptions.Item label="Session ID" span={2}>
+                    <code>{sessionDetail.session_id}</code>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="用户ID">{sessionDetail.user_id}</Descriptions.Item>
+                  <Descriptions.Item label="群组ID">{sessionDetail.group_id || '私聊'}</Descriptions.Item>
+                  <Descriptions.Item label="连续对话">
+                    {sessionDetail.continuous_mode ? '开启' : '关闭'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="选项模式">
+                    {sessionDetail.choice_mode ? '开启' : '关闭'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="消息数">{sessionDetail.message_count}</Descriptions.Item>
+                  <Descriptions.Item label="最后活跃">{sessionDetail.last_active}</Descriptions.Item>
+                  <Descriptions.Item label="是否过期">
+                    {sessionDetail.is_expired ? <Tag color="red">已过期</Tag> : <Tag color="green">活跃</Tag>}
+                  </Descriptions.Item>
+                </Descriptions>
+
+                {sessionDetail.user_images?.length > 0 && (
+                  <div>
+                    <Text strong>用户图片:</Text>
+                    <Space wrap>
+                      {sessionDetail.user_images.map(img => (
+                        <Tag key={img}>{img}</Tag>
+                      ))}
+                    </Space>
+                  </div>
+                )}
+
+                {sessionDetail.ai_images?.length > 0 && (
+                  <div>
+                    <Text strong>AI 图片:</Text>
+                    <Space wrap>
+                      {sessionDetail.ai_images.map(img => (
+                        <Tag key={img}>{img}</Tag>
+                      ))}
+                    </Space>
+                  </div>
+                )}
+
+                <Divider orientation="left">消息历史 ({sessionDetail.messages?.length || 0} 条)</Divider>
+                <List
+                  size="small"
+                  bordered
+                  dataSource={sessionDetail.messages || []}
+                  renderItem={(msg, idx) => (
+                    <List.Item>
+                      <div style={{ width: '100%' }}>
+                        <Tag color={msg.role === 'user' ? 'blue' : msg.role === 'assistant' ? 'green' : 'default'}>
+                          {msg.role}
+                        </Tag>
+                        <pre style={{ 
+                          margin: '8px 0 0 0', 
+                          padding: 8, 
+                          background: 'var(--ant-color-bg-elevated)',
+                          borderRadius: 4,
+                          fontSize: 12,
+                          maxHeight: 100,
+                          overflow: 'auto'
+                        }}>
+                          {typeof msg.content_preview === 'string' ? msg.content_preview : JSON.stringify(msg.content_preview, null, 2)}
+                        </pre>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              </Space>
+            ) : null}
+          </Modal>
         </TabPane>
       </Tabs>
 

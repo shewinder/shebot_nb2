@@ -196,3 +196,17 @@ export const deleteImageModel = (index) => request.delete(`/aichat/image-models/
 
 // 重新排序图像模型
 export const reorderImageModels = (models) => request.post('/aichat/image-models/reorder', { image_models: models })
+
+
+// ===== Session 调试 API =====
+// 获取所有 Session 列表
+export const getSessions = () => request.get('/aichat/sessions')
+
+// 获取指定 Session 详情
+export const getSessionDetail = (sessionId) => request.get(`/aichat/sessions/${sessionId}`)
+
+// 删除指定 Session
+export const deleteSession = (sessionId) => request.delete(`/aichat/sessions/${sessionId}`)
+
+// 清理过期 Session
+export const cleanupExpiredSessions = () => request.post('/aichat/sessions/cleanup-expired')

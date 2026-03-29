@@ -262,10 +262,7 @@ async def generate_image(
         # 构造 content：描述性文字，不包含标识符（避免 AI 在回复中输出标识符）
         # 标识符通过 metadata 传给 AI，让 AI 知道可以用什么引用
         if identifiers:
-            if len(identifiers) == 1:
-                content = "已成功生成图片。"
-            else:
-                content = f"已成功生成 {len(identifiers)} 张图片。"
+            content = f"已成功生成 {len(identifiers)} 张图片。"
         else:
             content = f"已成功生成 {len(urls)} 张图片"
         

@@ -2,6 +2,7 @@
 AI Chat Web 管理 API
 提供 API 厂商管理、模型切换、人格管理等功能
 """
+import time
 from typing import Dict, List, Optional, Set
 from fastapi import APIRouter, File, UploadFile, Form
 from pydantic import BaseModel
@@ -11,7 +12,7 @@ from loguru import logger
 import nonebot
 from hoshino import Bot
 from hoshino.config import get_plugin_config_by_name
-from hoshino.modules.interactive.aichat import api_manager, persona_manager, conf
+from hoshino.modules.interactive.aichat import api_manager, persona_manager, conf, session_manager
 from hoshino.modules.interactive.aichat.config import ApiEntry, ImageModelEntry
 from hoshino.modules.interactive.aichat.character_import import parse_character_png, CharacterCard
 import json
@@ -960,3 +961,181 @@ async def delete_image_model(index: int):
     except Exception as e:
         logger.exception(f"删除图像模型失败: {e}")
         return {"status": 500, "data": f"删除失败: {str(e)}"}
+
+
+# ========== Session 调试 API ==========
+
+from hoshino.modules.interactive.aichat.session import Session
+
+
+class SessionInfo(BaseModel):
+    """Session 信息"""
+    session_id: str
+    user_id: int
+    group_id: Optional[int]
+    type: str  # "group" 或 "private"
+    message_count: int
+    user_images: int
+    ai_images: int
+    continuous_mode: bool
+    choice_mode: bool
+    last_active: str
+    is_expired: bool
+
+
+@router.get("/sessions")
+async def get_sessions():
+    """获取所有活跃 Session 列表"""
+    try:
+        sessions = []
+        for session_id, session in session_manager.sessions.items():
+            # 解析 session_id 获取 user_id 和 group_id
+            user_id = 0
+            group_id = None
+            session_type = "private"
+            
+            if session_id.startswith("group_"):
+                # group_{group_id}_user_{user_id}
+                parts = session_id.split("_")
+                if len(parts) >= 4:
+                    try:
+                        group_id = int(parts[1])
+                        user_id = int(parts[3])
+                        session_type = "group"
+                    except (ValueError, IndexError):
+                        pass
+            elif session_id.startswith("private_"):
+                # private_{user_id}
+                try:
+                    user_id = int(session_id.replace("private_", ""))
+                except ValueError:
+                    pass
+            
+            sessions.append(SessionInfo(
+                session_id=session_id,
+                user_id=user_id,
+                group_id=group_id,
+                type=session_type,
+                message_count=len(session.messages),
+                user_images=len(session._user_images),
+                ai_images=len(session._ai_images),
+                continuous_mode=session.continuous_mode,
+                choice_mode=session.choice_mode_enabled,
+                last_active=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.last_active)),
+                is_expired=session.is_expired()
+            ))
+        
+        return {"status": 200, "data": {"sessions": sessions, "total": len(sessions)}}
+    except Exception as e:
+        logger.exception(f"获取 Session 列表失败: {e}")
+        return {"status": 500, "data": f"获取失败: {str(e)}"}
+
+
+@router.get("/sessions/{session_id}")
+async def get_session_detail(session_id: str):
+    """获取指定 Session 详情"""
+    try:
+        session = session_manager.sessions.get(session_id)
+        if not session:
+            return {"status": 404, "data": "Session 不存在"}
+        
+        # 解析 session_id
+        user_id = 0
+        group_id = None
+        if session_id.startswith("group_"):
+            parts = session_id.split("_")
+            if len(parts) >= 4:
+                try:
+                    group_id = int(parts[1])
+                    user_id = int(parts[3])
+                except (ValueError, IndexError):
+                    pass
+        elif session_id.startswith("private_"):
+            try:
+                user_id = int(session_id.replace("private_", ""))
+            except ValueError:
+                pass
+        
+        # 处理 messages，截断过长内容
+        messages = []
+        for msg in session.messages:
+            content = msg.get("content", "")
+            content_preview = content
+            if isinstance(content, str) and len(content) > 200:
+                content_preview = content[:200] + "..."
+            elif isinstance(content, list):
+                # 多模态消息，简化展示
+                content_preview = f"[多模态消息，共{len(content)}个部分]"
+            
+            messages.append({
+                "role": msg.get("role"),
+                "content_preview": content_preview,
+                "content_full": content if isinstance(content, str) else None
+            })
+        
+        # 获取人格预览
+        persona_preview = ""
+        if session.messages and session.messages[0].get("role") == "system":
+            persona = session.messages[0].get("content", "")
+            if isinstance(persona, str):
+                persona_preview = persona[:200] + "..." if len(persona) > 200 else persona
+        
+        return {
+            "status": 200,
+            "data": {
+                "session_id": session_id,
+                "user_id": user_id,
+                "group_id": group_id,
+                "messages": messages,
+                "message_count": len(session.messages),
+                "user_images": list(session._user_images.keys()),
+                "ai_images": list(session._ai_images.keys()),
+                "continuous_mode": session.continuous_mode,
+                "choice_mode": session.choice_mode_enabled,
+                "choice_guideline": session.choice_guideline,
+                "last_choices": session.last_choices,
+                "last_active": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.last_active)),
+                "is_expired": session.is_expired(),
+                "persona_preview": persona_preview
+            }
+        }
+    except Exception as e:
+        logger.exception(f"获取 Session 详情失败: {e}")
+        return {"status": 500, "data": f"获取失败: {str(e)}"}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """删除指定 Session"""
+    try:
+        if session_id not in session_manager.sessions:
+            return {"status": 404, "data": "Session 不存在"}
+        
+        del session_manager.sessions[session_id]
+        logger.info(f"已删除 Session: {session_id}")
+        return {"status": 200, "data": f"Session {session_id} 已删除"}
+    except Exception as e:
+        logger.exception(f"删除 Session 失败: {e}")
+        return {"status": 500, "data": f"删除失败: {str(e)}"}
+
+
+@router.post("/sessions/cleanup-expired")
+async def cleanup_expired_sessions():
+    """清理所有过期的 Session"""
+    try:
+        expired_count = 0
+        expired_sessions = []
+        
+        for session_id, session in list(session_manager.sessions.items()):
+            if session.is_expired():
+                expired_sessions.append(session_id)
+        
+        for session_id in expired_sessions:
+            del session_manager.sessions[session_id]
+            expired_count += 1
+        
+        logger.info(f"清理了 {expired_count} 个过期 Session")
+        return {"status": 200, "data": f"已清理 {expired_count} 个过期 Session"}
+    except Exception as e:
+        logger.exception(f"清理过期 Session 失败: {e}")
+        return {"status": 500, "data": f"清理失败: {str(e)}"}
