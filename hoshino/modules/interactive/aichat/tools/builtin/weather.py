@@ -16,15 +16,7 @@ conf = Config.get_instance('aichat')
 
 
 async def _get_city_code(city_name: str, api_key: str) -> Optional[str]:
-    """根据城市名称获取城市编码
-    
-    Args:
-        city_name: 城市名称，如"北京"
-        api_key: 高德地图 API Key
-        
-    Returns:
-        城市编码，失败返回 None
-    """
+    """根据城市名称获取城市编码"""
     url = "https://restapi.amap.com/v3/config/district"
     params = {
         "key": api_key,
@@ -40,6 +32,7 @@ async def _get_city_code(city_name: str, api_key: str) -> Optional[str]:
             return None
         
         data = resp.json if hasattr(resp, 'json') else await resp.json()
+        logger.debug(f"[Weather Debug] 城市编码响应: {data}")
         if data.get("status") != "1":
             logger.error(f"获取城市编码失败: {data.get('info', '未知错误')}")
             return None
@@ -54,28 +47,9 @@ async def _get_city_code(city_name: str, api_key: str) -> Optional[str]:
         return None
 
 
-async def _get_weather(city: str, api_key: str, extensions: str = "base") -> Optional[Dict[str, Any]]:
-    """获取天气信息
-    
-    Args:
-        city: 城市编码或城市名称
-        api_key: 高德地图 API Key
-        extensions: base(实况) 或 all(预报)
-        
-    Returns:
-        天气数据字典，失败返回 None
-    """
+async def _get_weather_data(city_code: str, api_key: str, extensions: str) -> Optional[Dict[str, Any]]:
+    """获取天气数据"""
     url = "https://restapi.amap.com/v3/weather/weatherInfo"
-    
-    # 判断是否为城市编码（6位数字）
-    city_code = city if city.isdigit() and len(city) == 6 else None
-    
-    # 如果不是城市编码，先获取编码
-    if not city_code:
-        city_code = await _get_city_code(city, api_key)
-        if not city_code:
-            return None
-    
     params = {
         "key": api_key,
         "city": city_code,
@@ -89,6 +63,7 @@ async def _get_weather(city: str, api_key: str, extensions: str = "base") -> Opt
             return None
         
         data = resp.json if hasattr(resp, 'json') else await resp.json()
+        logger.debug(f"[Weather Debug] 天气API响应 ({extensions}): {data}")
         if data.get("status") != "1":
             logger.error(f"获取天气失败: {data.get('info', '未知错误')}")
             return None
@@ -99,131 +74,62 @@ async def _get_weather(city: str, api_key: str, extensions: str = "base") -> Opt
         return None
 
 
-def _format_weather(data: Dict[str, Any], extensions: str) -> str:
-    """格式化天气信息为易读文本
-    
-    Args:
-        data: API 返回的天气数据
-        extensions: base 或 all
-        
-    Returns:
-        格式化的天气文本
-    """
-    if extensions == "base":
-        # 实况天气
-        lives = data.get("lives", [])
-        if not lives:
-            return "暂无天气数据"
-        
-        live = lives[0]
-        return (
-            f"📍 {live.get('province', '')} {live.get('city', '')}\n"
-            f"🌡️ 温度: {live.get('temperature', '--')}°C\n"
-            f"☁️ 天气: {live.get('weather', '--')}\n"
-            f"💨 风向: {live.get('winddirection', '--')}\n"
-            f"🌬️ 风力: {live.get('windpower', '--')}\n"
-            f"💧 湿度: {live.get('humidity', '--')}%\n"
-            f"📊 空气质量: {live.get('reporttime', '--')[:10]} 发布"
-        )
-    else:
-        # 预报天气
-        forecasts = data.get("forecasts", [])
-        if not forecasts:
-            return "暂无预报数据"
-        
-        forecast = forecasts[0]
-        city = f"{forecast.get('province', '')} {forecast.get('city', '')}"
-        casts = forecast.get("casts", [])
-        
-        lines = [f"📍 {city} 未来天气预报\n"]
-        
-        for cast in casts[:3]:  # 最多显示3天
-            date = cast.get('date', '--')
-            week = cast.get('week', '--')
-            day_weather = cast.get('dayweather', '--')
-            night_weather = cast.get('nightweather', '--')
-            day_temp = cast.get('daytemp', '--')
-            night_temp = cast.get('nighttemp', '--')
-            day_wind = cast.get('daywind', '--')
-            night_wind = cast.get('nightwind', '--')
-            
-            # 周转换
-            week_map = {'1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六', '7': '周日'}
-            week_str = week_map.get(str(week), week)
-            
-            lines.append(
-                f"📅 {date} {week_str}\n"
-                f"  ☁️ {day_weather} / {night_weather}\n"
-                f"  🌡️ {night_temp}°C ~ {day_temp}°C\n"
-                f"  💨 {day_wind}风"
-            )
-        
-        return "\n".join(lines)
-
-
 @tool_registry.register(
     name="get_weather",
-    description="""查询指定城市的天气信息。
+    description="""查询指定城市的天气信息，返回当前实时天气和未来几天预报数据。
 
-支持查询实时天气和未来几天预报，城市名称支持中文（如"北京"、"上海"、"广州"等）。
+数据包含两部分：
+- current: 当前实时天气（温度、天气状况、风向、风力、湿度等）
+- forecast: 未来几天的天气预报（含今天、明天、后天）
 
-使用场景：
-- 用户询问"今天天气怎么样"、"北京明天天气如何"
-- 用户关心出行天气、穿衣建议
-- 用户需要了解某地的气候情况
+使用建议：
+- 用户问"现在天气怎么样"：主要参考 current 数据，可结合 forecast 中今天的数据补充
+- 用户问"今天天气"：结合 current 和 forecast 中今天的数据
+- 用户问"明天/后天天气"：从 forecast 中取对应日期
+- 用户问"未来几天天气"：展示 forecast 中所有数据
 
-注意：
-- 城市名称可以是"北京"、"上海市"等常见名称
-- 预报模式会返回未来3天的天气预报""",
+注意：如果用户只问当前/今天天气，不要主动预报后几天的天气。""",
     parameters={
         "type": "object",
         "properties": {
             "city": {
                 "type": "string",
                 "description": "城市名称，如\"北京\"、\"上海\"、\"广州\"等"
-            },
-            "forecast": {
-                "type": "boolean",
-                "description": "是否获取天气预报，true 返回未来几天预报，false 返回实时天气（默认）"
             }
         },
         "required": ["city"]
     },
 )
-async def get_weather(city: str, forecast: bool = False) -> Dict[str, Any]:
-    """查询天气信息
-    
-    Args:
-        city: 城市名称
-        forecast: 是否获取预报，默认 False（实时天气）
-        
-    Returns:
-        工具调用结果
-    """
+async def get_weather(city: str) -> Dict[str, Any]:
+    """查询天气信息"""
     try:
-        # 获取高德 API Key
         gaode_key = getattr(conf, 'gaode_api_key', '')
         if not gaode_key:
             return fail("天气服务未配置，请联系管理员设置高德地图 API Key")
         
-        # 获取天气数据
-        extensions = "all" if forecast else "base"
-        data = await _get_weather(city, gaode_key, extensions)
+        # 获取城市编码
+        city_code = city if city.isdigit() and len(city) == 6 else await _get_city_code(city, gaode_key)
+        if not city_code:
+            return fail(f"无法获取 {city} 的城市编码，请检查城市名称是否正确")
         
-        if not data:
-            return fail(f"无法获取 {city} 的天气信息，请检查城市名称是否正确")
+        # 并发获取当前天气和预报
+        import asyncio
+        current_task = _get_weather_data(city_code, gaode_key, "base")
+        forecast_task = _get_weather_data(city_code, gaode_key, "all")
         
-        # 格式化天气信息
-        weather_text = _format_weather(data, extensions)
+        current_data, forecast_data = await asyncio.gather(current_task, forecast_task, return_exceptions=True)
         
-        return ok(
-            weather_text,
-            metadata={
-                "city": city,
-                "forecast": forecast,
-                "raw_data": data
-            }
-        )
+        # 检查是否有成功的结果
+        if isinstance(current_data, Exception) and isinstance(forecast_data, Exception):
+            return fail(f"获取 {city} 的天气信息失败")
+        
+        result = {
+            "current": current_data if not isinstance(current_data, Exception) else None,
+            "forecast": forecast_data if not isinstance(forecast_data, Exception) else None
+        }
+        
+        logger.debug(f"[Weather Debug] 返回给AI的数据: {result}")
+        return ok(str(result), metadata={"city": city})
         
     except Exception as e:
         logger.exception(f"查询天气失败: {e}")
