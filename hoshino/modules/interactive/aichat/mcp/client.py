@@ -1,16 +1,15 @@
 """MCP 客户端封装
 
 提供对 MCP server 的连接管理和工具调用功能。
-当前仅支持 stdio 传输方式。
+支持 sse 和 http 传输方式（通过 Docker 部署）。
 """
-import asyncio
-import os
 from typing import Any, Dict, List, Optional
 from loguru import logger
 
 # MCP SDK 导入
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 
 from .config import MCPServerConfig
 
@@ -19,18 +18,19 @@ class MCPClient:
     """MCP 客户端
     
     封装单个 MCP server 的连接和调用。
+    支持 SSE 和 HTTP (Streamable HTTP) 传输方式，用于连接 Docker 部署的 MCP 服务。
     
     Example:
         config = MCPServerConfig(
-            id="filesystem",
-            name="文件系统",
-            command="npx",
-            args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+            id="playwright",
+            name="浏览器自动化",
+            transport="http",
+            url="http://playwright-mcp:8931/mcp"
         )
         client = MCPClient(config)
         await client.connect()
         tools = await client.list_tools()
-        result = await client.call_tool("read_file", {"path": "/tmp/test.txt"})
+        result = await client.call_tool("browser_navigate", {"url": "https://example.com"})
         await client.disconnect()
     """
     
@@ -44,12 +44,13 @@ class MCPClient:
         self.id = config.id
         self.name = config.name
         
-        # stdio 相关
+        # 连接相关
         self._session: Optional[Any] = None
         self._client_ctx = None
         self._session_ctx = None
         self._read_stream = None
         self._write_stream = None
+        self._get_session_id: Optional[Any] = None  # HTTP 模式使用
         
         # 状态
         self._connected = False
@@ -75,30 +76,26 @@ class MCPClient:
             logger.debug(f"MCP client {self.id} 已连接")
             return True
         
-        if self.config.transport != "stdio":
-            logger.error(f"不支持的传输方式: {self.config.transport}")
+        if self.config.transport == "sse":
+            return await self._connect_sse()
+        elif self.config.transport == "http":
+            return await self._connect_http()
+        else:
+            logger.error(f"不支持的传输方式: {self.config.transport}，支持 sse/http")
             return False
-        
-        if not self.config.command:
-            logger.error(f"MCP server {self.id} 未配置 command")
+    
+    async def _connect_sse(self) -> bool:
+        """通过 SSE 方式连接"""
+        if not self.config.url:
+            logger.error(f"MCP server {self.id} 未配置 url")
             return False
         
         try:
-            logger.info(f"正在连接 MCP server: {self.id} ({self.name})")
+            logger.info(f"正在通过 SSE 连接 MCP server: {self.id} ({self.name})")
+            logger.info(f"SSE URL: {self.config.url}")
             
-            # 准备环境变量
-            env = os.environ.copy()
-            env.update(self.config.env)
-            
-            # 创建 server 参数
-            server_params = StdioServerParameters(
-                command=self.config.command,
-                args=self.config.args,
-                env=env
-            )
-            
-            # 创建 stdio 客户端
-            self._client_ctx = stdio_client(server_params)
+            # 创建 SSE 客户端
+            self._client_ctx = sse_client(self.config.url)
             self._read_stream, self._write_stream = await self._client_ctx.__aenter__()
             
             # 创建会话
@@ -109,7 +106,7 @@ class MCPClient:
             await self._session.initialize()
             
             self._connected = True
-            logger.info(f"MCP server {self.id} 连接成功")
+            logger.info(f"MCP server {self.id} (SSE) 连接成功")
             
             # 立即发现工具
             await self._discover_tools()
@@ -117,7 +114,42 @@ class MCPClient:
             return True
             
         except Exception as e:
-            logger.exception(f"连接 MCP server {self.id} 失败: {e}")
+            logger.exception(f"连接 MCP server {self.id} (SSE) 失败: {e}")
+            await self._cleanup()
+            return False
+    
+    async def _connect_http(self) -> bool:
+        """通过 HTTP (Streamable HTTP) 方式连接"""
+        if not self.config.url:
+            logger.error(f"MCP server {self.id} 未配置 url")
+            return False
+        
+        try:
+            logger.info(f"正在通过 HTTP 连接 MCP server: {self.id} ({self.name})")
+            logger.info(f"HTTP URL: {self.config.url}")
+            
+            # 创建 HTTP 客户端
+            # streamable_http_client 返回三元组: (read_stream, write_stream, get_session_id)
+            self._client_ctx = streamable_http_client(self.config.url)
+            self._read_stream, self._write_stream, self._get_session_id = await self._client_ctx.__aenter__()
+            
+            # 创建会话
+            self._session_ctx = ClientSession(self._read_stream, self._write_stream)
+            self._session = await self._session_ctx.__aenter__()
+            
+            # 初始化
+            await self._session.initialize()
+            
+            self._connected = True
+            logger.info(f"MCP server {self.id} (HTTP) 连接成功")
+            
+            # 立即发现工具
+            await self._discover_tools()
+            
+            return True
+            
+        except Exception as e:
+            logger.exception(f"连接 MCP server {self.id} (HTTP) 失败: {e}")
             await self._cleanup()
             return False
     
@@ -130,6 +162,7 @@ class MCPClient:
         """清理资源"""
         self._connected = False
         self._tools = []
+        self._get_session_id = None
         
         if self._session_ctx:
             try:

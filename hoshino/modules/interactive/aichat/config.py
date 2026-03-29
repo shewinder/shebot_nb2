@@ -69,7 +69,17 @@ class Config(BaseConfig):
 
     # MCP 配置
     enable_mcp: bool = True            # MCP 总开关
-    mcp_servers: List[MCPServerConfig] = []  # MCP server 列表
+    mcp_servers: List[MCPServerConfig] = [     # MCP server 列表
+        MCPServerConfig(
+            id="playwright",
+            name="Playwright 浏览器自动化",
+            transport="http",
+            url="http://localhost:8931/mcp",
+            enabled=True,
+            # 路径重写：将截图等文件保存路径映射到 /tmp
+            path_rewrite={"path": "/tmp"}
+        )
+    ]
 
     def get_apis(self) -> List[ApiEntry]:
         """获取厂商列表"""

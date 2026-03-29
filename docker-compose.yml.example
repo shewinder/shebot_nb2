@@ -93,6 +93,30 @@ services:
     #     reservations:
     #       memory: 512M
 
+  # Playwright MCP Server - AI 浏览器自动化
+  # 通过 MCP 协议让 AI 控制浏览器
+  playwright-mcp:
+    image: mcr.microsoft.com/playwright/mcp:latest
+    container_name: playwright-mcp
+    restart: always
+    ports:
+      - "8931:8931"  # MCP SSE 端口
+    environment:
+      # 无头模式运行
+      - PW_HEADLESS=true
+    # 镜像已自带启动参数: node cli.js --headless --browser chromium --no-sandbox
+    # 只需指定端口参数
+    command: ["--port", "8931"]
+    networks:
+      - bot-network
+    # 资源限制（可选）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2G
+    #     reservations:
+    #       memory: 1G
+
 volumes:
   # QQ 配置数据卷（pmhq 和 llbot 共享）
   qq_config:
