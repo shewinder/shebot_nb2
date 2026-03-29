@@ -1056,29 +1056,26 @@ async def get_session_detail(session_id: str):
             except ValueError:
                 pass
         
-        # 处理 messages，截断过长内容
+        # 处理 messages，保留完整内容
         messages = []
         for msg in session.messages:
             content = msg.get("content", "")
-            content_preview = content
-            if isinstance(content, str) and len(content) > 200:
-                content_preview = content[:200] + "..."
-            elif isinstance(content, list):
+            content_display = content
+            if isinstance(content, list):
                 # 多模态消息，简化展示
-                content_preview = f"[多模态消息，共{len(content)}个部分]"
+                content_display = f"[多模态消息，共{len(content)}个部分]"
             
             messages.append({
                 "role": msg.get("role"),
-                "content_preview": content_preview,
-                "content_full": content if isinstance(content, str) else None
+                "content": content_display
             })
         
-        # 获取人格预览
-        persona_preview = ""
+        # 获取人格
+        persona = ""
         if session.messages and session.messages[0].get("role") == "system":
             persona = session.messages[0].get("content", "")
-            if isinstance(persona, str):
-                persona_preview = persona[:200] + "..." if len(persona) > 200 else persona
+            if not isinstance(persona, str):
+                persona = ""
         
         return {
             "status": 200,
@@ -1096,7 +1093,7 @@ async def get_session_detail(session_id: str):
                 "last_choices": session.last_choices,
                 "last_active": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.last_active)),
                 "is_expired": session.is_expired(),
-                "persona_preview": persona_preview
+                "persona": persona
             }
         }
     except Exception as e:

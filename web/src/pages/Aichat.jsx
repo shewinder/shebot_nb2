@@ -1892,10 +1892,12 @@ function Aichat() {
                           background: 'var(--ant-color-bg-elevated)',
                           borderRadius: 4,
                           fontSize: 12,
-                          maxHeight: 100,
-                          overflow: 'auto'
+                          maxHeight: 400,
+                          overflow: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordWrap: 'break-word'
                         }}>
-                          {typeof msg.content_preview === 'string' ? msg.content_preview : JSON.stringify(msg.content_preview, null, 2)}
+                          {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}
                         </pre>
                       </div>
                     </List.Item>
