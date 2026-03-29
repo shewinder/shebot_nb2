@@ -1,7 +1,19 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel
 
 from hoshino.config import BaseConfig, configuration
+
+
+class MCPServerConfig(BaseModel):
+    """MCP Server 配置"""
+    id: str                           # 唯一标识
+    name: str                         # 显示名称
+    transport: str = "stdio"          # stdio | sse | http
+    command: Optional[str] = None     # stdio 模式：可执行文件路径
+    args: List[str] = []              # stdio 模式：参数
+    url: Optional[str] = None         # sse/http 模式：URL
+    env: Dict[str, str] = {}          # 环境变量
+    enabled: bool = True              # 是否启用
 
 
 class ApiEntry(BaseModel):
@@ -54,6 +66,10 @@ class Config(BaseConfig):
     image_models: List[ImageModelEntry] = [
         ImageModelEntry()
     ]
+
+    # MCP 配置
+    enable_mcp: bool = True            # MCP 总开关
+    mcp_servers: List[MCPServerConfig] = []  # MCP server 列表
 
     def get_apis(self) -> List[ApiEntry]:
         """获取厂商列表"""

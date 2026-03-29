@@ -14,7 +14,56 @@ from .session import Session, SessionManager, session_manager
 from hoshino.util import aiohttpx, get_event_imageurl
 from hoshino.util.message_util import extract_images_from_reply
 
+# MCP 导入
+from .mcp import mcp_server_manager, mcp_tool_bridge
+
 conf = Config.get_instance('aichat')
+
+
+# MCP 初始化函数
+async def init_mcp_servers():
+    """初始化 MCP servers"""
+    if not conf.enable_mcp:
+        logger.info("MCP 功能已禁用")
+        return
+    
+    if not conf.mcp_servers:
+        logger.info("未配置 MCP servers")
+        return
+    
+    logger.info(f"正在初始化 MCP servers，共 {len(conf.mcp_servers)} 个配置")
+    
+    for server_config in conf.mcp_servers:
+        if not server_config.enabled:
+            logger.debug(f"MCP server {server_config.id} 已禁用，跳过")
+            continue
+        
+        try:
+            mcp_server_manager.add_server(server_config)
+            success = await mcp_server_manager.start_server(server_config.id)
+            if success:
+                logger.info(f"MCP server {server_config.id} 启动成功")
+            else:
+                logger.warning(f"MCP server {server_config.id} 启动失败")
+        except Exception as e:
+            logger.exception(f"初始化 MCP server {server_config.id} 失败: {e}")
+
+
+# 注册启动时初始化 MCP
+try:
+    from nonebot import get_driver
+    driver = get_driver()
+    
+    @driver.on_startup
+    async def _init_mcp():
+        await init_mcp_servers()
+    
+    @driver.on_shutdown
+    async def _shutdown_mcp():
+        await mcp_server_manager.stop_all()
+            
+except ImportError:
+    pass
 sv = Service('aichat', help_='''AI聊天插件
 基础用法：
   #消息   以#开头触发AI对话
@@ -827,3 +876,192 @@ async def import_global_persona(bot: Bot, event: Event):
     )
     await import_global_persona_cmd.finish(msg)
 
+
+
+# ========== MCP 管理命令 ==========
+
+mcp_list_cmd = sv.on_command('MCP列表', aliases=('列出MCP', 'MCP状态'), permission=SUPERUSER, only_group=False)
+
+@mcp_list_cmd.handle()
+async def mcp_list(bot: Bot, event: Event):
+    """列出所有 MCP server 状态"""
+    if not conf.enable_mcp:
+        await mcp_list_cmd.finish("MCP 功能未启用，请在配置中设置 enable_mcp: true")
+        return
+    
+    servers = mcp_server_manager.list_servers()
+    
+    if not servers:
+        await mcp_list_cmd.finish("未配置 MCP servers\n\n使用说明：\n在 data/config/aichat.json 中添加 mcp_servers 配置")
+        return
+    
+    lines = [f"📡 MCP Servers（共 {len(servers)} 个）：\n"]
+    
+    for server in servers:
+        status = "🟢 已连接" if server["connected"] else "🔴 未连接"
+        enabled = "启用" if server["enabled"] else "禁用"
+        lines.append(f"• {server['name']} ({server['id']})")
+        lines.append(f"  状态：{status} | {enabled}")
+        lines.append(f"  工具数：{server['tool_count']} | 传输：{server['transport']}")
+        lines.append("")
+    
+    lines.append("管理命令：")
+    lines.append("• MCP启用 <id> - 启用指定 server")
+    lines.append("• MCP禁用 <id> - 禁用指定 server")
+    lines.append("• MCP重启 <id> - 重启指定 server")
+    lines.append("• MCP工具 - 列出所有可用工具")
+    
+    await mcp_list_cmd.finish("\n".join(lines))
+
+
+mcp_enable_cmd = sv.on_command('MCP启用', aliases=('启用MCP', '开启MCP'), permission=SUPERUSER, only_group=False)
+
+@mcp_enable_cmd.handle()
+async def mcp_enable(bot: Bot, event: Event):
+    """启用指定 MCP server"""
+    if not conf.enable_mcp:
+        await mcp_enable_cmd.finish("MCP 功能未启用")
+        return
+    
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await mcp_enable_cmd.finish("请提供 MCP server ID，例如：MCP启用 filesystem")
+        return
+    
+    server_id = args[1].strip()
+    
+    # 查找配置
+    server_config = None
+    for sc in conf.mcp_servers:
+        if sc.id == server_id:
+            server_config = sc
+            break
+    
+    if not server_config:
+        await mcp_enable_cmd.finish(f"未找到 ID 为 '{server_id}' 的 MCP server 配置")
+        return
+    
+    # 如果已存在，先移除再重新添加
+    if server_id in mcp_server_manager._clients:
+        await mcp_server_manager.stop_server(server_id)
+        mcp_server_manager.remove_server(server_id)
+    
+    server_config.enabled = True
+    mcp_server_manager.add_server(server_config)
+    success = await mcp_server_manager.start_server(server_id)
+    
+    if success:
+        await mcp_enable_cmd.finish(f"✅ MCP server '{server_id}' 已启用并连接")
+    else:
+        await mcp_enable_cmd.finish(f"⚠️ MCP server '{server_id}' 启用但连接失败，请检查日志")
+
+
+mcp_disable_cmd = sv.on_command('MCP禁用', aliases=('禁用MCP', '关闭MCP'), permission=SUPERUSER, only_group=False)
+
+@mcp_disable_cmd.handle()
+async def mcp_disable(bot: Bot, event: Event):
+    """禁用指定 MCP server"""
+    if not conf.enable_mcp:
+        await mcp_disable_cmd.finish("MCP 功能未启用")
+        return
+    
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await mcp_disable_cmd.finish("请提供 MCP server ID，例如：MCP禁用 filesystem")
+        return
+    
+    server_id = args[1].strip()
+    
+    if server_id not in mcp_server_manager._clients:
+        await mcp_disable_cmd.finish(f"MCP server '{server_id}' 未运行")
+        return
+    
+    await mcp_server_manager.stop_server(server_id)
+    mcp_server_manager.remove_server(server_id)
+    
+    await mcp_disable_cmd.finish(f"✅ MCP server '{server_id}' 已禁用")
+
+
+mcp_restart_cmd = sv.on_command('MCP重启', aliases=('重启MCP'), permission=SUPERUSER, only_group=False)
+
+@mcp_restart_cmd.handle()
+async def mcp_restart(bot: Bot, event: Event):
+    """重启指定 MCP server"""
+    if not conf.enable_mcp:
+        await mcp_restart_cmd.finish("MCP 功能未启用")
+        return
+    
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await mcp_restart_cmd.finish("请提供 MCP server ID，例如：MCP重启 filesystem")
+        return
+    
+    server_id = args[1].strip()
+    
+    # 查找配置
+    server_config = None
+    for sc in conf.mcp_servers:
+        if sc.id == server_id:
+            server_config = sc
+            break
+    
+    if not server_config:
+        await mcp_restart_cmd.finish(f"未找到 ID 为 '{server_id}' 的 MCP server 配置")
+        return
+    
+    # 重启
+    if server_id in mcp_server_manager._clients:
+        await mcp_server_manager.stop_server(server_id)
+        mcp_server_manager.remove_server(server_id)
+    
+    server_config.enabled = True
+    mcp_server_manager.add_server(server_config)
+    success = await mcp_server_manager.start_server(server_id)
+    
+    if success:
+        tools = mcp_server_manager.get_server(server_id).tools
+        await mcp_restart_cmd.finish(f"✅ MCP server '{server_id}' 重启成功，发现 {len(tools)} 个工具")
+    else:
+        await mcp_restart_cmd.finish(f"❌ MCP server '{server_id}' 重启失败，请检查日志")
+
+
+mcp_tools_cmd = sv.on_command('MCP工具', aliases=('MCP工具列表', '列出MCP工具'), permission=SUPERUSER, only_group=False)
+
+@mcp_tools_cmd.handle()
+async def mcp_tools(bot: Bot, event: Event):
+    """列出所有可用的 MCP 工具"""
+    if not conf.enable_mcp:
+        await mcp_tools_cmd.finish("MCP 功能未启用")
+        return
+    
+    all_tools = mcp_server_manager.get_all_tools()
+    
+    if not all_tools:
+        await mcp_tools_cmd.finish("暂无可用的 MCP 工具\n\n请确保：\n1. 已配置 MCP servers\n2. Servers 已连接（使用 'MCP列表' 查看状态）")
+        return
+    
+    # 按 server 分组
+    tools_by_server: dict = {}
+    for tool in all_tools:
+        server_id = tool["server_id"]
+        if server_id not in tools_by_server:
+            tools_by_server[server_id] = {
+                "name": tool["server_name"],
+                "tools": []
+            }
+        tools_by_server[server_id]["tools"].append(tool)
+    
+    lines = [f"🔧 MCP 工具列表（共 {len(all_tools)} 个）：\n"]
+    
+    for server_id, data in tools_by_server.items():
+        lines.append(f"📦 {data['name']} ({server_id})：")
+        for tool in data["tools"]:
+            desc = tool.get("description", "")[:50]
+            if len(tool.get("description", "")) > 50:
+                desc += "..."
+            lines.append(f"  • {tool['name']}: {desc}")
+        lines.append("")
+    
+    lines.append("💡 提示：MCP 工具会自动暴露给 AI 使用，无需额外配置")
+    
+    await mcp_tools_cmd.finish("\n".join(lines))
