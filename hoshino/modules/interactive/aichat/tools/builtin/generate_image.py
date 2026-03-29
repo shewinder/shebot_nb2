@@ -167,6 +167,16 @@ def _convert_to_png(image_bytes: bytes) -> bytes:
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "图片标识符列表（可选），用于编辑或融合图片。从对话中的[当前可用图片]列表获取，如 <user_image_1>, <ai_image_1>"
+            },
+            "aspect_ratio": {
+                "type": "string",
+                "enum": ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"],
+                "description": "图片宽高比（仅 Gemini 格式支持），可选: 1:1(正方形), 4:3, 3:4, 16:9(横屏), 9:16(竖屏), 2:3, 3:2"
+            },
+            "size": {
+                "type": "string",
+                "enum": ["512", "1K", "2K", "4K"],
+                "description": "图片分辨率（仅 Gemini 格式支持），可选: 512, 1K(默认), 2K, 4K"
             }
         },
         "required": ["prompt"]
@@ -176,23 +186,13 @@ async def generate_image(
     prompt: str,
     session: "Session",
     image_identifiers: List[str] = None,
+    aspect_ratio: str = None,
+    size: str = None,
 ) -> Dict[str, Any]:
-    """
-    生成或编辑图片
-    
-    Args:
-        prompt: 图片描述或编辑指令
-        session: 会话对象（自动注入）
-        image_identifiers: 图片标识符列表（可选）
-    
-    Returns:
-        {"success": bool, "content": str, "images": List[str], "error": str, "metadata": Dict}
-    """
     try:
         image_identifiers = image_identifiers or []
         image_count = len(image_identifiers)
         
-        # 选择模型配置
         model_entry = _select_image_model(image_count)
         if not model_entry:
             error_msg = "未找到可用的图片生成模型"
@@ -202,7 +202,6 @@ async def generate_image(
         target_model = model_entry.model
         api_format = model_entry.api_format
         
-        # 获取 API 配置
         api_config = _get_api_config_by_model(target_model)
         
         if not api_config:
@@ -220,10 +219,11 @@ async def generate_image(
         
         # 根据图片数量和 API 格式调用不同接口
         if image_count == 0:
-            # 纯生成
-            result = await _call_generate_api(api_base, api_key, target_model, api_format, prompt)
+            result = await _call_generate_api(
+                api_base, api_key, target_model, api_format, prompt,
+                aspect_ratio=aspect_ratio, size=size
+            )
         else:
-            # 编辑/融合
             image_urls = []
             for identifier in image_identifiers:
                 image_data = session.resolve_image_identifier(identifier)
@@ -231,15 +231,16 @@ async def generate_image(
                     error_msg = f"未找到图片标识符: {identifier}"
                     logger.error(error_msg)
                     return fail(error_msg)
-                # 获取图片 URL（如果是 base64，需要上传或处理）
                 image_urls.append(image_data)
             
-            # OpenAI 格式只支持单图编辑
             if api_format != "gemini" and image_count > 1:
                 logger.warning(f"OpenAI 格式不支持多图融合，只使用第一张图")
                 image_urls = [image_urls[0]]
             
-            result = await _call_edit_api(api_base, api_key, target_model, api_format, prompt, image_urls)
+            result = await _call_edit_api(
+                api_base, api_key, target_model, api_format, prompt, image_urls,
+                aspect_ratio=aspect_ratio, size=size
+            )
         
         if not result.get("success"):
             return fail(result.get("error", "API 调用失败"))
@@ -290,28 +291,39 @@ async def _call_generate_api(
     api_key: str,
     model: str,
     api_format: str,
-    prompt: str
+    prompt: str,
+    aspect_ratio: str = None,
+    size: str = None,
 ) -> Dict[str, Any]:
-    """调用图片生成 API"""
     if api_format == "gemini":
-        # Gemini 官方格式: generateContent
-        # 处理 api_base 可能包含版本号的情况
         base = api_base.rstrip('/')
         if '/v1' in base and not base.endswith('/v1beta'):
-            # 如果 base 包含 /v1 但不以 /v1beta 结尾，替换或追加
             base = base.replace('/v1', '/v1beta')
         url = f"{base}/models/{model}:generateContent"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+        
+        # 构建 generationConfig
+        generation_config = {
+            "responseModalities": ["IMAGE"]
+        }
+        
+        # 添加可选的图片配置（Gemini 官方 API 支持）
+        if aspect_ratio or size:
+            image_config = {}
+            if aspect_ratio:
+                image_config["aspectRatio"] = aspect_ratio
+            if size:
+                image_config["imageSize"] = size
+            generation_config["imageGenerationConfig"] = image_config
+        
         payload = {
             "contents": [{
                 "parts": [{"text": prompt}]
             }],
-            "generationConfig": {
-                "responseModalities": ["IMAGE"]
-            }
+            "generationConfig": generation_config
         }
     else:
         url = f"{api_base}/images/generations"
@@ -368,11 +380,11 @@ async def _call_edit_api(
     model: str,
     api_format: str,
     prompt: str,
-    image_urls: List[str]
+    image_urls: List[str],
+    aspect_ratio: str = None,
+    size: str = None,
 ) -> Dict[str, Any]:
-    """调用图片编辑 API"""
     if api_format == "gemini":
-        # Gemini 官方格式: 多图作为 inlineData
         base = api_base.rstrip('/')
         if '/v1' in base and not base.endswith('/v1beta'):
             base = base.replace('/v1', '/v1beta')
@@ -382,12 +394,10 @@ async def _call_edit_api(
             "Content-Type": "application/json"
         }
         
-        # 构建 parts: 先添加所有图片，再添加文本 prompt
         parts = []
         for image_url in image_urls:
             image_bytes = await _get_image_bytes(image_url)
             if image_bytes:
-                # 检测 MIME 类型
                 mime_type = "image/png"
                 try:
                     with Image.open(io.BytesIO(image_bytes)) as img:
@@ -395,7 +405,6 @@ async def _call_edit_api(
                             mime_type = f"image/{img.format.lower()}"
                 except:
                     pass
-                # 转换为 base64
                 b64_data = base64.b64encode(image_bytes).decode('utf-8')
                 parts.append({
                     "inlineData": {
@@ -406,11 +415,23 @@ async def _call_edit_api(
         
         parts.append({"text": prompt})
         
+        # 构建 generationConfig
+        generation_config = {
+            "responseModalities": ["IMAGE"]
+        }
+        
+        # 添加可选的图片配置
+        if aspect_ratio or size:
+            image_config = {}
+            if aspect_ratio:
+                image_config["aspectRatio"] = aspect_ratio
+            if size:
+                image_config["imageSize"] = size
+            generation_config["imageGenerationConfig"] = image_config
+        
         payload = {
             "contents": [{"parts": parts}],
-            "generationConfig": {
-                "responseModalities": ["IMAGE"]
-            }
+            "generationConfig": generation_config
         }
         
         logger.info(f"调用 Gemini 编辑 API: {url}, 图片数: {len(image_urls)}, prompt: {truncate_log(prompt)}")
