@@ -103,6 +103,11 @@ class Session:
         return identifier
     
     def resolve_image_identifier(self, identifier: str) -> Optional[str]:
+        # 兼容带尖括号和不带尖括号的格式
+        # AI 有时会传入 "user_image_1" 而不是 "<user_image_1>"
+        if not identifier.startswith('<'):
+            identifier = f"<{identifier}>"
+        
         if identifier in self._user_images:
             return self._user_images[identifier]
         

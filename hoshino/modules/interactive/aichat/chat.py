@@ -396,11 +396,57 @@ async def execute_tool_call(
         }
 
 
+async def send_response(
+    bot: Bot,
+    event: Event,
+    content: str,
+    enable_markdown: bool = False,
+    markdown_min_length: int = 100,
+) -> bool:
+    """统一发送 AI 回复内容，支持 Markdown 渲染和图片提取"""
+    if not content or not content.strip():
+        return False
+    
+    text = content.strip()
+    
+    # 尝试 Markdown 渲染
+    if enable_markdown and len(text) >= markdown_min_length:
+        try:
+            img_bytes = await render_text_if_markdown(text, min_length=markdown_min_length)
+            if img_bytes:
+                await bot.send(event, MessageSegment.image(BytesIO(img_bytes)))
+                logger.info("Markdown 渲染成功，发送渲染后的图片")
+                return True
+        except Exception as render_err:
+            logger.warning(f"Markdown 渲染失败: {render_err}")
+    
+    # 提取并发送图片 URL
+    from .md_render import extract_image_urls
+    image_urls = extract_image_urls(text)
+    
+    if image_urls:
+        for url in image_urls:
+            try:
+                await bot.send(event, MessageSegment.image(url))
+            except Exception as img_err:
+                logger.error(f"发送图片失败: {url}, 错误: {img_err}")
+        
+        text_content = MD_IMAGE_PATTERN.sub('', text).strip()
+        if text_content:
+            await bot.send(event, text_content)
+        return True
+    
+    # 纯文本发送
+    await bot.send(event, text)
+    return True
+
+
 async def call_ai_api_with_tools(
     messages: List[Dict[str, Any]], 
     api_config: Dict[str, Any],
     max_tool_rounds: int = 5,
     context: Optional[Dict[str, Any]] = None,
+    on_content: Optional[callable] = None,
 ) -> Dict[str, Any]:
     if not api_config.get("supports_tools", False):
         result = await call_ai_api(messages, api_config, tools=None)
@@ -421,16 +467,20 @@ async def call_ai_api_with_tools(
         if result.get("error"):
             return {"content": None, "tool_results": all_tool_results, "error": result["error"]}
         
+        content = result.get("content") or result.get("reasoning_content")
         tool_calls = result.get("tool_calls", [])
+        
         if not tool_calls:
-            content = result.get("content")
-            if not content and result.get("reasoning_content"):
-                content = result.get("reasoning_content")
+            # 最后一轮，返回最终 content
             return {
                 "content": content,
                 "tool_results": all_tool_results,
                 "error": None
             }
+        
+        # 工具调用轮次，即时输出 content（如果有）
+        if content and on_content:
+            await on_content(content)
         
         assistant_message = result.get("raw_response", {}).get("choices", [{}])[0].get("message", {})
         current_messages.append(assistant_message)
@@ -575,10 +625,20 @@ async def handle_ai_chat(bot: Bot, event: Event):
         "bot": bot,
         "event": event,
     }
+    
+    async def on_content(content: str):
+        if content and content.strip():
+            await send_response(
+                bot, event, content,
+                enable_markdown=conf.enable_markdown_render,
+                markdown_min_length=conf.markdown_min_length
+            )
+    
     api_result = await call_ai_api_with_tools(
         messages_for_api, 
         api_config, 
         context=tool_context,
+        on_content=on_content,
     )
     
     for tool_result in api_result.get("tool_results", []):
@@ -624,52 +684,16 @@ async def handle_ai_chat(bot: Bot, event: Event):
     else:
         session.add_message("assistant", response)
     
-    sent = False
     try:
         if not display_response:
             await bot.send(event, "抱歉，我没有生成任何内容，请重试")
             return
         
-        should_render = (
-            conf.enable_markdown_render and
-            len(display_response) >= conf.markdown_min_length
+        await send_response(
+            bot, event, display_response,
+            enable_markdown=conf.enable_markdown_render,
+            markdown_min_length=conf.markdown_min_length
         )
-        
-        if should_render:
-            try:
-                img_bytes = await render_text_if_markdown(
-                    display_response,
-                    min_length=conf.markdown_min_length
-                )
-                if img_bytes:
-                    await bot.send(event, MessageSegment.image(BytesIO(img_bytes)))
-                    sent = True
-                    logger.info("Markdown 渲染成功，发送渲染后的图片")
-            except Exception as render_err:
-                logger.warning(f"Markdown 渲染失败: {render_err}")
-        
-        if not sent:
-            from .md_render import extract_image_urls
-            image_urls = extract_image_urls(display_response)
-            
-            if image_urls:
-                for url in image_urls:
-                    try:
-                        await bot.send(event, MessageSegment.image(url))
-                    except Exception as img_err:
-                        logger.error(f"发送图片失败: {url}, 错误: {img_err}")
-                
-                text_content = MD_IMAGE_PATTERN.sub('', display_response)
-                text_content = text_content.strip()
-                
-                if text_content:
-                    await bot.send(event, text_content)
-                sent = True
-            else:
-                # 没有图片 URL，直接发送文本
-                await bot.send(event, display_response)
-                sent = True
-            
     except Exception as e:
         logger.error(truncate_log(str(display_response)))
         logger.error(f"发送AI回复失败: {e}")
