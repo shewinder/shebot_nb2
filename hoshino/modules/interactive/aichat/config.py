@@ -81,6 +81,9 @@ class Config(BaseConfig):
         )
     ]
 
+    # 天气工具配置
+    gaode_api_key: str = ""  # 高德地图 API Key，用于天气查询 https://lbs.amap.com/
+
     def get_apis(self) -> List[ApiEntry]:
         """获取厂商列表"""
         return self.apis

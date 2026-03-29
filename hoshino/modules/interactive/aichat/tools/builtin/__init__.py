@@ -5,5 +5,6 @@ AI 内置工具包
 # 导入所有工具模块，使其自动注册
 from . import generate_image
 from . import scheduler
+from . import weather
 
-__all__ = ["generate_image", "scheduler", "web_search"]
+__all__ = ["generate_image", "scheduler", "weather"]

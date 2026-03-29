@@ -451,7 +451,7 @@ async def call_ai_api_with_tools(
     if not api_config.get("supports_tools", False):
         result = await call_ai_api(messages, api_config, tools=None)
         return {
-            "content": result.get("content") or result.get("reasoning_content"),
+            "content": result.get("content"),
             "tool_results": [],
             "error": result.get("error")
         }
@@ -467,7 +467,7 @@ async def call_ai_api_with_tools(
         if result.get("error"):
             return {"content": None, "tool_results": all_tool_results, "error": result["error"]}
         
-        content = result.get("content") or result.get("reasoning_content")
+        content = result.get("content")
         tool_calls = result.get("tool_calls", [])
         
         if not tool_calls:
@@ -519,12 +519,6 @@ async def call_ai_api_with_tools(
         "tool_results": all_tool_results,
         "error": "达到最大工具调用轮数限制"
     }
-
-
-# 保留旧函数以兼容代码，但实际使用 call_ai_api_with_tools
-async def call_ai_api_legacy(messages: List[Dict[str, Any]], api_config: Dict[str, Any]) -> Optional[str]:
-    result = await call_ai_api(messages, api_config, tools=None)
-    return result.get("content") or result.get("reasoning_content")
 
 
 async def handle_ai_chat(bot: Bot, event: Event):
