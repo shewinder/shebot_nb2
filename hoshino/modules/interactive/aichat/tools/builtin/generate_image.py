@@ -151,11 +151,14 @@ def _convert_to_png(image_bytes: bytes) -> bytes:
     description="""生成或编辑图片。
 
 根据传入的参数自动选择合适的能力：
-- 仅提供 prompt：根据描述生成新图片
+- 仅提供 prompt：根据描述生成新图片，可指定宽高比和分辨率
 - 提供单张图片：编辑该图片（如改变风格、添加元素）
-- 提供多张图片：融合图片（如让人物穿衣服、替换背景）
+- 提供多张图片：融合图片（如让人物穿衣服、替换背景、多图合成）
 
-注意：部分模型不支持编辑或多图融合，将自动选择合适的模型或提示错误。""",
+重要提示：
+- 编辑图片时，默认不传 aspect_ratio 以保持原图比例
+- 仅当用户明确要求调整比例（如"把图片改成横屏/竖屏"）时才传入 aspect_ratio
+- Gemini 和 OpenAI 格式都支持多图编辑（最多10张）""",
     parameters={
         "type": "object",
         "properties": {
@@ -171,12 +174,12 @@ def _convert_to_png(image_bytes: bytes) -> bytes:
             "aspect_ratio": {
                 "type": "string",
                 "enum": ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"],
-                "description": "图片宽高比（仅 Gemini 格式支持），可选: 1:1(正方形), 4:3, 3:4, 16:9(横屏), 9:16(竖屏), 2:3, 3:2"
+                "description": "图片宽高比（Gemini 格式支持）。所有 Gemini 图像模型都支持。默认与输入图片匹配，无输入时为 1:1。可选: 1:1, 4:3, 3:4, 16:9, 9:16, 2:3, 3:2"
             },
             "size": {
                 "type": "string",
                 "enum": ["512", "1K", "2K", "4K"],
-                "description": "图片分辨率（仅 Gemini 格式支持），可选: 512, 1K(默认), 2K, 4K"
+                "description": "图片分辨率。Gemini 3.1/3-pro 原生支持；OpenAI 会自动映射到 1024x1024/1536x1024/1536x1536。可选: 512, 1K(默认), 2K, 4K"
             }
         },
         "required": ["prompt"]
@@ -232,10 +235,6 @@ async def generate_image(
                     logger.error(error_msg)
                     return fail(error_msg)
                 image_urls.append(image_data)
-            
-            if api_format != "gemini" and image_count > 1:
-                logger.warning(f"OpenAI 格式不支持多图融合，只使用第一张图")
-                image_urls = [image_urls[0]]
             
             result = await _call_edit_api(
                 api_base, api_key, target_model, api_format, prompt, image_urls,
@@ -338,7 +337,8 @@ async def _call_generate_api(
             "response_format": "b64_json"
         }
     
-    logger.info(f"调用生成 API: {url}, model: {model}, prompt: {truncate_log(prompt)}")
+    logger.info(f"调用生成 API: {url}, model: {model}")
+    logger.debug(f"生成 API payload: {log_json(payload)}")
     resp = await aiohttpx.post(url, headers=headers, json=payload)
     
     if not resp.ok:
@@ -434,7 +434,8 @@ async def _call_edit_api(
             "generationConfig": generation_config
         }
         
-        logger.info(f"调用 Gemini 编辑 API: {url}, 图片数: {len(image_urls)}, prompt: {truncate_log(prompt)}")
+        logger.info(f"调用 Gemini 编辑 API: {url}, 图片数: {len(image_urls)}")
+        logger.debug(f"Gemini 编辑 API payload: {log_json(payload)}")
         resp = await aiohttpx.post(url, headers=headers, json=payload)
         
         if not resp.ok:
@@ -457,32 +458,42 @@ async def _call_edit_api(
         
         return {"success": True, "urls": urls}
     else:
-        # OpenAI 格式只支持单图
-        image_url = image_urls[0]
-        image_bytes = await _get_image_bytes(image_url)
-        if not image_bytes:
-            return {"success": False, "error": "无法获取图片数据"}
-        
-        try:
-            with Image.open(io.BytesIO(image_bytes)) as img:
-                width, height = img.size
-                target_size = _get_closest_size(width, height)
-        except:
-            target_size = "1024x1024"
-        
-        image_bytes = _convert_to_png(image_bytes)
-        
+        # OpenAI 格式支持多图（最多10张）
         url = f"{api_base}/images/edits"
+        
+        # 确定输出尺寸
+        if size:
+            # 用户指定了尺寸，转换为 OpenAI 格式
+            target_size = _convert_gemini_size_to_openai(size)
+        else:
+            # 根据第一张图的比例自动选择
+            try:
+                first_image_bytes = await _get_image_bytes(image_urls[0])
+                with Image.open(io.BytesIO(first_image_bytes)) as img:
+                    width, height = img.size
+                    target_size = _get_closest_size(width, height)
+            except:
+                target_size = "1024x1024"
         
         async with ClientSession() as http_session:
             form = FormData()
-            form.add_field('image', image_bytes, filename='image.png', content_type='image/png')
+            
+            # 添加所有图片（OpenAI 支持多张）
+            for i, image_url in enumerate(image_urls):
+                image_bytes = await _get_image_bytes(image_url)
+                if not image_bytes:
+                    logger.warning(f"无法获取第 {i+1} 张图片数据，跳过")
+                    continue
+                image_bytes = _convert_to_png(image_bytes)
+                form.add_field('image', image_bytes, filename=f'image_{i}.png', content_type='image/png')
+            
             form.add_field('prompt', prompt)
             form.add_field('n', '1')
             form.add_field('size', target_size)
             
             headers = {"Authorization": f"Bearer {api_key}"}
-            logger.info(f"调用 OpenAI 编辑 API: {url}")
+            logger.info(f"调用 OpenAI 编辑 API: {url}, images: {len(image_urls)}, size: {target_size}")
+            logger.debug(f"OpenAI 编辑 API form data: prompt={truncate_log(prompt)}, size={target_size}, images: {len(image_urls)}")
             async with http_session.post(url, headers=headers, data=form) as resp:
                 if resp.status != 200:
                     error_text = truncate_log(await resp.text())
@@ -528,4 +539,15 @@ def _get_closest_size(width: int, height: int) -> str:
     else:
         # 接近正方形，使用 1024x1024
         return "1024x1024"
+
+
+def _convert_gemini_size_to_openai(size: str) -> str:
+    """将 Gemini 尺寸格式转换为 OpenAI 尺寸格式"""
+    mapping = {
+        "512": "1024x1024",  # OpenAI 最小 1024
+        "1K": "1024x1024",
+        "2K": "1536x1024",   # 2K 用横屏表示
+        "4K": "1536x1536"    # OpenAI 最大 1536
+    }
+    return mapping.get(size, "1024x1024")
 
