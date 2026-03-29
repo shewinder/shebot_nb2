@@ -601,15 +601,18 @@ current_model_cmd = sv.on_command('当前模型', aliases=('查看模型', '当�
 async def current_model(bot: Bot, event: Event):
     api_name = api_manager.get_current_api()
     model_name = api_manager.get_current_model()
-    image_gen_model = conf.image_generation_model
-    image_edit_model = conf.image_edit_model
     
     lines = [
         f"🤖 当前 API 厂商：{api_name}",
         f"💬 对话模型：{model_name}",
-        f"🎨 绘图模型：{image_gen_model}",
-        f"✏️ 图片编辑模型：{image_edit_model}",
     ]
+    
+    if conf.image_models:
+        image_models_info = []
+        for m in conf.image_models:
+            caps = ", ".join(m.capabilities)
+            image_models_info.append(f"{m.model} ({caps})")
+        lines.append(f"🎨 图像模型：{'; '.join(image_models_info)}")
     
     await current_model_cmd.finish("\n".join(lines))
 
