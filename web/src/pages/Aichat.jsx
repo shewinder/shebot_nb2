@@ -38,7 +38,10 @@ import {
   TagOutlined,
   UploadOutlined,
   ImportOutlined,
-  FileImageOutlined
+  FileImageOutlined,
+  PictureOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined
 } from '@ant-design/icons'
 import * as aichatApi from '../api'
 
@@ -102,6 +105,13 @@ function Aichat() {
   const [switchingModel, setSwitchingModel] = useState(false)
   const [loadingModels, setLoadingModels] = useState(false)
 
+  // 图像模型管理相关
+  const [imageModels, setImageModels] = useState([])
+  const [imageModelModalVisible, setImageModelModalVisible] = useState(false)
+  const [imageModelModalMode, setImageModelModalMode] = useState('add') // 'add' 或 'edit'
+  const [editingImageModelIndex, setEditingImageModelIndex] = useState(null)
+  const [imageModelForm] = Form.useForm()
+
   useEffect(() => {
     fetchInitialData()
   }, [])
@@ -115,7 +125,8 @@ function Aichat() {
         fetchConfig(),
         fetchSuperusers(),
         fetchGroups(),
-        fetchGlobalPresets()
+        fetchGlobalPresets(),
+        fetchImageModels()
       ])
     } catch (error) {
       message.error('加载数据失败: ' + error.message)
@@ -562,6 +573,93 @@ function Aichat() {
     }
   }
 
+  // ===== 图像模型管理相关函数 =====
+  const fetchImageModels = async () => {
+    try {
+      const data = await aichatApi.getImageModels()
+      setImageModels(data || [])
+    } catch (error) {
+      // 静默处理，不显示错误
+    }
+  }
+
+  const openAddImageModelModal = () => {
+    setImageModelModalMode('add')
+    setEditingImageModelIndex(null)
+    imageModelForm.resetFields()
+    imageModelForm.setFieldsValue({
+      api_format: 'openai',
+      capabilities: ['generate']
+    })
+    setImageModelModalVisible(true)
+  }
+
+  const openEditImageModelModal = (record) => {
+    setImageModelModalMode('edit')
+    setEditingImageModelIndex(record.index)
+    imageModelForm.resetFields()
+    imageModelForm.setFieldsValue({
+      model: record.model,
+      api_format: record.api_format,
+      capabilities: record.capabilities
+    })
+    setImageModelModalVisible(true)
+  }
+
+  const handleImageModelSubmit = async (values) => {
+    try {
+      if (imageModelModalMode === 'add') {
+        const result = await aichatApi.addImageModel(values)
+        message.success(result.data || '添加成功')
+      } else {
+        const result = await aichatApi.updateImageModel(editingImageModelIndex, values)
+        message.success(result.data || '更新成功')
+      }
+      setImageModelModalVisible(false)
+      await fetchImageModels()
+    } catch (error) {
+      message.error(imageModelModalMode === 'add' ? '添加失败: ' : '更新失败: ' + error.message)
+    }
+  }
+
+  const handleDeleteImageModel = async (index) => {
+    try {
+      const result = await aichatApi.deleteImageModel(index)
+      message.success(result.data || '删除成功')
+      await fetchImageModels()
+    } catch (error) {
+      message.error('删除失败: ' + error.message)
+    }
+  }
+
+  const handleMoveImageModel = async (index, direction) => {
+    if (direction === 'up' && index === 0) return
+    if (direction === 'down' && index === imageModels.length - 1) return
+
+    const newModels = [...imageModels]
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    
+    // 交换位置
+    const temp = newModels[index]
+    newModels[index] = newModels[targetIndex]
+    newModels[targetIndex] = temp
+
+    // 更新索引
+    newModels.forEach((m, i) => m.index = i)
+
+    try {
+      // 构建提交数据（去掉index字段）
+      const submitModels = newModels.map(({ model, api_format, capabilities }) => ({
+        model, api_format, capabilities
+      }))
+      const result = await aichatApi.reorderImageModels(submitModels)
+      message.success(result.data || '排序更新成功')
+      await fetchImageModels()
+    } catch (error) {
+      message.error('排序更新失败: ' + error.message)
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '100px' }}>
@@ -704,9 +802,8 @@ function Aichat() {
                     configForm.setFieldsValue({
                       max_history: config.max_history,
                       session_timeout: config.session_timeout,
-                      max_tokens: config.max_tokens,
-                      temperature: config.temperature,
-                      max_saved_personas: config.max_saved_personas
+                      enable_markdown_render: config.enable_markdown_render,
+                      markdown_min_length: config.markdown_min_length
                     })
                     setConfigModalVisible(true)
                   }}
@@ -718,9 +815,8 @@ function Aichat() {
               <Descriptions bordered size="small" column={2}>
                 <Descriptions.Item label="最大历史消息">{config.max_history}</Descriptions.Item>
                 <Descriptions.Item label="会话超时">{config.session_timeout} 秒</Descriptions.Item>
-                <Descriptions.Item label="最大 Token">{config.max_tokens}</Descriptions.Item>
-                <Descriptions.Item label="温度">{config.temperature}</Descriptions.Item>
-                <Descriptions.Item label="最大保存人格数">{config.max_saved_personas}</Descriptions.Item>
+                <Descriptions.Item label="Markdown渲染">{config.enable_markdown_render ? '开启' : '关闭'}</Descriptions.Item>
+                <Descriptions.Item label="渲染最小长度">{config.markdown_min_length}</Descriptions.Item>
               </Descriptions>
             </Card>
           )}
@@ -1331,6 +1427,110 @@ function Aichat() {
         </TabPane>
 
         <TabPane
+          tab={<span><PictureOutlined /> 图像模型管理</span>}
+          key="image-models"
+        >
+          <Card
+            title="图像生成模型配置"
+            extra={
+              <Space>
+                <Button icon={<PlusOutlined />} type="primary" onClick={openAddImageModelModal}>
+                  添加模型
+                </Button>
+                <Button icon={<ReloadOutlined />} onClick={fetchImageModels}>
+                  刷新
+                </Button>
+              </Space>
+            }
+          >
+            <Alert
+              message="模型选择优先级说明"
+              description={
+                <div>
+                  <p>系统按列表顺序选择第一个满足需求的模型：</p>
+                  <ul style={{ margin: 0, paddingLeft: 20 }}>
+                    <li><strong>generate</strong>：根据文本描述生成新图片</li>
+                    <li><strong>edit</strong>：编辑单张图片（如改变风格、添加元素）</li>
+                    <li><strong>multi_edit</strong>：融合多张图片（如让人物穿衣服、替换背景）</li>
+                  </ul>
+                  <p style={{ marginTop: 8, marginBottom: 0 }}>列表越靠前的模型优先级越高。可通过上下箭头调整顺序。</p>
+                </div>
+              }
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            {imageModels.length > 0 ? (
+              <List
+                bordered
+                dataSource={imageModels}
+                renderItem={(item, index) => (
+                  <List.Item
+                    actions={[
+                      <Button
+                        type="text"
+                        icon={<ArrowUpOutlined />}
+                        disabled={index === 0}
+                        onClick={() => handleMoveImageModel(index, 'up')}
+                        title="上移"
+                      />,
+                      <Button
+                        type="text"
+                        icon={<ArrowDownOutlined />}
+                        disabled={index === imageModels.length - 1}
+                        onClick={() => handleMoveImageModel(index, 'down')}
+                        title="下移"
+                      />,
+                      <Button
+                        type="link"
+                        icon={<EditOutlined />}
+                        onClick={() => openEditImageModelModal(item)}
+                      >
+                        编辑
+                      </Button>,
+                      <Popconfirm
+                        title="确定要删除这个图像模型吗？"
+                        onConfirm={() => handleDeleteImageModel(item.index)}
+                        okText="确定"
+                        cancelText="取消"
+                      >
+                        <Button type="link" danger icon={<DeleteOutlined />}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    ]}
+                  >
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          <Tag color="blue">优先级 {index + 1}</Tag>
+                          <span>{item.model}</span>
+                        </Space>
+                      }
+                      description={
+                        <Space direction="vertical" size={0} style={{ fontSize: 12 }}>
+                          <span>API格式: <Tag>{item.api_format}</Tag></span>
+                          <span>
+                            支持能力: {item.capabilities?.map(cap => (
+                              <Tag key={cap} color="green" size="small">
+                                {cap === 'generate' ? '生成' : cap === 'edit' ? '编辑' : '多图融合'}
+                              </Tag>
+                            ))}
+                          </span>
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Empty description="暂无图像模型配置，点击「添加模型」创建" />
+            )}
+          </Card>
+        </TabPane>
+
+        <TabPane
           tab={<span><ImportOutlined /> 角色卡导入</span>}
           key="character-import"
         >
@@ -1610,28 +1810,67 @@ function Aichat() {
             <InputNumber style={{ width: '100%' }} min={0} max={86400} />
           </Form.Item>
           <Form.Item
-            name="max_tokens"
-            label="最大 Tokens"
-            rules={[{ required: true, message: '请输入最大 Tokens' }]}
-            extra="模型生成的最大 token 数"
+            name="enable_markdown_render"
+            label="启用 Markdown 渲染"
+            valuePropName="checked"
+            extra="是否开启 Markdown 渲染功能"
           >
-            <InputNumber style={{ width: '100%' }} min={1} max={32768} />
+            <Switch />
           </Form.Item>
           <Form.Item
-            name="temperature"
-            label="温度 (Temperature)"
-            rules={[{ required: true, message: '请输入温度值' }]}
-            extra="控制输出的随机性，范围 0-2，值越大输出越随机"
+            name="markdown_min_length"
+            label="渲染最小长度"
+            rules={[{ required: true, message: '请输入渲染最小长度' }]}
+            extra="超过此长度的消息才会进行 Markdown 渲染"
           >
-            <InputNumber style={{ width: '100%' }} min={0} max={2} step={0.1} />
+            <InputNumber style={{ width: '100%' }} min={1} max={10000} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 添加/编辑图像模型弹窗 */}
+      <Modal
+        title={imageModelModalMode === 'add' ? '添加图像模型' : '编辑图像模型'}
+        open={imageModelModalVisible}
+        onCancel={() => setImageModelModalVisible(false)}
+        onOk={() => imageModelForm.submit()}
+        width={600}
+      >
+        <Form
+          form={imageModelForm}
+          layout="vertical"
+          onFinish={handleImageModelSubmit}
+        >
+          <Form.Item
+            name="model"
+            label="模型名称"
+            rules={[{ required: true, message: '请输入模型名称' }]}
+            extra="具体的图像模型名称，如：gpt-image-1, gemini-3-pro-image-preview"
+          >
+            <Input placeholder="例如：gpt-image-1" />
           </Form.Item>
           <Form.Item
-            name="max_saved_personas"
-            label="最大保存人格数"
-            rules={[{ required: true, message: '请输入最大保存人格数' }]}
-            extra="每个用户最多可以保存的人格数量"
+            name="api_format"
+            label="API 格式"
+            rules={[{ required: true, message: '请选择API格式' }]}
+            extra="openai 格式兼容 OpenAI DALL-E API；gemini 格式兼容 Google Gemini API"
           >
-            <InputNumber style={{ width: '100%' }} min={1} max={50} />
+            <Select placeholder="选择API格式">
+              <Option value="openai">OpenAI (openai)</Option>
+              <Option value="gemini">Gemini (gemini)</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="capabilities"
+            label="支持能力"
+            rules={[{ required: true, message: '请至少选择一项能力' }]}
+            extra="选择该模型支持的功能，可多选"
+          >
+            <Select mode="multiple" placeholder="选择支持的能力">
+              <Option value="generate">生成 (generate) - 根据文本描述生成新图片</Option>
+              <Option value="edit">编辑 (edit) - 编辑单张图片</Option>
+              <Option value="multi_edit">多图融合 (multi_edit) - 融合多张图片</Option>
+            </Select>
           </Form.Item>
         </Form>
       </Modal>

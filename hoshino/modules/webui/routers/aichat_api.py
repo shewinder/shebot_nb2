@@ -12,7 +12,7 @@ import nonebot
 from hoshino import Bot
 from hoshino.config import get_plugin_config_by_name
 from hoshino.modules.interactive.aichat import api_manager, persona_manager, conf
-from hoshino.modules.interactive.aichat.config import ApiEntry
+from hoshino.modules.interactive.aichat.config import ApiEntry, ImageModelEntry
 from hoshino.modules.interactive.aichat.character_import import parse_character_png, CharacterCard
 import json
 
@@ -802,3 +802,161 @@ async def import_character_single(
         return {"status": 500, "data": f"导入失败: {str(e)}"}
     finally:
         await file.close()
+
+
+# ========== 图像模型管理 API ==========
+
+class ImageModelInfo(BaseModel):
+    """图像模型信息"""
+    model: str
+    api_format: str
+    capabilities: List[str]
+
+
+class ImageModelsUpdate(BaseModel):
+    """更新图像模型列表请求"""
+    image_models: List[ImageModelInfo]
+
+
+@router.get("/image-models")
+async def get_image_models():
+    """获取图像模型列表"""
+    try:
+        models = conf.image_models
+        result = []
+        for idx, model in enumerate(models):
+            result.append({
+                "index": idx,
+                "model": model.model,
+                "api_format": model.api_format,
+                "capabilities": model.capabilities
+            })
+        return {"status": 200, "data": result}
+    except Exception as e:
+        logger.exception(f"获取图像模型列表失败: {e}")
+        return {"status": 500, "data": f"获取失败: {str(e)}"}
+
+
+@router.post("/image-models")
+async def add_image_model(model_info: ImageModelInfo):
+    """添加图像模型"""
+    try:
+        # 验证 api_format
+        if model_info.api_format not in ["openai", "gemini"]:
+            return {"status": 400, "data": "API格式必须是 openai 或 gemini"}
+        
+        # 验证 capabilities
+        valid_capabilities = ["generate", "edit", "multi_edit"]
+        for cap in model_info.capabilities:
+            if cap not in valid_capabilities:
+                return {"status": 400, "data": f"无效的能力: {cap}，可选值: {valid_capabilities}"}
+        
+        # 创建新模型配置
+        new_model = ImageModelEntry(
+            model=model_info.model,
+            api_format=model_info.api_format,
+            capabilities=model_info.capabilities
+        )
+        
+        # 添加到列表
+        conf.image_models.append(new_model)
+        
+        # 保存配置
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        
+        return {"status": 200, "data": f"图像模型 '{model_info.model}' 添加成功"}
+    except Exception as e:
+        logger.exception(f"添加图像模型失败: {e}")
+        return {"status": 500, "data": f"添加失败: {str(e)}"}
+
+
+# 注意: reorder 路由必须放在 {index} 路由之前，否则会被拦截
+@router.post("/image-models/reorder")
+async def reorder_image_models(update: ImageModelsUpdate):
+    """重新排序图像模型列表"""
+    try:
+        # 验证所有模型数据
+        valid_capabilities = ["generate", "edit", "multi_edit"]
+        for model in update.image_models:
+            if model.api_format not in ["openai", "gemini"]:
+                return {"status": 400, "data": f"API格式必须是 openai 或 gemini"}
+            for cap in model.capabilities:
+                if cap not in valid_capabilities:
+                    return {"status": 400, "data": f"无效的能力: {cap}"}
+        
+        # 替换整个列表
+        conf.image_models = [
+            ImageModelEntry(
+                model=m.model,
+                api_format=m.api_format,
+                capabilities=m.capabilities
+            )
+            for m in update.image_models
+        ]
+        
+        # 保存配置
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        
+        return {"status": 200, "data": "图像模型顺序更新成功"}
+    except Exception as e:
+        logger.exception(f"重新排序图像模型失败: {e}")
+        return {"status": 500, "data": f"排序失败: {str(e)}"}
+
+
+@router.post("/image-models/{index}")
+async def update_image_model(index: int, model_info: ImageModelInfo):
+    """更新指定索引的图像模型"""
+    try:
+        if index < 0 or index >= len(conf.image_models):
+            return {"status": 404, "data": f"未找到索引为 {index} 的图像模型"}
+        
+        # 验证 api_format
+        if model_info.api_format not in ["openai", "gemini"]:
+            return {"status": 400, "data": "API格式必须是 openai 或 gemini"}
+        
+        # 验证 capabilities
+        valid_capabilities = ["generate", "edit", "multi_edit"]
+        for cap in model_info.capabilities:
+            if cap not in valid_capabilities:
+                return {"status": 400, "data": f"无效的能力: {cap}，可选值: {valid_capabilities}"}
+        
+        # 更新模型配置
+        conf.image_models[index] = ImageModelEntry(
+            model=model_info.model,
+            api_format=model_info.api_format,
+            capabilities=model_info.capabilities
+        )
+        
+        # 保存配置
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        
+        return {"status": 200, "data": f"图像模型 '{model_info.model}' 更新成功"}
+    except Exception as e:
+        logger.exception(f"更新图像模型失败: {e}")
+        return {"status": 500, "data": f"更新失败: {str(e)}"}
+
+
+@router.delete("/image-models/{index}")
+async def delete_image_model(index: int):
+    """删除指定索引的图像模型"""
+    try:
+        if index < 0 or index >= len(conf.image_models):
+            return {"status": 404, "data": f"未找到索引为 {index} 的图像模型"}
+        
+        # 获取要删除的模型名称
+        deleted_model = conf.image_models[index].model
+        
+        # 从列表中移除
+        conf.image_models.pop(index)
+        
+        # 保存配置
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        
+        return {"status": 200, "data": f"图像模型 '{deleted_model}' 删除成功"}
+    except Exception as e:
+        logger.exception(f"删除图像模型失败: {e}")
+        return {"status": 500, "data": f"删除失败: {str(e)}"}
