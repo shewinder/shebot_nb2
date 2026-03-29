@@ -17,11 +17,7 @@ class Session:
         self.choice_guideline: Optional[str] = None
         self.last_choices: Dict[int, str] = {}
         self._user_images: Dict[str, str] = {}
-        self._user_image_counter: int = 0
         self._ai_images: Dict[str, str] = {}
-        self._ai_image_counter: int = 0
-        self._url_images: Dict[str, str] = {}
-        self._url_image_counter: int = 0
         if persona:
             self.messages.append({"role": "system", "content": persona})
     
@@ -67,8 +63,7 @@ class Session:
             return None
     
     def store_user_image(self, image_data: str) -> str:
-        self._user_image_counter += 1
-        identifier = f"<user_image_{self._user_image_counter}>"
+        identifier = f"<user_image_{len(self._user_images) + 1}>"
         self._user_images[identifier] = image_data
         self.last_active = time.time()
         
@@ -79,26 +74,13 @@ class Session:
         return identifier
     
     def store_ai_image(self, image_data: str) -> str:
-        self._ai_image_counter += 1
-        identifier = f"<ai_image_{self._ai_image_counter}>"
+        identifier = f"<ai_image_{len(self._ai_images) + 1}>"
         self._ai_images[identifier] = image_data
         self.last_active = time.time()
         
         if len(self._ai_images) > 20:
             oldest = list(self._ai_images.keys())[0]
             del self._ai_images[oldest]
-        
-        return identifier
-    
-    def store_url_image(self, url: str) -> str:
-        self._url_image_counter += 1
-        identifier = f"<url_image_{self._url_image_counter}>"
-        self._url_images[identifier] = url
-        self.last_active = time.time()
-        
-        if len(self._url_images) > 10:
-            oldest = list(self._url_images.keys())[0]
-            del self._url_images[oldest]
         
         return identifier
     
@@ -114,9 +96,6 @@ class Session:
         if identifier in self._ai_images:
             return self._ai_images[identifier]
         
-        if identifier in self._url_images:
-            return self._url_images[identifier]
-        
         return None
     
     def get_last_user_image(self) -> Optional[Tuple[str, str]]:
@@ -131,23 +110,15 @@ class Session:
         identifier = list(self._ai_images.keys())[-1]
         return identifier, self._ai_images[identifier]
     
-    def get_last_url_image(self) -> Optional[Tuple[str, str]]:
-        if not self._url_images:
-            return None
-        identifier = list(self._url_images.keys())[-1]
-        return identifier, self._url_images[identifier]
-    
     def get_last_image(self) -> Optional[Tuple[str, str]]:
         if self._user_images:
             return self.get_last_user_image()
         if self._ai_images:
             return self.get_last_ai_image()
-        if self._url_images:
-            return self.get_last_url_image()
         return None
     
     def build_image_list_prompt(self) -> str:
-        has_images = self._user_images or self._ai_images or self._url_images
+        has_images = self._user_images or self._ai_images
         if not has_images:
             return ""
         
@@ -170,13 +141,11 @@ class Session:
             lines.append("  用户图片：" + ", ".join(self._user_images.keys()))
         if self._ai_images:
             lines.append("  AI生成的图片：" + ", ".join(self._ai_images.keys()))
-        if self._url_images:
-            lines.append("  链接图片：" + ", ".join(self._url_images.keys()))
-        
+
         lines.extend([
             "",
             "=" * 40,
-            "【系统信息结束，以下是用户消息】",
+            "【系统信息结束】",
             "=" * 40,
             ""
         ])
