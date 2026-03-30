@@ -192,10 +192,11 @@ def build_messages_for_api(
     # 注入静态环境信息（XML格式）
     if event:
         env_info = build_static_env_info(event)
-        if system_content:
-            system_content += "\n\n" + env_info
-        else:
-            system_content = env_info
+        if env_info:
+            if system_content:
+                system_content += "\n\n" + env_info
+            else:
+                system_content = env_info
     
     # 添加工具提示（告知AI可调用get_current_time）
     tool_hint = "<instructions>\n你可以调用 get_current_time 工具获取当前准确时间。\n</instructions>"
