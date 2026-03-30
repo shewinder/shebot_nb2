@@ -239,8 +239,11 @@ class TaskManager:
             
             bot = bots[0]
             
+            logger.debug(f"[Scheduler] 发送任务结果: task_id={task.id}, silent={task.silent}, mention_user={task.mention_user}")
+            
             if task.silent:
                 message = content[:1000]
+                logger.debug(f"[Scheduler] 静默模式，直接发送内容")
             else:
                 msg_lines = [
                     "📋 定时任务执行结果",

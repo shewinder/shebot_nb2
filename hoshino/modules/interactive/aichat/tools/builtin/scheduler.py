@@ -63,13 +63,17 @@ if TYPE_CHECKING:
 - mention_user=false（默认）: 正常发送消息
 - mention_user=true: 在消息开头 @ 任务创建者（仅在群聊中有效）
 
+**重要提示：**
+- task_description 中不要写 "@某人" 的文字，@ 功能由 mention_user 参数控制
+- 如需 @任务创建者，设置 mention_user=true 即可，系统会自动在消息开头添加 @
+
 **使用建议：**
 - 个人提醒类任务 → mention_user=true, silent=true（直接 @你 + 提醒内容）
 - 群公告类任务 → mention_user=false, silent=false（带报告框架，不@个人）
 - 搜索/报告类任务 → mention_user=false, silent=false
 
 **示例：**
-- "30分钟后提醒我该开会了，要@我" → mention_user=true, silent=true, delay_minutes=30
+- "30分钟后提醒我该开会了" + mention_user=true, silent=true（任务描述中不加@，mention_user会自动@）
 
 任务创建后，到时间会调用AI自动执行，可以链式调用其他工具完成复杂任务。""",
     parameters={
