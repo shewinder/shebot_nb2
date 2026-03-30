@@ -7,5 +7,6 @@ from . import generate_image
 from . import scheduler
 from . import weather
 from . import environment
+from . import service_manage
 
-__all__ = ["generate_image", "scheduler", "weather", "environment"]
+__all__ = ["generate_image", "scheduler", "weather", "environment", "service_manage"]
