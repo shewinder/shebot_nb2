@@ -259,8 +259,30 @@ class MCPClient:
             }
             
         except Exception as e:
+            error_msg = str(e)
+            # 检查是否是 session 已终止的错误，尝试重连一次
+            if "terminated" in error_msg.lower() or "session" in error_msg.lower():
+                logger.warning(f"MCP session {self.id} 已终止，尝试重连...")
+                await self._cleanup()
+                if await self.connect():
+                    logger.info(f"MCP session {self.id} 重连成功，重新调用工具")
+                    try:
+                        result = await self._session.call_tool(tool_name, arguments)
+                        return {
+                            "content": result.content if hasattr(result, 'content') else [str(result)],
+                            "isError": result.isError if hasattr(result, 'isError') else False
+                        }
+                    except Exception as e2:
+                        logger.exception(f"重连后调用 MCP 工具 {tool_name} 仍失败: {e2}")
+                        return {
+                            "content": [f"工具调用失败（重连后）: {str(e2)}"],
+                            "isError": True
+                        }
+                else:
+                    logger.error(f"MCP session {self.id} 重连失败")
+            
             logger.exception(f"调用 MCP 工具 {tool_name} 失败: {e}")
             return {
-                "content": [f"工具调用失败: {str(e)}"],
+                "content": [f"工具调用失败: {error_msg}"],
                 "isError": True
             }
