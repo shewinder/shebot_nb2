@@ -53,6 +53,17 @@ const { TextArea } = Input
 const { Option } = Select
 const { TabPane } = Tabs
 
+// HTML 转义函数，防止 XML/HTML 标签被浏览器解析
+function escapeHtml(text) {
+  if (typeof text !== 'string') return text
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
 function Aichat() {
   const [loading, setLoading] = useState(true)
   const [models, setModels] = useState([])
@@ -1886,19 +1897,17 @@ function Aichat() {
                         <Tag color={msg.role === 'user' ? 'blue' : msg.role === 'assistant' ? 'green' : 'default'}>
                           {msg.role}
                         </Tag>
-                        <pre style={{ 
-                          margin: '8px 0 0 0', 
-                          padding: 8, 
-                          background: 'var(--ant-color-bg-elevated)',
-                          borderRadius: 4,
-                          fontSize: 12,
-                          maxHeight: 400,
-                          overflow: 'auto',
-                          whiteSpace: 'pre-wrap',
-                          wordWrap: 'break-word'
-                        }}>
-                          {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}
-                        </pre>
+                        <TextArea
+                          value={typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}
+                          readOnly
+                          autoSize={{ minRows: 1, maxRows: 20 }}
+                          style={{ 
+                            marginTop: 8,
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            background: 'var(--ant-color-bg-elevated)'
+                          }}
+                        />
                       </div>
                     </List.Item>
                   )}
