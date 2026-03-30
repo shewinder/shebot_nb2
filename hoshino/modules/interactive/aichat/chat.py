@@ -153,10 +153,9 @@ def build_static_env_info(event: Event, fields: Optional[List[str]] = None) -> s
         if group_only and not getattr(event, 'group_id', None):
             continue
         
-        # 转义 XML 属性值
-        if isinstance(value, str):
-            value = value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&apos;')
-        
+        # 注意：XML 属性值如果包含特殊字符需要转义
+        # 但 user_id/group_id 通常是数字，不需要转义
+        # 如果后续添加字符串字段，需要在这里处理转义
         attrs.append(f'{attr_name}="{value}"')
     
     if not attrs:
@@ -208,9 +207,13 @@ def build_messages_for_api(
     if system_content:
         messages.append({"role": "system", "content": system_content})
     
-    for msg in session.messages:
-        if msg.get("role") != "system":
-            messages.append(msg)
+    # 保持 session.messages 与 API 调用一致（包含完整的 system 消息）
+    # 这样 web 端调试时能看到实际发送给 AI 的完整内容
+    non_system_msgs = [msg for msg in session.messages if msg.get("role") != "system"]
+    if system_content:
+        session.messages = [{"role": "system", "content": system_content}] + non_system_msgs
+    
+    messages.extend(non_system_msgs)
     
     if image_list_prompt:
         for msg in reversed(messages):
