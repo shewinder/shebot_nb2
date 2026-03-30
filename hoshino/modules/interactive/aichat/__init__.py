@@ -950,6 +950,10 @@ async def mcp_enable(bot: Bot, event: Event):
     mcp_server_manager.add_server(server_config)
     success = await mcp_server_manager.start_server(server_id)
     
+    # 保存配置状态
+    from hoshino.config import save_plugin_config
+    save_plugin_config("aichat", conf)
+    
     if success:
         await mcp_enable_cmd.finish(f"✅ MCP server '{server_id}' 已启用并连接")
     else:
@@ -978,6 +982,14 @@ async def mcp_disable(bot: Bot, event: Event):
     
     await mcp_server_manager.stop_server(server_id)
     mcp_server_manager.remove_server(server_id)
+    
+    # 更新配置中的启用状态
+    for server_config in conf.mcp_servers:
+        if server_config.id == server_id:
+            server_config.enabled = False
+            from hoshino.config import save_plugin_config
+            save_plugin_config("aichat", conf)
+            break
     
     await mcp_disable_cmd.finish(f"✅ MCP server '{server_id}' 已禁用")
 

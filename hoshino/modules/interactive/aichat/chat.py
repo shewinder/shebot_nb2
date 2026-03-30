@@ -111,11 +111,66 @@ def build_messages_with_choice_mode(
     return messages
 
 
+# 可扩展的环境信息字段配置
+# key: (获取函数, XML属性名, 是否仅在群聊有效)
+ENV_CONTEXT_PROVIDERS: Dict[str, tuple] = {
+    "user_id": (lambda e: e.user_id, "user_id", False),
+    "group_id": (lambda e: getattr(e, 'group_id', None), "group_id", True),
+    # 扩展示例：
+    # "user_role": (lambda e: get_user_role(e), "role", False),
+    # "group_name": (lambda e: get_group_name(e), "group_name", True),
+}
+
+
+def build_static_env_info(event: Event, fields: Optional[List[str]] = None) -> str:
+    """构建静态环境信息（XML格式）
+    
+    Args:
+        event: 消息事件
+        fields: 要包含的字段列表，None 则使用默认（user_id, group_id）
+    
+    返回 XML 格式字符串，便于模型理解结构化数据。
+    扩展方式：向 ENV_CONTEXT_PROVIDERS 添加字段配置
+    """
+    if fields is None:
+        fields = ["user_id", "group_id"]
+    
+    attrs = []
+    for field in fields:
+        if field not in ENV_CONTEXT_PROVIDERS:
+            continue
+        
+        getter, attr_name, group_only = ENV_CONTEXT_PROVIDERS[field]
+        try:
+            value = getter(event)
+        except Exception:
+            continue
+        
+        if value is None:
+            continue
+        
+        # 群聊特有字段，在私聊中跳过
+        if group_only and not getattr(event, 'group_id', None):
+            continue
+        
+        # 转义 XML 属性值
+        if isinstance(value, str):
+            value = value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&apos;')
+        
+        attrs.append(f'{attr_name}="{value}"')
+    
+    if not attrs:
+        return ""
+    
+    return f'<context type="environment" {" ".join(attrs)} />'
+
+
 def build_messages_for_api(
     session: Any,
     persona: Optional[str],
     choice_mode: bool,
-    guideline: Optional[str]
+    guideline: Optional[str],
+    event: Optional[Event] = None
 ) -> List[Dict[str, Any]]:
     from .session import Session
     
@@ -133,6 +188,21 @@ def build_messages_for_api(
             system_content += "\n\n" + choice_prompt
         else:
             system_content = choice_prompt
+    
+    # 注入静态环境信息（XML格式）
+    if event:
+        env_info = build_static_env_info(event)
+        if system_content:
+            system_content += "\n\n" + env_info
+        else:
+            system_content = env_info
+    
+    # 添加工具提示（告知AI可调用get_current_time）
+    tool_hint = "<instructions>\n你可以调用 get_current_time 工具获取当前准确时间。\n</instructions>"
+    if system_content:
+        system_content += "\n\n" + tool_hint
+    else:
+        system_content = tool_hint
     
     if system_content:
         messages.append({"role": "system", "content": system_content})
@@ -620,7 +690,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
 
     session.add_message("user", message_content)
     messages_for_api = build_messages_for_api(
-        session, persona, choice_mode_enabled and in_continuous_mode, choice_guideline
+        session, persona, choice_mode_enabled and in_continuous_mode, choice_guideline, event
     )
 
     tool_context = {

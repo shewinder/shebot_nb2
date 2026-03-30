@@ -61,6 +61,12 @@ class MCPToolBridge:
         if not tool_key.startswith("mcp_"):
             return None
         
+        # 优先从缓存查询（避免 server_id 含下划线时切分错误）
+        if tool_key in self._tool_cache:
+            info = self._tool_cache[tool_key]
+            return info["server_id"], info["tool_name"]
+        
+        # 降级：尝试切分（server_id 不含下划线时可正常工作）
         parts = tool_key[4:].split("_", 1)  # 去掉 "mcp_" 前缀
         if len(parts) != 2:
             return None

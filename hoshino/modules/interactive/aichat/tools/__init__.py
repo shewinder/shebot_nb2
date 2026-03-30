@@ -17,6 +17,7 @@ from .registry import (
 
 # 导入内置工具，使其自动注册
 from .builtin import generate_image
+from .builtin import environment
 
 # MCP 相关导入
 from ..mcp import mcp_tool_bridge, mcp_server_manager

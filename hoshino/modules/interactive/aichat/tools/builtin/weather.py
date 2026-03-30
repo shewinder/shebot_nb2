@@ -2,6 +2,7 @@
 AI 工具：天气查询
 使用高德地图 API 查询实时天气和天气预报
 """
+import asyncio
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -113,7 +114,6 @@ async def get_weather(city: str) -> Dict[str, Any]:
             return fail(f"无法获取 {city} 的城市编码，请检查城市名称是否正确")
         
         # 并发获取当前天气和预报
-        import asyncio
         current_task = _get_weather_data(city_code, gaode_key, "base")
         forecast_task = _get_weather_data(city_code, gaode_key, "all")
         
@@ -123,13 +123,30 @@ async def get_weather(city: str) -> Dict[str, Any]:
         if isinstance(current_data, Exception) and isinstance(forecast_data, Exception):
             return fail(f"获取 {city} 的天气信息失败")
         
-        result = {
-            "current": current_data if not isinstance(current_data, Exception) else None,
-            "forecast": forecast_data if not isinstance(forecast_data, Exception) else None
-        }
+        # 格式化天气信息
+        content_parts = []
+        if not isinstance(current_data, Exception) and current_data:
+            live = current_data.get('lives', [{}])[0]
+            if live:
+                content_parts.append(
+                    f"当前天气：{live.get('city', city)} {live.get('weather', '未知')} "
+                    f"{live.get('temperature', '未知')}°C，{live.get('winddirection', '未知')}风{live.get('windpower', '')}"
+                )
         
-        logger.debug(f"[Weather Debug] 返回给AI的数据: {result}")
-        return ok(str(result), metadata={"city": city})
+        if not isinstance(forecast_data, Exception) and forecast_data:
+            forecasts = forecast_data.get('forecasts', [{}])[0].get('casts', [])
+            if forecasts:
+                content_parts.append("\n未来预报：")
+                for cast in forecasts[:3]:  # 只显示未来3天
+                    content_parts.append(
+                        f"{cast.get('date', '')}: {cast.get('dayweather', '未知')} "
+                        f"{cast.get('nighttemp', '')}~{cast.get('daytemp', '')}°C"
+                    )
+        
+        content = "\n".join(content_parts) if content_parts else f"{city} 天气数据获取失败"
+        
+        logger.debug(f"[Weather Debug] 返回给AI的数据: {city}")
+        return ok(content, metadata={"city": city})
         
     except Exception as e:
         logger.exception(f"查询天气失败: {e}")

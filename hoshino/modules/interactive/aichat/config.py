@@ -75,9 +75,7 @@ class Config(BaseConfig):
             name="Playwright 浏览器自动化",
             transport="http",
             url="http://localhost:8931/mcp",
-            enabled=True,
-            # 路径重写：将截图等文件保存路径映射到 /tmp
-            path_rewrite={"path": "/tmp"}
+            enabled=True
         )
     ]
 

@@ -261,7 +261,8 @@ class MCPClient:
         except Exception as e:
             error_msg = str(e)
             # 检查是否是 session 已终止的错误，尝试重连一次
-            if "terminated" in error_msg.lower() or "session" in error_msg.lower():
+            error_lower = error_msg.lower()
+            if "terminated" in error_lower or "session closed" in error_lower or "connection closed" in error_lower:
                 logger.warning(f"MCP session {self.id} 已终止，尝试重连...")
                 await self._cleanup()
                 if await self.connect():

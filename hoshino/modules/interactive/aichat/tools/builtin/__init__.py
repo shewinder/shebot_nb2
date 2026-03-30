@@ -6,5 +6,6 @@ AI 内置工具包
 from . import generate_image
 from . import scheduler
 from . import weather
+from . import environment
 
-__all__ = ["generate_image", "scheduler", "weather"]
+__all__ = ["generate_image", "scheduler", "weather", "environment"]
