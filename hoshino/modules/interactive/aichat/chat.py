@@ -17,6 +17,7 @@ from .config import Config
 from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PATTERN
 from .persona import persona_manager
 from .session import session_manager
+from .skills import skill_manager
 from .tools import get_available_tools, get_tool_function
 from .tools.registry import get_injectable_params
 
@@ -203,6 +204,24 @@ def build_messages_for_api(
         system_content += "\n\n" + tool_hint
     else:
         system_content = tool_hint
+    
+    # 注入 SKILL 元数据和已激活 SKILL 内容
+    if conf.enable_skills and hasattr(session, 'session_id'):
+        # 始终注入可用 SKILL 列表（帮助 AI 自动选择）
+        skill_summary = skill_manager.get_metadata_summary()
+        if skill_summary:
+            if system_content:
+                system_content += "\n\n" + skill_summary
+            else:
+                system_content = skill_summary
+        
+        # 注入已激活 SKILL 的详细内容
+        skill_content = skill_manager.get_injected_content(session.session_id)
+        if skill_content:
+            if system_content:
+                system_content += "\n\n" + skill_content
+            else:
+                system_content = skill_content
     
     if system_content:
         messages.append({"role": "system", "content": system_content})
@@ -518,10 +537,12 @@ async def send_response(
 async def call_ai_api_with_tools(
     messages: List[Dict[str, Any]], 
     api_config: Dict[str, Any],
-    max_tool_rounds: int = 5,
+    max_tool_rounds: int = None,
     context: Optional[Dict[str, Any]] = None,
     on_content: Optional[callable] = None,
 ) -> Dict[str, Any]:
+    if max_tool_rounds is None:
+        max_tool_rounds = conf.max_tool_rounds
     if not api_config.get("supports_tools", False):
         result = await call_ai_api(messages, api_config, tools=None)
         return {

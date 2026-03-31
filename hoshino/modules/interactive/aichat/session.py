@@ -1,6 +1,6 @@
 """Session 管理模块"""
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from .config import Config
 
@@ -18,6 +18,8 @@ class Session:
         self.last_choices: Dict[int, str] = {}
         self._user_images: Dict[str, str] = {}
         self._ai_images: Dict[str, str] = {}
+        # SKILL 系统：已激活的 SKILL 名称集合
+        self.active_skills: Set[str] = set()
         if persona:
             self.messages.append({"role": "system", "content": persona})
     
@@ -118,6 +120,35 @@ class Session:
         if conf.session_timeout <= 0:
             return False
         return time.time() - self.last_active > conf.session_timeout
+    
+    # ========== SKILL 系统方法 ==========
+    
+    def activate_skill(self, skill_name: str) -> bool:
+        """激活一个 SKILL"""
+        self.active_skills.add(skill_name)
+        self.last_active = time.time()
+        return True
+    
+    def deactivate_skill(self, skill_name: str) -> bool:
+        """停用指定 SKILL"""
+        if skill_name in self.active_skills:
+            self.active_skills.discard(skill_name)
+            self.last_active = time.time()
+            return True
+        return False
+    
+    def deactivate_all_skills(self) -> None:
+        """停用所有 SKILL"""
+        self.active_skills.clear()
+        self.last_active = time.time()
+    
+    def is_skill_active(self, skill_name: str) -> bool:
+        """检查指定 SKILL 是否已激活"""
+        return skill_name in self.active_skills
+    
+    def get_active_skills(self) -> Set[str]:
+        """获取已激活的 SKILL 名称集合"""
+        return self.active_skills.copy()
 
 
 class SessionManager:
@@ -271,6 +302,54 @@ class SessionManager:
         
         session.last_active = time.time()
         return deleted
+    
+    # ========== SKILL 系统管理方法 ==========
+    
+    def activate_skill(self, user_id: int, group_id: Optional[int], skill_name: str) -> bool:
+        """为用户会话激活 SKILL"""
+        session_id = self.get_session_id(user_id, group_id)
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            if not session.is_expired():
+                return session.activate_skill(skill_name)
+        return False
+    
+    def deactivate_skill(self, user_id: int, group_id: Optional[int], skill_name: str) -> bool:
+        """为用户会话停用 SKILL"""
+        session_id = self.get_session_id(user_id, group_id)
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            if not session.is_expired():
+                return session.deactivate_skill(skill_name)
+        return False
+    
+    def deactivate_all_skills(self, user_id: int, group_id: Optional[int]) -> bool:
+        """停用用户会话的所有 SKILL"""
+        session_id = self.get_session_id(user_id, group_id)
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            if not session.is_expired():
+                session.deactivate_all_skills()
+                return True
+        return False
+    
+    def get_active_skills(self, user_id: int, group_id: Optional[int]) -> Set[str]:
+        """获取用户会话的已激活 SKILL"""
+        session_id = self.get_session_id(user_id, group_id)
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            if not session.is_expired():
+                return session.get_active_skills()
+        return set()
+    
+    def is_skill_active(self, user_id: int, group_id: Optional[int], skill_name: str) -> bool:
+        """检查 SKILL 是否已激活"""
+        session_id = self.get_session_id(user_id, group_id)
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            if not session.is_expired():
+                return session.is_skill_active(skill_name)
+        return False
 
 
 session_manager = SessionManager()

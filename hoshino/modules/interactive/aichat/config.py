@@ -82,6 +82,16 @@ class Config(BaseConfig):
     # 天气工具配置
     gaode_api_key: str = ""  # 高德地图 API Key，用于天气查询 https://lbs.amap.com/
 
+    # SKILL 系统配置
+    enable_skills: bool = True         # SKILL 系统总开关
+    # 用户自定义 SKILL 搜索路径（这些路径的 skill 不会被 git 跟踪）
+    skill_user_paths: List[str] = ["data/skills"]
+    skill_default_tools: List[str] = ["Read", "Bash"]  # SKILL 默认允许的工具
+    skill_max_per_session: int = 5     # 单个会话最大激活 SKILL 数量
+
+    # 工具调用配置
+    max_tool_rounds: int = 10           # 单次对话最大工具调用轮数
+
     def get_apis(self) -> List[ApiEntry]:
         """获取厂商列表"""
         return self.apis
