@@ -330,8 +330,7 @@ async def _call_generate_api(
         payload = {
             "model": model,
             "prompt": prompt,
-            "n": 1,
-            "response_format": "b64_json"
+            "n": 1
         }
     
     logger.info(f"调用生成 API: {url}, model: {model}")
