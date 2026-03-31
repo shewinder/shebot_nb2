@@ -14,95 +14,6 @@ if TYPE_CHECKING:
 
 
 @tool_registry.register(
-    name="list_skills",
-    description="""列出所有可用的 SKILL 及其基本信息。
-
-当你需要了解系统有哪些可用的 SKILL 时使用此工具。
-
-返回内容包括：
-- SKILL 名称和描述
-- 是否允许 AI 自动触发
-- 是否允许用户手动触发
-- SKILL 允许使用的工具列表
-
-使用场景：
-1. 用户请求需要特定能力（如计算、数据分析）时，先列出可用 SKILL
-2. 不确定某个功能如何实现时，查看是否有对应的 SKILL
-3. 向用户展示可用的扩展功能
-
-注意：此工具仅返回 SKILL 的元数据（名称、描述等），不会加载 SKILL 的详细指导内容。
-要获取 SKILL 的详细指导，需要使用 activate_skill 工具激活它。""",
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-)
-async def list_skills() -> Dict[str, Any]:
-    """列出所有可用 SKILL
-    
-    Returns:
-        包含 SKILL 列表的 ToolResult
-    """
-    from ...config import Config
-    conf = Config.get_instance('aichat')
-    
-    if not conf.enable_skills:
-        return fail(
-            "SKILL 系统未启用",
-            error="SKILL system disabled"
-        )
-    
-    try:
-        skills = skill_manager.list_skills()
-        
-        if not skills:
-            return ok(
-                "暂无可用 SKILL。SKILL 应放置在以下路径：\n" + 
-                "\n".join(conf.skill_search_paths),
-                metadata={"count": 0, "skills": []}
-            )
-        
-        lines = [f"📚 可用 SKILL 列表（共 {len(skills)} 个）：\n"]
-        skill_list = []
-        
-        for skill in skills:
-            model_invocation = "🤖 AI可触发" if not skill.metadata.disable_model_invocation else "🚫 禁止AI触发"
-            user_invocable = "👤 用户可触发" if skill.metadata.user_invocable else "🚫 禁止用户触发"
-            
-            lines.append(f"• {skill.metadata.name}")
-            lines.append(f"  📖 {skill.metadata.description}")
-            lines.append(f"  {model_invocation} | {user_invocable}")
-            
-            if skill.metadata.allowed_tools:
-                lines.append(f"  🔧 可用工具：{', '.join(skill.metadata.allowed_tools)}")
-            
-            lines.append("")
-            
-            skill_list.append({
-                "name": skill.metadata.name,
-                "description": skill.metadata.description,
-                "model_invocable": not skill.metadata.disable_model_invocation,
-                "user_invocable": skill.metadata.user_invocable,
-                "allowed_tools": skill.metadata.allowed_tools
-            })
-        
-        lines.append("使用 activate_skill 工具激活需要的 SKILL")
-        
-        return ok(
-            "\n".join(lines),
-            metadata={
-                "count": len(skills),
-                "skills": skill_list
-            }
-        )
-        
-    except Exception as e:
-        logger.exception(f"list_skills 执行失败: {e}")
-        return fail(f"获取 SKILL 列表失败: {str(e)}", error=str(e))
-
-
-@tool_registry.register(
     name="activate_skill",
     description="""激活指定的 SKILL，将其指导内容注入到当前对话上下文中。
 
@@ -192,7 +103,7 @@ async def activate_skill(
             )
         else:
             return fail(
-                f"SKILL '{skill_name}' 不存在。使用 list_skills 查看可用 SKILL。",
+                f"SKILL '{skill_name}' 不存在。查看系统提示中的【SKILL 系统】列表获取可用 SKILL。",
                 error="Skill not found"
             )
     

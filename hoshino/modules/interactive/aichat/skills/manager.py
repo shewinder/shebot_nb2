@@ -83,14 +83,12 @@ class SkillManager:
         lines.extend([
             "",
             "💡 使用指导：",
-            "1. 当用户需求与某个 SKILL 功能匹配时，使用 activate_skill 工具激活它",
+            "1. 当用户需求与某个 SKILL 功能匹配时，直接使用 activate_skill 工具激活它",
             "2. 激活后，SKILL 的详细指导内容会注入到上下文中",
             "3. 如果当前没有合适的 SKILL，按常规方式回答",
             "4. 不要重复激活已激活的 SKILL",
             "",
-            "🔧 元工具：",
-            "- list_skills: 列出所有 SKILL",
-            "- activate_skill(skill_name): 激活指定 SKILL",
+            "🔧 使用方法：activate_skill(skill_name=\"xxx\")",
         ])
         
         return "\n".join(lines)

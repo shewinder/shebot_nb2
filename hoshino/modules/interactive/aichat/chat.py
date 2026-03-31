@@ -16,7 +16,7 @@ from .api import api_manager
 from .config import Config
 from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PATTERN
 from .persona import persona_manager
-from .session import session_manager
+from .session import session_manager, ChatResult
 from .skills import skill_manager
 from .tools import get_available_tools, get_tool_function
 from .tools.registry import get_injectable_params
@@ -283,212 +283,6 @@ async def download_image_to_base64(image_url: str) -> Optional[str]:
         return None
 
 
-async def call_ai_api(
-    messages: List[Dict[str, Any]], 
-    api_config: Dict[str, Any],
-    tools: Optional[List[Dict[str, Any]]] = None,
-    tool_choice: Optional[str] = None
-) -> Dict[str, Any]:
-    if not api_config or not api_config.get("api_key"):
-        logger.warning("AI API 未配置或密钥为空")
-        return {"error": "API 未配置", "content": None}
-
-    if not messages:
-        logger.error("消息列表为空")
-        return {"error": "消息列表为空", "content": None}
-
-    url = f"{api_config['api_base'].rstrip('/')}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_config['api_key']}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": api_config["model"],
-        "messages": messages,
-    }
-
-    if "max_tokens" in api_config:
-        payload["max_tokens"] = api_config["max_tokens"]
-    if "temperature" in api_config:
-        payload["temperature"] = api_config["temperature"]
-    
-    if tools and api_config.get("supports_tools", False):
-        payload["tools"] = tools
-        if tool_choice:
-            payload["tool_choice"] = tool_choice
-        logger.debug(f"启用 Tool Calling，工具数量: {len(tools)}")
-
-    MAX_LOG_MESSAGES = 2
-    total_msgs = len(payload["messages"])
-    if total_msgs > MAX_LOG_MESSAGES:
-        log_messages = [{"role": "system", "content": f"...[省略 {total_msgs - MAX_LOG_MESSAGES} 条历史消息]..."}] + payload["messages"][-MAX_LOG_MESSAGES:]
-    else:
-        log_messages = payload["messages"]
-    
-    log_payload = {
-        "model": payload["model"],
-        "messages": log_messages,
-    }
-    if "max_tokens" in payload:
-        log_payload["max_tokens"] = payload["max_tokens"]
-    if "temperature" in payload:
-        log_payload["temperature"] = payload["temperature"]
-    if "tools" in payload:
-        log_payload["tools"] = [t.get("function", {}).get("name") for t in payload["tools"]]
-    if "tool_choice" in payload:
-        log_payload["tool_choice"] = payload["tool_choice"]
-    
-    logger.info(f"调用 AI API: URL={url}, Payload: {log_json(truncate_log(log_payload))}")
-    
-    logger.debug(f"API 请求详情 - model: {payload['model']}, messages: {len(payload['messages'])} 条")
-    for i, msg in enumerate(payload["messages"]):
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            # 多模态消息，提取文本部分
-            texts = []
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    texts.append(item.get("text", ""))
-            content_str = " | ".join(texts) if texts else "[multimodal content]"
-        else:
-            content_str = str(content)
-        logger.debug(f"  [{i}] {role}: {truncate_log(content_str, 300, 100, 100)}")
-
-    try:
-        resp = await aiohttpx.post(url, headers=headers, json=payload)
-        if not resp.ok:
-            error_text = truncate_log(resp.text) if hasattr(resp, 'text') else 'unknown'
-            logger.error(f"AI API 调用失败: {resp.status_code}, 响应: {error_text}")
-            return {"error": f"HTTP {resp.status_code}", "content": None}
-
-        result = resp.json
-        if not result:
-            logger.error("AI API 返回空结果")
-            return {"error": "返回空结果", "content": None}
-
-        logger.info(f"AI API 响应: {log_json(result)}")
-
-        if "choices" in result and len(result["choices"]) > 0:
-            choice = result["choices"][0]
-            message = choice.get("message", {})
-            finish_reason = choice.get("finish_reason", "")
-            
-            content = message.get("content", "") or ""
-            reasoning_content = message.get("reasoning_content", "") or ""
-            tool_calls = message.get("tool_calls", [])
-            
-            return {
-                "content": content.strip() if content else None,
-                "reasoning_content": reasoning_content.strip() if reasoning_content else None,
-                "tool_calls": tool_calls if tool_calls else [],
-                "finish_reason": finish_reason,
-                "raw_response": result,
-            }
-        
-        error_info = result.get("error", {})
-        error_msg = error_info.get("message", "未知错误") if error_info else "返回格式错误"
-        logger.error(f"AI API 返回错误: {error_msg}, 完整响应: {log_json(result)}")
-        return {"error": error_msg, "content": None}
-        
-    except Exception as e:
-        logger.exception(f"调用 AI API 异常: {e}")
-        return {"error": str(e), "content": None}
-
-
-async def execute_tool_call(
-    tool_call: Dict[str, Any],
-    context: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    
-    tool_id = tool_call.get("id", "")
-    function_info = tool_call.get("function", {})
-    function_name = function_info.get("name", "")
-    arguments_str = function_info.get("arguments", "{}")
-    
-    logger.info(f"执行工具: {function_name}, args: {truncate_log(arguments_str)}")
-    
-    # 解析参数
-    try:
-        arguments = json.loads(arguments_str)
-    except json.JSONDecodeError:
-        logger.error(f"工具参数解析失败: {arguments_str}")
-        return {
-            "tool_call_id": tool_id,
-            "role": "tool",
-            "content": json.dumps({"success": False, "error": "参数解析失败"}, ensure_ascii=False),
-            "_image_urls": []
-        }
-    
-    # 获取工具函数
-    tool_func = get_tool_function(function_name)
-    if not tool_func:
-        logger.error(f"未找到工具: {function_name}")
-        return {
-            "tool_call_id": tool_id,
-            "role": "tool",
-            "content": json.dumps({"success": False, "error": f"未知工具: {function_name}"}, ensure_ascii=False),
-            "_image_urls": []
-        }
-    
-    if context:
-        injectable = get_injectable_params(tool_func)
-        for param_name, type_name in injectable.items():
-            if param_name in arguments:
-                continue  # AI 已提供，跳过
-            
-            if type_name == 'Session':
-                arguments[param_name] = context.get('session')
-                logger.debug(f"注入 Session 到参数 '{param_name}'")
-            elif type_name == 'Bot':
-                arguments[param_name] = context.get('bot')
-                logger.debug(f"注入 Bot 到参数 '{param_name}'")
-            elif type_name == 'Event':
-                arguments[param_name] = context.get('event')
-                logger.debug(f"注入 Event 到参数 '{param_name}'")
-    
-    try:
-        result = await tool_func(**arguments)
-        
-        success = result.get("success", False)
-        content = result.get("content", "")
-        images = result.get("images", [])
-        error = result.get("error")
-        metadata = result.get("metadata", {})
-        if "data:image" in content:
-            pattern = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}'
-            content = re.sub(
-                pattern,
-                lambda m: m.group(0)[:50] + "...[图片数据已省略]",
-                content
-            )
-        
-        content_for_ai = {
-            "success": success,
-            "content": content,
-            "error": error
-        }
-        # 如果有 metadata（如占位符），也传给 AI
-        if metadata:
-            content_for_ai["metadata"] = metadata
-        
-        return {
-            "tool_call_id": tool_id,
-            "role": "tool",
-            "content": json.dumps(content_for_ai, ensure_ascii=False),
-            "_image_urls": images  # 真实图片，直接用于发送
-        }
-        
-    except Exception as e:
-        logger.exception(f"工具执行失败: {e}")
-        return {
-            "tool_call_id": tool_id,
-            "role": "tool",
-            "content": json.dumps({"success": False, "error": str(e)}, ensure_ascii=False),
-            "_image_urls": []
-        }
-
-
 async def send_response(
     bot: Bot,
     event: Event,
@@ -532,88 +326,6 @@ async def send_response(
     # 纯文本发送
     await bot.send(event, text)
     return True
-
-
-async def call_ai_api_with_tools(
-    messages: List[Dict[str, Any]], 
-    api_config: Dict[str, Any],
-    max_tool_rounds: int = None,
-    context: Optional[Dict[str, Any]] = None,
-    on_content: Optional[callable] = None,
-) -> Dict[str, Any]:
-    if max_tool_rounds is None:
-        max_tool_rounds = conf.max_tool_rounds
-    if not api_config.get("supports_tools", False):
-        result = await call_ai_api(messages, api_config, tools=None)
-        return {
-            "content": result.get("content"),
-            "tool_results": [],
-            "error": result.get("error")
-        }
-    
-    tools = get_available_tools()
-    current_messages = messages.copy()
-    all_tool_results = []
-    
-    for round_num in range(max_tool_rounds):
-        logger.debug(f"Tool calling 第 {round_num + 1} 轮")
-        result = await call_ai_api(current_messages, api_config, tools=tools)
-        
-        if result.get("error"):
-            return {"content": None, "tool_results": all_tool_results, "error": result["error"]}
-        
-        content = result.get("content")
-        tool_calls = result.get("tool_calls", [])
-        
-        if not tool_calls:
-            # 最后一轮，返回最终 content
-            return {
-                "content": content,
-                "tool_results": all_tool_results,
-                "error": None
-            }
-        
-        # 工具调用轮次，即时输出 content（如果有）
-        if content and on_content:
-            await on_content(content)
-        
-        assistant_message = result.get("raw_response", {}).get("choices", [{}])[0].get("message", {})
-        current_messages.append(assistant_message)
-        
-        # 同步 assistant 的 tool_calls 消息到 session
-        if context and context.get('session'):
-            context['session'].messages.append(assistant_message)
-        
-        for tool_call in tool_calls:
-            tool_result = await execute_tool_call(tool_call, context=context)
-            all_tool_results.append({
-                "tool_call": tool_call,
-                "result": tool_result
-            })
-            current_messages.append(tool_result)
-            
-            # 同步 tool 结果到 session
-            if context and context.get('session'):
-                context['session'].messages.append(tool_result)
-            
-            logger.info(f"工具调用结果: {truncate_log(tool_result['content'])}")
-        
-        if context and context.get('session'):
-            session = context.get('session')
-            image_list_prompt = session.build_image_list_prompt()
-            if image_list_prompt:
-                current_messages.append({
-                    "role": "system",
-                    "content": image_list_prompt
-                })
-                logger.debug("已添加图片列表系统提示到对话")
-    
-    logger.warning(f"达到最大工具调用轮数限制: {max_tool_rounds}")
-    return {
-        "content": "工具调用次数过多，请简化请求",
-        "tool_results": all_tool_results,
-        "error": "达到最大工具调用轮数限制"
-    }
 
 
 async def handle_ai_chat(bot: Bot, event: Event):
@@ -719,7 +431,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
     )
 
     tool_context = {
-        "session": session,
         "bot": bot,
         "event": event,
     }
@@ -732,14 +443,16 @@ async def handle_ai_chat(bot: Bot, event: Event):
                 markdown_min_length=conf.markdown_min_length
             )
     
-    api_result = await call_ai_api_with_tools(
-        messages_for_api, 
-        api_config, 
-        context=tool_context,
+    # 使用 Session 内聚的 chat 方法
+    api_result = await session.chat(
+        api_config=api_config,
+        tools=get_available_tools() if api_config.get("supports_tools", False) else None,
         on_content=on_content,
+        context=tool_context,
     )
     
-    for tool_result in api_result.get("tool_results", []):
+    # 处理工具图片输出
+    for tool_result in api_result.tool_results:
         image_urls = tool_result["result"].get("_image_urls", [])
         try:
             for i, url in enumerate(image_urls):
@@ -760,13 +473,14 @@ async def handle_ai_chat(bot: Bot, event: Event):
         except Exception as e:
             logger.warning(f"处理工具图片失败: {e}")
     
-    if api_result.get("error") and not api_result.get("content"):
-        await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result['error']}")
-        if session.messages and session.messages[-1].get("role") == "user":
+    if api_result.error and not api_result.content:
+        await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result.error}")
+        # 回滚到用户消息之前的状态（移除用户消息及工具调用过程中添加的消息）
+        while session.messages and session.messages[-1].get("role") in ("user", "assistant", "tool"):
             session.messages.pop()
         return
     
-    response = api_result.get("content", "")
+    response = api_result.content or ""
     
     display_response = response
     

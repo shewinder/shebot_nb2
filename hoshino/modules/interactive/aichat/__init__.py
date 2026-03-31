@@ -6,7 +6,7 @@ from hoshino.permission import ADMIN, SUPERUSER
 from hoshino.typing import T_State
 
 from .api import api_manager
-from .chat import call_ai_api, download_image_to_base64, handle_ai_chat
+from .chat import handle_ai_chat
 from .character_import import parse_character_png
 from .config import Config
 from .persona import persona_manager
@@ -97,6 +97,7 @@ sv = Service('aichat', help_='''AI聊天插件
 对话管理：
   清除对话/清空对话/重置对话  清除当前对话历史
   回溯/回退 [N]  回溯N条对话
+  查询token/token查询  查询当前会话的 Token 使用情况
 人格设置：
   设置人格 [描述]  设置当前人格
   使用人格 [名称]  使用已保存的人格
@@ -1275,3 +1276,31 @@ async def deactivate_all_skills(bot: Bot, event: Event):
     session_manager.deactivate_all_skills(user_id, group_id)
     
     await deactivate_all_skills_cmd.finish(f"✅ 已停用 {count} 个 SKILL")
+
+
+# ========== Token 查询命令 ==========
+
+query_token_cmd = sv.on_command('查询token', aliases=('token查询', 'token统计', 'token使用'), only_group=False)
+
+@query_token_cmd.handle()
+async def query_token(bot: Bot, event: Event):
+    """查询当前 session 的 token 使用情况"""
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+    
+    session_id = session_manager.get_session_id(user_id, group_id)
+    session = session_manager.sessions.get(session_id)
+    
+    if not session or session.total_tokens == 0:
+        await query_token_cmd.finish("📊 当前会话暂无 token 使用记录\n\n提示：\n- 请先与 AI 进行对话\n- Token 统计在 session 过期后重置")
+        return
+    
+    lines = [
+        "📊 当前会话 Token 使用情况：\n",
+        f"💬 输入 Token：{session.total_prompt_tokens:,}",
+        f"🤖 输出 Token：{session.total_completion_tokens:,}",
+        f"📈 总计 Token：{session.total_tokens:,}",
+        "\n注：Token 统计在 session 过期后重置",
+    ]
+    
+    await query_token_cmd.finish("\n".join(lines))
