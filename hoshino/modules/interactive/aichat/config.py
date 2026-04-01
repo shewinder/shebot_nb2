@@ -82,6 +82,11 @@ class Config(BaseConfig):
     # 天气工具配置
     gaode_api_key: str = ""  # 高德地图 API Key，用于天气查询 https://lbs.amap.com/
 
+    # 网页搜索工具配置 (阿里云百炼 IQS)
+    # 获取方式: https://bailian.console.aliyun.com/
+    # 文档: https://help.aliyun.com/zh/document_detail/2883041.html
+    iqs_api_key: str = ""  # 阿里云 IQS API Key，用于网页搜索
+
     # SKILL 系统配置
     enable_skills: bool = True         # SKILL 系统总开关
     # 用户自定义 SKILL 搜索路径（这些路径的 skill 不会被 git 跟踪）

@@ -9,5 +9,6 @@ from . import weather
 from . import environment
 from . import service_manage
 from . import skill_tools
+from . import web_search
 
-__all__ = ["generate_image", "scheduler", "weather", "environment", "service_manage", "skill_tools"]
+__all__ = ["generate_image", "scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search"]
