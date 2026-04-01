@@ -7,9 +7,21 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from loguru import logger
 
 from .config import Config
+from .skills import skill_manager
 from hoshino.util import aiohttpx, log_json, truncate_log
 
 conf = Config.get_instance('aichat')
+
+# 选项生成提示词模板
+CHOICE_MODE_PROMPT_TEMPLATE = """[选项生成模式]
+请在你的回复末尾，使用以下格式为用户提供3个接下来的行动选项，格外注意[CHOICES]标签是成对出现的：
+[CHOICES]
+1. 选项1内容
+2. 选项2内容
+3. 选项3内容
+[/CHOICES]
+{guideline_section}
+[/选项生成模式]"""
 
 
 @dataclass
@@ -175,6 +187,80 @@ class Session:
         self.total_completion_tokens += completion_tokens
         self.total_tokens += prompt_tokens + completion_tokens
         self.last_active = time.time()
+    
+    async def build_messages(
+        self,
+        persona: Optional[str] = None,
+        choice_mode: bool = False,
+        guideline: Optional[str] = None,
+        env_info: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        构建用于 API 调用的完整消息列表
+        
+        Args:
+            persona: 人格提示词
+            choice_mode: 是否启用选项生成模式
+            guideline: 选项生成指导标准
+            env_info: 预构建的环境信息字符串（XML格式）
+        
+        Returns:
+            List[Dict[str, Any]]: 完整的消息列表
+        """
+        messages: List[Dict[str, Any]] = []
+        image_list_prompt = self.build_image_list_prompt()
+        
+        # 构建系统消息内容
+        system_content = persona or ""
+        
+        # 选项生成模式提示
+        if choice_mode:
+            guideline_section = f"\n选项生成指导标准：{guideline}\n请根据以上指导标准生成合适的选项。" if guideline else ""
+            choice_prompt = CHOICE_MODE_PROMPT_TEMPLATE.format(guideline_section=guideline_section)
+            system_content = f"{system_content}\n\n{choice_prompt}" if system_content else choice_prompt
+        
+        # 环境信息
+        if env_info:
+            system_content = f"{system_content}\n\n{env_info}" if system_content else env_info
+        
+        # 工具提示
+        tool_hint = "<instructions>\n你可以调用 get_current_time 工具获取当前准确时间。\n</instructions>"
+        system_content = f"{system_content}\n\n{tool_hint}" if system_content else tool_hint
+        
+        # SKILL 内容注入
+        if conf.enable_skills:
+            skill_summary = skill_manager.get_metadata_summary()
+            if skill_summary:
+                system_content = f"{system_content}\n\n{skill_summary}" if system_content else skill_summary
+            
+            skill_content = skill_manager.get_injected_content(self.session_id)
+            if skill_content:
+                system_content = f"{system_content}\n\n{skill_content}" if system_content else skill_content
+        
+        # 组装消息列表
+        non_system_msgs = [msg for msg in self.messages if msg.get("role") != "system"]
+        
+        if system_content:
+            messages.append({"role": "system", "content": system_content})
+            # 同步更新 session.messages，供 web 端调试查看
+            self.messages = [{"role": "system", "content": system_content}] + non_system_msgs
+        else:
+            self.messages = non_system_msgs
+        
+        messages.extend(non_system_msgs)
+        
+        # 追加图片列表提示到最近的用户消息
+        if image_list_prompt:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content")
+                    if isinstance(content, list):
+                        content.append({"type": "text", "text": image_list_prompt})
+                    elif isinstance(content, str):
+                        msg["content"] = content + image_list_prompt
+                    break
+        
+        return messages
     
     # ========== 对话方法 ==========
     

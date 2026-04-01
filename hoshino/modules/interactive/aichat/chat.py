@@ -17,7 +17,7 @@ from .config import Config
 from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PATTERN
 from .persona import persona_manager
 from .session import session_manager, ChatResult, Session
-from .skills import skill_manager
+
 from .tools import get_available_tools, get_tool_function
 from .tools.registry import get_injectable_params
 
@@ -27,17 +27,6 @@ conf = Config.get_instance('aichat')
 # 选项标记的正则表达式
 CHOICES_PATTERN = re.compile(r'\[CHOICES\](.*?)\[/CHOICES\]', re.DOTALL)
 CHOICE_ITEM_PATTERN = re.compile(r'^(\d+)\.\s*(.+)$', re.MULTILINE)
-
-# 选项生成提示词模板
-CHOICE_MODE_PROMPT_TEMPLATE = """[选项生成模式]
-请在你的回复末尾，使用以下格式为用户提供3个接下来的行动选项，格外注意[CHOICES]标签是成对出现的：
-[CHOICES]
-1. 选项1内容
-2. 选项2内容
-3. 选项3内容
-[/CHOICES]
-{guideline_section}
-[/选项生成模式]"""
 
 
 def parse_choices_from_response(response: str) -> Tuple[str, Dict[int, str]]:
@@ -82,34 +71,6 @@ def format_choices_for_display(choices: Dict[int, str]) -> str:
             lines.append(f"{emoji_map[num]} {choices[num]}")
     
     return "\n".join(lines)
-
-
-def build_messages_with_choice_mode(
-    session_messages: List[Dict[str, Any]], 
-    original_persona: Optional[str],
-    guideline: Optional[str]
-) -> List[Dict[str, Any]]:
-    messages = []
-    
-    system_content = ""
-    if original_persona:
-        system_content = original_persona
-    
-    guideline_section = f"\n选项生成指导标准：{guideline}\n请根据以上指导标准生成合适的选项。" if guideline else ""
-    choice_prompt = CHOICE_MODE_PROMPT_TEMPLATE.format(guideline_section=guideline_section)
-    
-    if system_content:
-        system_content += "\n\n" + choice_prompt
-    else:
-        system_content = choice_prompt
-    
-    messages.append({"role": "system", "content": system_content})
-    
-    for msg in session_messages:
-        if msg.get("role") != "system":
-            messages.append(msg)
-    
-    return messages
 
 
 # 可扩展的环境信息字段配置
@@ -163,90 +124,6 @@ def build_static_env_info(event: Event, fields: Optional[List[str]] = None) -> s
         return ""
     
     return f'<context type="environment" {" ".join(attrs)} />'
-
-
-def build_messages_for_api(
-    session: Any,
-    persona: Optional[str],
-    choice_mode: bool,
-    guideline: Optional[str],
-    event: Optional[Event] = None
-) -> List[Dict[str, Any]]:
-    from .session import Session
-    
-    messages: List[Dict[str, Any]] = []
-    
-    image_list_prompt = session.build_image_list_prompt()
-    system_content = ""
-    if persona:
-        system_content = persona
-    
-    if choice_mode:
-        guideline_section = f"\n选项生成指导标准：{guideline}\n请根据以上指导标准生成合适的选项。" if guideline else ""
-        choice_prompt = CHOICE_MODE_PROMPT_TEMPLATE.format(guideline_section=guideline_section)
-        if system_content:
-            system_content += "\n\n" + choice_prompt
-        else:
-            system_content = choice_prompt
-    
-    # 注入静态环境信息（XML格式）
-    if event:
-        env_info = build_static_env_info(event)
-        if env_info:
-            if system_content:
-                system_content += "\n\n" + env_info
-            else:
-                system_content = env_info
-    
-    # 添加工具提示（告知AI可调用get_current_time）
-    tool_hint = "<instructions>\n你可以调用 get_current_time 工具获取当前准确时间。\n</instructions>"
-    if system_content:
-        system_content += "\n\n" + tool_hint
-    else:
-        system_content = tool_hint
-    
-    # 注入 SKILL 元数据和已激活 SKILL 内容
-    if conf.enable_skills and hasattr(session, 'session_id'):
-        # 始终注入可用 SKILL 列表（帮助 AI 自动选择）
-        skill_summary = skill_manager.get_metadata_summary()
-        if skill_summary:
-            if system_content:
-                system_content += "\n\n" + skill_summary
-            else:
-                system_content = skill_summary
-        
-        # 注入已激活 SKILL 的详细内容
-        skill_content = skill_manager.get_injected_content(session.session_id)
-        if skill_content:
-            if system_content:
-                system_content += "\n\n" + skill_content
-            else:
-                system_content = skill_content
-    
-    if system_content:
-        messages.append({"role": "system", "content": system_content})
-    
-    # 保持 session.messages 与 API 调用一致（包含完整的 system 消息）
-    # 这样 web 端调试时能看到实际发送给 AI 的完整内容
-    non_system_msgs = [msg for msg in session.messages if msg.get("role") != "system"]
-    if system_content:
-        session.messages = [{"role": "system", "content": system_content}] + non_system_msgs
-    
-    messages.extend(non_system_msgs)
-    
-    if image_list_prompt:
-        for msg in reversed(messages):
-            if msg.get("role") == "user":
-                content = msg.get("content")
-                if isinstance(content, list):
-                    # 多模态消息：添加文本部分
-                    content.append({"type": "text", "text": image_list_prompt})
-                elif isinstance(content, str):
-                    # 纯文本消息：拼接
-                    msg["content"] = content + image_list_prompt
-                break
-    
-    return messages
 
 
 async def download_image_to_base64(image_url: str) -> Optional[str]:
@@ -426,8 +303,12 @@ async def handle_ai_chat(bot: Bot, event: Event):
         message_content = user_input
 
     session.add_message("user", message_content)
-    messages_for_api = build_messages_for_api(
-        session, persona, choice_mode_enabled and in_continuous_mode, choice_guideline, event
+    env_info = build_static_env_info(event) if event else None
+    messages_for_api = await session.build_messages(
+        persona=persona,
+        choice_mode=choice_mode_enabled and in_continuous_mode,
+        guideline=choice_guideline,
+        env_info=env_info,
     )
 
     tool_context = {
