@@ -3,8 +3,10 @@ Author: SheBot
 Date: 2026-03-31
 Description: SKILL 管理器 - 管理 SKILL 生命周期和会话状态
 """
+import json
 import time
-from typing import Dict, List, Optional, Set
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 
 from loguru import logger
@@ -209,6 +211,200 @@ class SkillManager:
             lines.append(f"• {skill.metadata.name}: {skill.metadata.description}")
         
         return "\n".join(lines)
+    
+    # ========== Skill 安装管理方法 ==========
+    
+    def list_installed_skills(self) -> List[Tuple[Skill, Path]]:
+        """列出所有已安装的 skill（包括禁用的）
+        
+        Returns:
+            List of (skill, source_path) tuples
+        """
+        installed = []
+        # 只检查用户路径（内置 skill 不算"安装"的）
+        for path_str in self.user_paths:
+            path = Path(path_str)
+            if not path.exists():
+                continue
+            for item in path.iterdir():
+                if not item.is_dir():
+                    continue
+                skill_md = item / "SKILL.md"
+                if skill_md.exists():
+                    skill = self.discovery._parse_skill(item)
+                    if skill:
+                        installed.append((skill, item))
+        return installed
+    
+    def disable_skill(self, skill_name: str) -> Tuple[bool, str]:
+        """禁用指定 skill
+        
+        Returns:
+            (success, message)
+        """
+        skill = self._skills.get(skill_name)
+        if not skill:
+            return False, f"SKILL '{skill_name}' 不存在"
+        
+        # 检查是否是用户路径中的 skill（内置 skill 不能禁用）
+        skill_dir = skill.directory
+        is_user_skill = any(
+            skill_dir.resolve().is_relative_to(Path(p).resolve())
+            for p in self.user_paths
+        )
+        if not is_user_skill:
+            return False, f"SKILL '{skill_name}' 是内置 skill，不能禁用"
+        
+        # 更新内存中的状态
+        skill.metadata.enabled = False
+        
+        # 更新 _meta.json
+        meta_path = skill_dir / "_meta.json"
+        try:
+            meta = {}
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding='utf-8'))
+            meta['enabled'] = False
+            meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding='utf-8')
+        except Exception as e:
+            logger.error(f"更新 _meta.json 失败: {e}")
+            return False, f"禁用失败：{e}"
+        
+        # 从已加载列表中移除
+        if skill_name in self._skills:
+            del self._skills[skill_name]
+        
+        logger.info(f"SKILL '{skill_name}' 已禁用")
+        return True, f"SKILL '{skill_name}' 已禁用"
+    
+    def enable_skill(self, skill_name: str) -> Tuple[bool, str]:
+        """启用指定 skill
+        
+        Returns:
+            (success, message)
+        """
+        # 查找该 skill 的目录
+        skill_dir = None
+        for path_str in self.user_paths:
+            path = Path(path_str)
+            if not path.exists():
+                continue
+            for item in path.iterdir():
+                if not item.is_dir():
+                    continue
+                skill_md = item / "SKILL.md"
+                if not skill_md.exists():
+                    continue
+                # 读取 SKILL.md 检查名称
+                try:
+                    content = skill_md.read_text(encoding='utf-8')
+                    # 简单解析 frontmatter 中的 name
+                    if content.startswith('---'):
+                        _, frontmatter, _ = content.split('---', 2)
+                        import yaml
+                        meta = yaml.safe_load(frontmatter)
+                        if meta and meta.get('name') == skill_name:
+                            skill_dir = item
+                            break
+                except Exception:
+                    continue
+        
+        if not skill_dir:
+            return False, f"SKILL '{skill_name}' 未找到"
+        
+        # 更新 _meta.json
+        meta_path = skill_dir / "_meta.json"
+        try:
+            meta = {}
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding='utf-8'))
+            meta['enabled'] = True
+            meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding='utf-8')
+        except Exception as e:
+            logger.error(f"更新 _meta.json 失败: {e}")
+            return False, f"启用失败：{e}"
+        
+        # 重新加载该 skill
+        skill = self.discovery._parse_skill(skill_dir)
+        if skill:
+            self._skills[skill_name] = skill
+            logger.info(f"SKILL '{skill_name}' 已启用")
+            return True, f"SKILL '{skill_name}' 已启用"
+        else:
+            return False, f"SKILL '{skill_name}' 解析失败"
+    
+    def delete_skill(self, skill_name: str) -> Tuple[bool, str]:
+        """删除指定 skill
+        
+        Returns:
+            (success, message)
+        """
+        skill = self._skills.get(skill_name)
+        
+        # 如果已加载，检查是否是用户 skill
+        if skill:
+            skill_dir = skill.directory
+            is_user_skill = any(
+                skill_dir.resolve().is_relative_to(Path(p).resolve())
+                for p in self.user_paths
+            )
+            if not is_user_skill:
+                return False, f"SKILL '{skill_name}' 是内置 skill，不能删除"
+            skill_path = skill_dir
+        else:
+            # 尝试查找未加载的 skill 目录
+            skill_path = None
+            for path_str in self.user_paths:
+                path = Path(path_str)
+                if not path.exists():
+                    continue
+                for item in path.iterdir():
+                    if not item.is_dir():
+                        continue
+                    skill_md = item / "SKILL.md"
+                    if not skill_md.exists():
+                        continue
+                    try:
+                        content = skill_md.read_text(encoding='utf-8')
+                        if content.startswith('---'):
+                            _, frontmatter, _ = content.split('---', 2)
+                            import yaml
+                            meta = yaml.safe_load(frontmatter)
+                            if meta and meta.get('name') == skill_name:
+                                skill_path = item
+                                break
+                    except Exception:
+                        continue
+                if skill_path:
+                    break
+        
+        if not skill_path or not skill_path.exists():
+            return False, f"SKILL '{skill_name}' 未找到"
+        
+        # 删除目录
+        try:
+            import shutil
+            shutil.rmtree(skill_path)
+            # 从已加载列表中移除
+            if skill_name in self._skills:
+                del self._skills[skill_name]
+            logger.info(f"SKILL '{skill_name}' 已删除")
+            return True, f"SKILL '{skill_name}' 已删除"
+        except Exception as e:
+            logger.error(f"删除 skill 失败: {e}")
+            return False, f"删除失败：{e}"
+    
+    def is_skill_installed(self, skill_name: str) -> bool:
+        """检查 skill 是否已安装（存在即可，不论是否启用）"""
+        # 检查已加载的
+        if skill_name in self._skills:
+            return True
+        
+        # 检查未加载但存在的
+        for skill, _ in self.list_installed_skills():
+            if skill.metadata.name == skill_name:
+                return True
+        return False
 
 
 # 全局 SKILL 管理器实例

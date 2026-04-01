@@ -19,6 +19,7 @@ from .mcp import mcp_server_manager, mcp_tool_bridge
 
 # SKILL 系统导入
 from .skills import skill_manager
+from .skills.skill_admin import register_skill_admin_commands
 
 conf = Config.get_instance('aichat')
 
@@ -128,9 +129,25 @@ SKILL 系统：
   #技能列表  列出所有可用 SKILL
   #当前技能  查看已激活的 SKILL
   #停用技能 <skill名称>  停用指定 SKILL
-  #停用所有技能  停用所有 SKILL''')
+  #停用所有技能  停用所有 SKILL
+SKILL 管理（超管）：
+  #安装技能 <来源>  安装 skill（支持 URL/ClawHub/本地）
+  #搜索技能 <关键词>  从 ClawHub 搜索 skill
+  #更新技能 <名称>  更新已安装的 skill
+  #删除技能 <名称>  删除已安装的 skill
+  #禁用技能 <名称>  禁用 skill（不加载）
+  #启用技能 <名称>  启用已禁用的 skill
+  #已安装技能  查看所有已安装 skill 状态
+  #测试ClawHub  测试 ClawHub CLI
+
+前置要求:
+  npm install -g clawhub  # 需要安装 ClawHub CLI''')
 
 sv.on_message(priority=10, block=False, only_group=False).handle()(handle_ai_chat)
+
+# 注册 SKILL 管理命令
+register_skill_admin_commands(sv)
+
 enter_chat_mode_cmd = sv.on_command('进入对话模式', aliases=('连续对话', '免井号对话', '聊天模式', '进入聊天'), only_group=False, block=True)
 
 @enter_chat_mode_cmd.handle()

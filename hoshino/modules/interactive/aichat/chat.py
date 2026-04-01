@@ -16,7 +16,7 @@ from .api import api_manager
 from .config import Config
 from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PATTERN
 from .persona import persona_manager
-from .session import session_manager, ChatResult
+from .session import session_manager, ChatResult, Session
 from .skills import skill_manager
 from .tools import get_available_tools, get_tool_function
 from .tools.registry import get_injectable_params
@@ -509,3 +509,47 @@ async def handle_ai_chat(bot: Bot, event: Event):
     except Exception as e:
         logger.error(truncate_log(str(display_response)))
         logger.error(f"发送AI回复失败: {e}")
+
+
+async def call_ai_api_with_tools(
+    messages: List[Dict[str, Any]],
+    api_config: Dict[str, Any],
+    max_tool_rounds: int = 10,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    调用 AI API 并支持工具调用
+    
+    这是一个独立的函数，用于非交互式场景（如定时任务）调用 AI API。
+    不依赖 Session 状态，每次调用都是独立的。
+    
+    Args:
+        messages: 消息列表
+        api_config: API 配置
+        max_tool_rounds: 最大工具调用轮数
+        context: 可选的上下文信息
+    
+    Returns:
+        Dict[str, Any]: 包含 content, error, tool_results 等字段的结果
+    """
+    from .tools import get_available_tools
+    
+    tools = get_available_tools() if api_config.get("supports_tools", False) else None
+    
+    # 创建一个临时 Session 来复用其 _chat_with_api 方法
+    temp_session = Session("temp_scheduled_task")
+    
+    result = await temp_session._chat_with_api(
+        messages=messages,
+        api_config=api_config,
+        tools=tools,
+        max_tool_rounds=max_tool_rounds,
+        context=context,
+    )
+    
+    return {
+        "content": result.content,
+        "error": result.error,
+        "tool_results": result.tool_results,
+        "usage": result.usage,
+    }

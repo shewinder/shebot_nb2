@@ -16,6 +16,9 @@ class SkillMetadata:
     allowed_tools: List[str] = field(default_factory=list)  # 允许的工具
     user_invocable: bool = True        # 用户是否可手动触发
     disable_model_invocation: bool = False  # 是否禁止 AI 自动触发
+    source: str = "local"              # 来源标识 (local/clawhub/url)
+    version: str = ""                  # 版本号
+    enabled: bool = True               # 是否启用
     
     def has_tool_permission(self, tool_name: str) -> bool:
         """检查是否有指定工具的权限"""
