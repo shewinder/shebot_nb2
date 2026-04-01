@@ -18,7 +18,7 @@ services:
       - browser
     environment:
       # 浏览器服务地址（容器内通信）
-      - BROWSER_WS_URL=ws://browser:3000/chromium?launch={"headless":false}
+      - BROWSER_WS_URL=ws://localhost:3003/chromium?launch={"headless":false}
 
   # QQ 客户端 (PMHQ)
   pmhq:

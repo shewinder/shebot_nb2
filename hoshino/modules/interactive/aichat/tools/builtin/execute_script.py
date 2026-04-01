@@ -6,7 +6,7 @@ Description: 通用脚本执行工具
 import asyncio
 import shlex
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 
