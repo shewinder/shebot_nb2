@@ -446,7 +446,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
     # 使用 Session 内聚的 chat 方法
     api_result = await session.chat(
         api_config=api_config,
-        tools=get_available_tools() if api_config.get("supports_tools", False) else None,
+        tools=await get_available_tools() if api_config.get("supports_tools", False) else None,
         on_content=on_content,
         context=tool_context,
     )
@@ -534,7 +534,7 @@ async def call_ai_api_with_tools(
     """
     from .tools import get_available_tools
     
-    tools = get_available_tools() if api_config.get("supports_tools", False) else None
+    tools = await get_available_tools() if api_config.get("supports_tools", False) else None
     
     # 创建一个临时 Session 来复用其 _chat_with_api 方法
     temp_session = Session("temp_scheduled_task")

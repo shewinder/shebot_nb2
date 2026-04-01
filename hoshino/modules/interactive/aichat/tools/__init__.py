@@ -24,7 +24,7 @@ from ..mcp import mcp_tool_bridge, mcp_server_manager
 from ..config import Config
 
 
-def get_available_tools() -> List[Dict[str, Any]]:
+async def get_available_tools() -> List[Dict[str, Any]]:
     """获取所有可用工具（包括内置工具和 MCP 工具）
     
     Returns:
@@ -37,7 +37,7 @@ def get_available_tools() -> List[Dict[str, Any]]:
     try:
         conf = Config.get_instance('aichat')
         if conf.enable_mcp:
-            mcp_tools = mcp_tool_bridge.get_tool_schemas()
+            mcp_tools = await mcp_tool_bridge.get_tool_schemas()
             tools.extend(mcp_tools)
     except Exception as e:
         logger.debug(f"获取 MCP 工具失败: {e}")

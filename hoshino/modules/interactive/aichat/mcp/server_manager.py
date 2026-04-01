@@ -178,16 +178,30 @@ class MCPServerManager:
             })
         return result
     
-    def get_all_tools(self) -> List[Dict[str, Any]]:
+    async def get_all_tools(self) -> List[Dict[str, Any]]:
         """获取所有 server 的所有工具
+        
+        自动尝试重连未连接的 client，确保工具列表始终可用。
         
         Returns:
             工具列表，每个工具包含 server_id, name, description, inputSchema
         """
         all_tools = []
-        for server_id, client in self._clients.items():
+        for server_id, client in list(self._clients.items()):  # 使用 list 避免遍历时修改
+            # 如果 client 需要重建，直接重建
+            if client.needs_rebuild:
+                logger.warning(f"MCP client {server_id} 需要重建，正在重建...")
+                if not await self._recreate_client(server_id):
+                    continue
+                client = self._clients[server_id]  # 获取新 client
+            
+            # 未连接时尝试重连
             if not client.is_connected:
-                continue
+                logger.debug(f"MCP client {server_id} 未连接，尝试重连...")
+                if not await client.connect():
+                    logger.warning(f"MCP client {server_id} 重连失败，跳过工具列表")
+                    continue
+                logger.info(f"MCP client {server_id} 重连成功")
             
             tools = client.tools
             for tool in tools:
@@ -201,8 +215,52 @@ class MCPServerManager:
         
         return all_tools
     
+    async def _recreate_client(self, server_id: str) -> bool:
+        """重新创建 client 实例
+        
+        当 client 损坏（needs_rebuild=True）时，完全重建。
+        
+        Args:
+            server_id: Server ID
+            
+        Returns:
+            是否重建成功
+        """
+        if server_id not in self._clients:
+            return False
+        
+        config = self._configs.get(server_id)
+        if not config:
+            logger.error(f"无法重建 MCP client {server_id}：配置不存在")
+            return False
+        
+        # 停止旧 client（不等待，强制清理）
+        old_client = self._clients[server_id]
+        try:
+            await old_client.disconnect()
+        except Exception as e:
+            logger.debug(f"断开旧 MCP client {server_id} 时出错: {e}")
+        
+        # 创建新 client
+        try:
+            new_client = MCPClient(config)
+            self._clients[server_id] = new_client
+            
+            # 尝试连接
+            if await new_client.connect():
+                logger.info(f"MCP client {server_id} 重建并连接成功")
+                return True
+            else:
+                logger.error(f"MCP client {server_id} 重建后连接失败")
+                return False
+        except Exception as e:
+            logger.exception(f"重建 MCP client {server_id} 失败: {e}")
+            return False
+    
     async def call_tool(self, server_id: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """调用指定 server 的工具
+        
+        支持自动重连和 client 重建。
         
         Args:
             server_id: Server ID
@@ -219,15 +277,32 @@ class MCPServerManager:
                 "isError": True
             }
         
+        # 如果 client 需要重建，先重建
+        if client.needs_rebuild:
+            logger.warning(f"MCP client {server_id} 需要重建，正在重建...")
+            if not await self._recreate_client(server_id):
+                return {
+                    "content": [f"MCP server {server_id} 重建失败"],
+                    "isError": True
+                }
+            client = self._clients[server_id]  # 获取新 client
+        
+        # 尝试连接
         if not client.is_connected:
-            # 尝试连接
             if not await client.connect():
                 return {
                     "content": [f"MCP server {server_id} 未连接"],
                     "isError": True
                 }
         
-        return await client.call_tool(tool_name, arguments)
+        # 调用工具
+        result = await client.call_tool(tool_name, arguments)
+        
+        # 如果调用后 client 标记需要重建，下次调用会触发重建
+        if client.needs_rebuild:
+            logger.warning(f"MCP client {server_id} 调用后标记需要重建，将在下次使用时重建")
+        
+        return result
     
     async def refresh_tools(self) -> None:
         """刷新所有 server 的工具列表"""

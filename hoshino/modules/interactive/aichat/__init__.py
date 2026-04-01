@@ -1090,7 +1090,7 @@ async def mcp_tools(bot: Bot, event: Event):
         await mcp_tools_cmd.finish("MCP 功能未启用")
         return
     
-    all_tools = mcp_server_manager.get_all_tools()
+    all_tools = await mcp_server_manager.get_all_tools()
     
     if not all_tools:
         await mcp_tools_cmd.finish("暂无可用的 MCP 工具\n\n请确保：\n1. 已配置 MCP servers\n2. Servers 已连接（使用 'MCP列表' 查看状态）")

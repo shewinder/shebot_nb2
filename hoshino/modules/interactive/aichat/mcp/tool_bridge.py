@@ -111,14 +111,14 @@ class MCPToolBridge:
             }
         }
     
-    def get_tool_schemas(self) -> List[Dict[str, Any]]:
+    async def get_tool_schemas(self) -> List[Dict[str, Any]]:
         """获取所有 MCP 工具的 schemas（用于传给 AI）
         
         Returns:
             OpenAI tools 格式的列表
         """
         schemas = []
-        tools = self.server_manager.get_all_tools()
+        tools = await self.server_manager.get_all_tools()
         
         for tool in tools:
             schema = self.convert_mcp_tool(
