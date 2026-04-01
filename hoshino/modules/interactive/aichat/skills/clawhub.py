@@ -18,6 +18,8 @@ from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from hoshino.config import get_plugin_config_by_name
+
 
 @dataclass
 class ClawHubSkill:
@@ -44,11 +46,24 @@ class ClawHubClient:
         """运行 CLI 命令"""
         try:
             cmd = ["clawhub"] + list(args)
+            
+            # 从配置读取 token 并设置环境变量
+            env = os.environ.copy()
+            try:
+                conf = get_plugin_config_by_name("aichat")
+                if conf and conf.clawhub_token:
+                    env["CLAWHUB_TOKEN"] = conf.clawhub_token
+                    masked = conf.clawhub_token[:4] + "****" if len(conf.clawhub_token) > 4 else "****"
+                    logger.info(f"ClawHub token 已加载: {masked}")
+            except Exception:
+                pass
+            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=timeout
+                timeout=timeout,
+                env=env
             )
             return result.returncode == 0, result.stdout or result.stderr
         except subprocess.TimeoutExpired:
@@ -249,16 +264,6 @@ class ClawHubClient:
                     shutil.rmtree(target_dir)
                 shutil.move(backup_dir, target_dir)
             return False, f"更新失败: {install_msg}"
-    
-    async def health_check(self) -> Tuple[bool, str]:
-        """检查 CLI 是否可用"""
-        success, output = self._run("--version")
-        
-        if success:
-            version = output.strip()
-            return True, f"CLI 可用: {version}"
-        else:
-            return False, f"CLI 不可用: {output}\n请安装: npm install -g clawhub"
     
     def parse_clawhub_reference(self, ref: str) -> str:
         """解析引用"""

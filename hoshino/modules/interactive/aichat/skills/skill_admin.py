@@ -86,12 +86,7 @@ async def search_skill_handler(bot: Bot, event: Event):
         results = await clawhub_client.search_skills(query, limit=10)
         
         if not results:
-            msg = f"未找到与 '{query}' 相关的 skill"
-            # 检查 CLI 是否可用
-            is_healthy, health_msg = await clawhub_client.health_check()
-            if not is_healthy:
-                msg += f"\n\n⚠️ {health_msg}"
-            await bot.send(event, msg)
+            await bot.send(event, f"未找到与 '{query}' 相关的 skill")
             return
         
         lines = [f"🔍 搜索结果（{len(results)} 个）：\n"]
@@ -313,35 +308,20 @@ async def list_installed_handler(bot: Bot, event: Event):
 
 async def test_clawhub_handler(bot: Bot, event: Event):
     """测试 ClawHub 连接"""
-    sv = get_sv()
-    
     await bot.send(event, "正在测试 ClawHub API 连接...")
     
     try:
-        is_healthy, message = await clawhub_client.health_check()
-        
-        if is_healthy:
-            msg = f"✅ {message}\n\n"
-            # 尝试搜索测试
-            skills = await clawhub_client.search_skills("test", limit=3)
-            if skills:
-                msg += "📋 示例 skills:\n"
-                for skill in skills:
-                    msg += f"  • {skill.name} ({skill.slug})\n"
-                    if hasattr(skill, 'score') and skill.score:
-                        msg += f"    🎯 匹配度: {skill.score:.3f}\n"
-            await bot.send(event, msg)
+        # 直接尝试搜索测试
+        skills = await clawhub_client.search_skills("test", limit=3)
+        if skills:
+            msg = "✅ ClawHub 连接正常\n\n📋 示例 skills:\n"
+            for skill in skills:
+                msg += f"  • {skill.name} ({skill.slug})\n"
+                if hasattr(skill, 'score') and skill.score:
+                    msg += f"    🎯 匹配度: {skill.score:.3f}\n"
         else:
-            msg = f"⚠️ {message}\n\n"
-            if "401" in message:
-                msg += "🔑 需要设置 API Token:\n"
-                msg += "1. 在 ClawHub 官网申请 Token\n"
-                msg += "2. 设置环境变量: export CLAWHUB_TOKEN=your_token\n"
-                msg += "3. 或在 .env 文件中添加: CLAWHUB_TOKEN=your_token\n\n"
-            msg += "💡 你也可以使用其他安装方式:\n"
-            msg += "• URL: #安装技能 https://.../skill.zip\n"
-            msg += "• 本地: #安装技能 ./path/to/skill"
-            await bot.send(event, msg)
+            msg = "⚠️ 搜索无结果，请检查 CLI 是否已安装: npm install -g clawhub"
+        await bot.send(event, msg)
             
     except Exception as e:
         await bot.send(event, f"❌ 测试失败: {e}")
