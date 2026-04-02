@@ -14,12 +14,10 @@ from hoshino.util.message_util import extract_images_from_reply
 
 from .api import api_manager
 from .config import Config
+from .env_context import build_static_env_info
 from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PATTERN
 from .persona import persona_manager
 from .session import session_manager, ChatResult, Session
-
-from .tools import get_available_tools, get_tool_function
-from .tools.registry import get_injectable_params
 
 conf = Config.get_instance('aichat')
 
@@ -71,59 +69,6 @@ def format_choices_for_display(choices: Dict[int, str]) -> str:
             lines.append(f"{emoji_map[num]} {choices[num]}")
     
     return "\n".join(lines)
-
-
-# 可扩展的环境信息字段配置
-# key: (获取函数, XML属性名, 是否仅在群聊有效)
-ENV_CONTEXT_PROVIDERS: Dict[str, tuple] = {
-    "user_id": (lambda e: e.user_id, "user_id", False),
-    "group_id": (lambda e: getattr(e, 'group_id', None), "group_id", True),
-    # 扩展示例：
-    # "user_role": (lambda e: get_user_role(e), "role", False),
-    # "group_name": (lambda e: get_group_name(e), "group_name", True),
-}
-
-
-def build_static_env_info(event: Event, fields: Optional[List[str]] = None) -> str:
-    """构建静态环境信息（XML格式）
-    
-    Args:
-        event: 消息事件
-        fields: 要包含的字段列表，None 则使用默认（user_id, group_id）
-    
-    返回 XML 格式字符串，便于模型理解结构化数据。
-    扩展方式：向 ENV_CONTEXT_PROVIDERS 添加字段配置
-    """
-    if fields is None:
-        fields = ["user_id", "group_id"]
-    
-    attrs = []
-    for field in fields:
-        if field not in ENV_CONTEXT_PROVIDERS:
-            continue
-        
-        getter, attr_name, group_only = ENV_CONTEXT_PROVIDERS[field]
-        try:
-            value = getter(event)
-        except Exception:
-            continue
-        
-        if value is None:
-            continue
-        
-        # 群聊特有字段，在私聊中跳过
-        if group_only and not getattr(event, 'group_id', None):
-            continue
-        
-        # 注意：XML 属性值如果包含特殊字符需要转义
-        # 但 user_id/group_id 通常是数字，不需要转义
-        # 如果后续添加字符串字段，需要在这里处理转义
-        attrs.append(f'{attr_name}="{value}"')
-    
-    if not attrs:
-        return ""
-    
-    return f'<context type="environment" {" ".join(attrs)} />'
 
 
 async def download_image_to_base64(image_url: str) -> Optional[str]:
@@ -390,47 +335,3 @@ async def handle_ai_chat(bot: Bot, event: Event):
     except Exception as e:
         logger.error(truncate_log(str(display_response)))
         logger.error(f"发送AI回复失败: {e}")
-
-
-async def call_ai_api_with_tools(
-    messages: List[Dict[str, Any]],
-    api_config: Dict[str, Any],
-    max_tool_rounds: int = 10,
-    context: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    调用 AI API 并支持工具调用
-    
-    这是一个独立的函数，用于非交互式场景（如定时任务）调用 AI API。
-    不依赖 Session 状态，每次调用都是独立的。
-    
-    Args:
-        messages: 消息列表
-        api_config: API 配置
-        max_tool_rounds: 最大工具调用轮数
-        context: 可选的上下文信息
-    
-    Returns:
-        Dict[str, Any]: 包含 content, error, tool_results 等字段的结果
-    """
-    from .tools import get_available_tools
-    
-    tools = await get_available_tools() if api_config.get("supports_tools", False) else None
-    
-    # 创建一个临时 Session 来复用其 _chat_with_api 方法
-    temp_session = Session("temp_scheduled_task")
-    
-    result = await temp_session._chat_with_api(
-        messages=messages,
-        api_config=api_config,
-        tools=tools,
-        max_tool_rounds=max_tool_rounds,
-        context=context,
-    )
-    
-    return {
-        "content": result.content,
-        "error": result.error,
-        "tool_results": result.tool_results,
-        "usage": result.usage,
-    }

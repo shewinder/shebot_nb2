@@ -8,6 +8,8 @@ from loguru import logger
 
 from .config import Config
 from .skills import skill_manager
+from .tools import get_tool_function
+from .tools.registry import get_injectable_params
 from hoshino.util import aiohttpx, log_json, truncate_log
 
 conf = Config.get_instance('aichat')
@@ -305,6 +307,51 @@ class Session:
         
         return result
     
+    @classmethod
+    async def chat_with_messages(
+        cls,
+        messages: List[Dict[str, Any]],
+        api_config: Dict[str, Any],
+        max_tool_rounds: int = 10,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        使用指定消息列表进行对话（非会话模式）
+        
+        这是一个独立的类方法，用于非交互式场景（如定时任务）调用 AI API。
+        不维护会话状态，每次调用都是独立的。
+        
+        Args:
+            messages: 消息列表
+            api_config: API 配置
+            max_tool_rounds: 最大工具调用轮数
+            context: 可选的上下文信息
+        
+        Returns:
+            Dict[str, Any]: 包含 content, error, tool_results, usage 等字段的结果
+        """
+        from .tools import get_available_tools
+        
+        tools = await get_available_tools() if api_config.get("supports_tools", False) else None
+        
+        # 创建一个临时 Session 来复用其 _chat_with_api 方法
+        temp_session = cls("temp_scheduled_task")
+        
+        result = await temp_session._chat_with_api(
+            messages=messages,
+            api_config=api_config,
+            tools=tools,
+            max_tool_rounds=max_tool_rounds,
+            context=context,
+        )
+        
+        return {
+            "content": result.content,
+            "error": result.error,
+            "tool_results": result.tool_results,
+            "usage": result.usage,
+        }
+    
     async def _call_ai_api(
         self,
         messages: List[Dict[str, Any]],
@@ -413,9 +460,6 @@ class Session:
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """执行单个工具调用"""
-        # 延迟导入避免循环依赖
-        from .tools import get_tool_function
-        from .tools.registry import get_injectable_params
         
         tool_id = tool_call.get("id", "")
         function_info = tool_call.get("function", {})
