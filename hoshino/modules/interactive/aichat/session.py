@@ -39,6 +39,7 @@ class ChatResult:
 class Session:
     def __init__(self, session_id: str, persona: Optional[str] = None):
         self.session_id = session_id
+        self.persona = persona
         self.messages: List[Dict[str, Any]] = []
         self.last_active = time.time()
         self.continuous_mode = False
@@ -49,10 +50,14 @@ class Session:
         self._ai_images: Dict[str, str] = {}
         # SKILL 系统：已激活的 SKILL 名称集合
         self.active_skills: Set[str] = set()
+        # 当前正在执行的 SKILL（用于工具权限检查）
+        self.active_skill: Optional[str] = None
         # Token 使用量统计
         self.total_prompt_tokens: int = 0
         self.total_completion_tokens: int = 0
         self.total_tokens: int = 0
+        # 从 session_id 解析 user_id 和 group_id
+        self.user_id, self.group_id = self._parse_session_id(session_id)
         if persona:
             self.messages.append({"role": "system", "content": persona})
     
@@ -190,38 +195,84 @@ class Session:
         self.total_tokens += prompt_tokens + completion_tokens
         self.last_active = time.time()
     
-    async def build_messages(
-        self,
-        persona: Optional[str] = None,
-        choice_mode: bool = False,
-        guideline: Optional[str] = None,
-        env_info: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        构建用于 API 调用的完整消息列表
+    @staticmethod
+    def _parse_session_id(session_id: str) -> Tuple[Optional[int], Optional[int]]:
+        """从 session_id 解析 user_id 和 group_id
         
-        Args:
-            persona: 人格提示词
-            choice_mode: 是否启用选项生成模式
-            guideline: 选项生成指导标准
-            env_info: 预构建的环境信息字符串（XML格式）
+        格式：
+        - group_{group_id}_user_{user_id} -> (user_id, group_id)
+        - private_{user_id} -> (user_id, None)
         
         Returns:
-            List[Dict[str, Any]]: 完整的消息列表
+            Tuple[user_id, group_id]
+        """
+        user_id = None
+        group_id = None
+        
+        try:
+            if session_id.startswith("group_"):
+                # group_{group_id}_user_{user_id}
+                parts = session_id.split("_")
+                if len(parts) >= 4:
+                    group_id = int(parts[1])
+                    user_id = int(parts[3])
+            elif session_id.startswith("private_"):
+                # private_{user_id}
+                user_id = int(session_id.split("_")[1])
+        except (ValueError, IndexError):
+            pass
+        
+        return user_id, group_id
+    
+    def _build_env_info(self, event: Optional[Any] = None) -> str:
+        """构建环境信息（XML格式）
+        
+        Args:
+            event: 消息事件（优先使用），如为 None 则使用 session 解析的值
+        """
+        attrs = []
+        
+        # 优先从 event 获取，否则使用 session 解析的值
+        if event:
+            user_id = event.user_id
+            group_id = getattr(event, 'group_id', None)
+        else:
+            user_id = self.user_id
+            group_id = self.group_id
+        
+        if user_id:
+            attrs.append(f'user_id="{user_id}"')
+        if group_id:
+            attrs.append(f'group_id="{group_id}"')
+        
+        if not attrs:
+            return ""
+        
+        return f'<context type="environment" {" ".join(attrs)} />'
+    
+    async def _build_messages_for_chat(self, event: Optional[Any] = None) -> None:
+        """构建用于 API 调用的消息列表，直接更新 self.messages
+        
+        使用内部保存的 persona, choice_mode_enabled, choice_guideline
+        以及 event 构建环境信息
+        
+        Args:
+            event: 消息事件（可选，用于构建环境信息）
         """
         messages: List[Dict[str, Any]] = []
         image_list_prompt = self.build_image_list_prompt()
         
-        # 构建系统消息内容
-        system_content = persona or ""
+        # 构建系统消息内容（使用内部保存的 persona）
+        system_content = self.persona or ""
         
-        # 选项生成模式提示
-        if choice_mode:
-            guideline_section = f"\n选项生成指导标准：{guideline}\n请根据以上指导标准生成合适的选项。" if guideline else ""
+        # 选项生成模式提示（使用内部的 choice_mode_enabled 和 choice_guideline）
+        if self.choice_mode_enabled:
+            guideline_section = f"\n选项生成指导标准：{self.choice_guideline}\n请根据以上指导标准生成合适的选项。" if self.choice_guideline else ""
             choice_prompt = CHOICE_MODE_PROMPT_TEMPLATE.format(guideline_section=guideline_section)
             system_content = f"{system_content}\n\n{choice_prompt}" if system_content else choice_prompt
         
-        # 环境信息
+        # 环境信息（从 event 构建）
+        env_info = self._build_env_info(event)
         if env_info:
             system_content = f"{system_content}\n\n{env_info}" if system_content else env_info
         
@@ -269,27 +320,39 @@ class Session:
     async def chat(
         self,
         api_config: Dict[str, Any],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        bot: Optional[Any] = None,
+        event: Optional[Any] = None,
         on_content: Optional[Callable[[str], Any]] = None,
-        context: Optional[Dict[str, Any]] = None,
     ) -> ChatResult:
         """
-        执行对话调用，自动处理消息和 token 统计
+        执行对话调用，完全内聚，自动处理消息构建和工具获取
         
         Args:
             api_config: API 配置
-            tools: 可用工具列表
+            bot: Bot 实例（用于工具注入）
+            event: 消息事件（用于构建环境信息和工具注入）
             on_content: 内容回调（用于流式输出）
-            context: 上下文（用于工具注入）
         
         Returns:
             ChatResult: 对话结果
         """
-        # 构建包含当前 session 的上下文
-        chat_context = context.copy() if context else {}
-        chat_context['session'] = self
+        # 1. 内部自动构建消息
+        await self._build_messages_for_chat(event)
         
-        # 调用 API
+        # 2. 内部自动获取 tools
+        tools = None
+        if api_config.get("supports_tools", False):
+            from .tools import get_available_tools
+            tools = await get_available_tools()
+        
+        # 3. 构建上下文（注入 session、bot、event）
+        chat_context: Dict[str, Any] = {'session': self}
+        if bot:
+            chat_context['bot'] = bot
+        if event:
+            chat_context['event'] = event
+        
+        # 4. 调用 API
         result = await self._chat_with_api(
             messages=self.messages,
             api_config=api_config,
@@ -298,7 +361,7 @@ class Session:
             on_content=on_content,
         )
         
-        # 自动累加 token 使用量
+        # 5. 自动累加 token 使用量
         if result.usage:
             prompt_tokens = result.usage.get("prompt_tokens", 0) or 0
             completion_tokens = result.usage.get("completion_tokens", 0) or 0

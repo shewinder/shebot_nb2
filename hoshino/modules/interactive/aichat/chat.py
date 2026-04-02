@@ -14,7 +14,6 @@ from hoshino.util.message_util import extract_images_from_reply
 
 from .api import api_manager
 from .config import Config
-from .env_context import build_static_env_info
 from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PATTERN
 from .persona import persona_manager
 from .session import session_manager, ChatResult, Session
@@ -248,18 +247,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
         message_content = user_input
 
     session.add_message("user", message_content)
-    env_info = build_static_env_info(event) if event else None
-    messages_for_api = await session.build_messages(
-        persona=persona,
-        choice_mode=choice_mode_enabled and in_continuous_mode,
-        guideline=choice_guideline,
-        env_info=env_info,
-    )
-
-    tool_context = {
-        "bot": bot,
-        "event": event,
-    }
     
     async def on_content(content: str):
         if content and content.strip():
@@ -269,12 +256,12 @@ async def handle_ai_chat(bot: Bot, event: Event):
                 markdown_min_length=conf.markdown_min_length
             )
     
-    # 使用 Session 内聚的 chat 方法
+    # 使用 Session 内聚的 chat 方法（自动处理消息构建和工具获取）
     api_result = await session.chat(
         api_config=api_config,
-        tools=await get_available_tools() if api_config.get("supports_tools", False) else None,
+        bot=bot,
+        event=event,
         on_content=on_content,
-        context=tool_context,
     )
     
     # 处理工具图片输出
