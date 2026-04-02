@@ -13,6 +13,7 @@ import nonebot
 from hoshino import Bot
 from hoshino.config import get_plugin_config_by_name
 from hoshino.modules.interactive.aichat import api_manager, persona_manager, conf, session_manager
+from hoshino.modules.interactive.aichat.skills import skill_manager
 from hoshino.modules.interactive.aichat.config import ApiEntry, ImageModelEntry
 from hoshino.modules.interactive.aichat.character_import import parse_character_png, CharacterCard
 import json
@@ -1136,3 +1137,179 @@ async def cleanup_expired_sessions():
     except Exception as e:
         logger.exception(f"清理过期 Session 失败: {e}")
         return {"status": 500, "data": f"清理失败: {str(e)}"}
+
+
+# ========== SKILL 管理 API ==========
+
+class SkillInfo(BaseModel):
+    """SKILL 信息"""
+    name: str
+    description: str
+    allowed_tools: List[str]
+    user_invocable: bool
+    disable_model_invocation: bool
+    source: str
+    version: str
+    enabled: bool
+
+
+class InstalledSkillInfo(BaseModel):
+    """已安装 SKILL 信息"""
+    name: str
+    description: str
+    allowed_tools: List[str]
+    user_invocable: bool
+    disable_model_invocation: bool
+    source: str
+    version: str
+    enabled: bool
+    path: str
+
+
+class SkillConfig(BaseModel):
+    """SKILL 配置"""
+    enable_skills: bool
+    skill_user_paths: List[str]
+
+
+@router.get("/skills")
+async def get_skills():
+    """获取所有可用 SKILL 列表"""
+    try:
+        if not conf.enable_skills:
+            return {"status": 200, "data": [], "message": "SKILL 系统未启用"}
+        
+        # 确保 skill_manager 已初始化
+        if not skill_manager._initialized:
+            skill_manager.user_paths = conf.skill_user_paths
+            skill_manager.initialize()
+        
+        skills = skill_manager.list_skills()
+        result = [
+            SkillInfo(
+                name=skill.metadata.name,
+                description=skill.metadata.description,
+                allowed_tools=skill.metadata.allowed_tools,
+                user_invocable=skill.metadata.user_invocable,
+                disable_model_invocation=skill.metadata.disable_model_invocation,
+                source=skill.metadata.source,
+                version=skill.metadata.version,
+                enabled=skill.metadata.enabled
+            )
+            for skill in skills
+        ]
+        return {"status": 200, "data": result}
+    except Exception as e:
+        logger.exception(f"获取 SKILL 列表失败: {e}")
+        return {"status": 500, "data": f"获取失败: {str(e)}"}
+
+
+@router.get("/skills/installed")
+async def get_installed_skills():
+    """获取所有已安装的 SKILL（包括禁用的）"""
+    try:
+        # 确保 skill_manager 已初始化
+        if not skill_manager._initialized:
+            skill_manager.user_paths = conf.skill_user_paths
+            skill_manager.initialize()
+        
+        installed = skill_manager.list_installed_skills()
+        result = [
+            InstalledSkillInfo(
+                name=skill.metadata.name,
+                description=skill.metadata.description,
+                allowed_tools=skill.metadata.allowed_tools,
+                user_invocable=skill.metadata.user_invocable,
+                disable_model_invocation=skill.metadata.disable_model_invocation,
+                source=skill.metadata.source,
+                version=skill.metadata.version,
+                enabled=skill.metadata.enabled,
+                path=str(path)
+            )
+            for skill, path in installed
+        ]
+        return {"status": 200, "data": result}
+    except Exception as e:
+        logger.exception(f"获取已安装 SKILL 列表失败: {e}")
+        return {"status": 500, "data": f"获取失败: {str(e)}"}
+
+
+@router.post("/skills/{skill_name}/enable")
+async def enable_skill(skill_name: str):
+    """启用指定 SKILL"""
+    try:
+        success, msg = skill_manager.enable_skill(skill_name)
+        if success:
+            return {"status": 200, "data": msg}
+        else:
+            return {"status": 400, "data": msg}
+    except Exception as e:
+        logger.exception(f"启用 SKILL 失败: {e}")
+        return {"status": 500, "data": f"启用失败: {str(e)}"}
+
+
+@router.post("/skills/{skill_name}/disable")
+async def disable_skill(skill_name: str):
+    """禁用指定 SKILL"""
+    try:
+        success, msg = skill_manager.disable_skill(skill_name)
+        if success:
+            return {"status": 200, "data": msg}
+        else:
+            return {"status": 400, "data": msg}
+    except Exception as e:
+        logger.exception(f"禁用 SKILL 失败: {e}")
+        return {"status": 500, "data": f"禁用失败: {str(e)}"}
+
+
+@router.delete("/skills/{skill_name}")
+async def delete_skill(skill_name: str):
+    """删除指定 SKILL"""
+    try:
+        success, msg = skill_manager.delete_skill(skill_name)
+        if success:
+            return {"status": 200, "data": msg}
+        else:
+            return {"status": 400, "data": msg}
+    except Exception as e:
+        logger.exception(f"删除 SKILL 失败: {e}")
+        return {"status": 500, "data": f"删除失败: {str(e)}"}
+
+
+@router.get("/config/skills")
+async def get_skills_config():
+    """获取 SKILL 系统配置"""
+    try:
+        return {
+            "status": 200,
+            "data": {
+                "enable_skills": conf.enable_skills,
+                "skill_user_paths": conf.skill_user_paths
+            }
+        }
+    except Exception as e:
+        logger.exception(f"获取 SKILL 配置失败: {e}")
+        return {"status": 500, "data": f"获取失败: {str(e)}"}
+
+
+@router.post("/config/skills")
+async def update_skills_config(config_update: SkillConfig):
+    """更新 SKILL 系统配置"""
+    try:
+        # 更新配置
+        conf.enable_skills = config_update.enable_skills
+        conf.skill_user_paths = config_update.skill_user_paths
+        
+        # 保存配置
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+        
+        # 如果 SKILL 系统被启用，重新初始化 skill_manager
+        if conf.enable_skills:
+            skill_manager.user_paths = conf.skill_user_paths
+            skill_manager.reload()
+        
+        return {"status": 200, "data": "SKILL 配置更新成功"}
+    except Exception as e:
+        logger.exception(f"更新 SKILL 配置失败: {e}")
+        return {"status": 500, "data": f"更新失败: {str(e)}"}

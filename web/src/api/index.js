@@ -210,3 +210,26 @@ export const deleteSession = (sessionId) => request.delete(`/aichat/sessions/${s
 
 // 清理过期 Session
 export const cleanupExpiredSessions = () => request.post('/aichat/sessions/cleanup-expired')
+
+
+// ===== SKILL 管理 API =====
+// 获取所有可用 SKILL 列表
+export const getSkills = () => request.get('/aichat/skills')
+
+// 获取已安装的 SKILL 列表（包括禁用的）
+export const getInstalledSkills = () => request.get('/aichat/skills/installed')
+
+// 启用 SKILL
+export const enableSkill = (skillName) => request.post(`/aichat/skills/${skillName}/enable`)
+
+// 禁用 SKILL
+export const disableSkill = (skillName) => request.post(`/aichat/skills/${skillName}/disable`)
+
+// 删除 SKILL
+export const deleteSkill = (skillName) => request.delete(`/aichat/skills/${skillName}`)
+
+// 获取 SKILL 系统配置
+export const getSkillsConfig = () => request.get('/aichat/config/skills')
+
+// 更新 SKILL 系统配置
+export const updateSkillsConfig = (config) => request.post('/aichat/config/skills', config)

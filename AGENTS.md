@@ -397,6 +397,46 @@ cd web
 npm run build
 ```
 
+#### API 请求响应处理（重要）
+
+Web 前端使用 axios 拦截器自动解包响应，**调用 API 时不需要再取 `.data`**：
+
+```javascript
+// web/src/utils/request.js 中的响应拦截器
+request.interceptors.response.use(
+  (response) => {
+    const { data } = response
+    if (data.status === 200) {
+      return data.data  // 直接返回解包后的 data
+    }
+    // ...
+  }
+)
+```
+
+**正确写法**（响应拦截器已解包）：
+```javascript
+const fetchSkills = async () => {
+  const res = await aichatApi.getSkills()  // res 直接是数组 [...]
+  setSkills(res || [])  // ✅ 不需要 res?.data
+}
+
+const fetchConfig = async () => {
+  const res = await aichatApi.getSkillsConfig()  // res 直接是对象 {...}
+  setSkillsConfig(res)  // ✅ 不需要 res?.data
+}
+```
+
+**错误写法**（重复取 data）：
+```javascript
+const fetchSkills = async () => {
+  const res = await aichatApi.getSkills()
+  setSkills(res?.data || [])  // ❌ 错误！res 已经是解包后的数据
+}
+```
+
+**总结**：所有通过 `request.js` 发起的 API 调用，返回的 `res` 直接是后端返回的 `response.data.data`，不要再取 `.data`。
+
 ---
 
 ## 角色：Verifier（审查与验收）
