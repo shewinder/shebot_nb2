@@ -2,8 +2,7 @@
 name: calculate
 description: 执行安全数学计算的 SKILL，支持基础运算和复杂表达式
 allowed-tools:
-  - "Bash(python scripts/*)"
-  - "Read"
+  - "execute_script"
 user-invocable: true
 disable-model-invocation: false
 ---

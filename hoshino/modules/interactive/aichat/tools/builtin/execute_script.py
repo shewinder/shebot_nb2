@@ -36,32 +36,30 @@ def _is_path_safe(target: Path, allowed_base: Path) -> bool:
 
 @tool_registry.register(
     name="execute_script",
-    description="""执行指定路径的脚本文件（Python、Shell 等）
+    description="""执行指定 SKILL 目录下的脚本文件（Python、Shell 等）
 
-用于执行各种脚本任务，如 Skill 目录下的脚本、数据处理脚本等。
-
-## 使用场景
-1. 执行 Skill 目录下的脚本
-2. 执行系统脚本（需要权限）
-3. 自动化任务处理
+用于执行已激活 SKILL 目录下的脚本，完成特定任务。
 
 ## 参数说明
-- script_path: 脚本文件路径（相对或绝对路径）
+- skill_name: SKILL 名称（必须从当前激活的 SKILL 中选择）
+- script_path: 脚本文件路径（相对于 SKILL 目录，如 'scripts/calc.py'）
 - args: 传递给脚本的参数列表（字符串数组）
 - timeout: 超时时间（秒，默认30，最大300）
 
 ## 使用示例
 ```python
-# 执行 Skill 脚本
-execute_script(script_path="scripts/calculate.py", args=["15 * 23"])
-
-# 执行系统脚本（需要权限）
-execute_script(script_path="/path/to/script.sh", args=["arg1", "arg2"])
+# 执行 math SKILL 的 calculate.py 脚本
+execute_script(
+    skill_name="math",
+    script_path="scripts/calculate.py",
+    args=["15 * 23"]
+)
 ```
 
-## 权限说明
-- 从 Skill 调用时，只能执行该 Skill 目录下的脚本
-- 直接调用需要超级用户权限
+## 重要提示
+- skill_name 必须是当前已激活的 SKILL 之一
+- 只能执行该 SKILL 目录下的脚本（安全限制）
+- 如果需要执行多个 SKILL 的脚本，请分别调用
 
 ## 返回值
 - stdout: 脚本的标准输出
@@ -71,9 +69,13 @@ execute_script(script_path="/path/to/script.sh", args=["arg1", "arg2"])
     parameters={
         "type": "object",
         "properties": {
+            "skill_name": {
+                "type": "string",
+                "description": "SKILL 名称（必须从当前激活的 SKILL 中选择）"
+            },
             "script_path": {
                 "type": "string",
-                "description": "脚本文件路径（如 'scripts/calc.py' 或绝对路径）"
+                "description": "脚本文件路径（相对于 SKILL 目录，如 'scripts/calc.py'）"
             },
             "args": {
                 "type": "array",
@@ -89,10 +91,11 @@ execute_script(script_path="/path/to/script.sh", args=["arg1", "arg2"])
                 "maximum": 300
             }
         },
-        "required": ["script_path"]
+        "required": ["skill_name", "script_path"]
     }
 )
 async def execute_script(
+    skill_name: str,
     script_path: str,
     args: Optional[List[str]] = None,
     timeout: int = 30,
@@ -103,7 +106,8 @@ async def execute_script(
     """执行指定脚本
     
     Args:
-        script_path: 脚本路径
+        skill_name: SKILL 名称（必须从当前激活的 SKILL 中选择）
+        script_path: 脚本路径（相对于 SKILL 目录）
         args: 脚本参数
         timeout: 超时时间
         session: 当前会话
@@ -119,27 +123,30 @@ async def execute_script(
     # 限制超时时间
     timeout = min(max(timeout, 1), 300)
     
-    # 获取脚本绝对路径
-    script_path_obj = Path(script_path)
+    # 验证 skill_name 是否已激活
+    if not session or skill_name not in session.active_skills:
+        return fail(f"SKILL '{skill_name}' 未激活，请先激活该 SKILL")
+    
+    # 获取 SKILL 目录
+    from ...skills import skill_manager
+    skill = skill_manager.get_skill(skill_name)
+    if not skill:
+        return fail(f"SKILL '{skill_name}' 不存在")
     
     # 权限检查
+    script_path_obj = Path(script_path)
     can_execute, reason = await _check_execute_permission(
-        script_path_obj, session, bot, event
+        script_name=script_path_obj.name,
+        skill=skill,
+        session=session,
+        bot=bot,
+        event=event
     )
     if not can_execute:
         return fail(f"权限检查失败: {reason}")
     
-    # 解析为绝对路径
-    if session and session.active_skill:
-        # 如果有激活的 skill，以 skill 目录为基目录
-        from ...skills import skill_manager
-        skill = skill_manager.get_skill(session.active_skill)
-        if skill:
-            script_abs = _resolve_script_path(script_path, skill.directory)
-        else:
-            script_abs = _resolve_script_path(script_path)
-    else:
-        script_abs = _resolve_script_path(script_path)
+    # 解析为绝对路径（基于 SKILL 目录）
+    script_abs = _resolve_script_path(script_path, skill.directory)
     
     # 检查文件是否存在
     if not script_abs.exists():
@@ -219,47 +226,37 @@ def _get_interpreter(script_path: Path) -> Optional[str]:
 
 
 async def _check_execute_permission(
-    script_path: Path,
+    script_name: str,
+    skill: Any,
     session: Optional["Session"],
     bot: Optional["Bot"],
     event: Optional["Event"]
 ) -> tuple:
     """检查执行权限
     
+    Args:
+        script_name: 脚本文件名
+        skill: SKILL 对象
+        session: 当前会话
+        bot: Bot 实例
+        event: Event 实例
+        
     Returns:
         (bool, str) - (是否允许, 原因)
     """
     from hoshino.permission import SUPERUSER
-    from ...skills import skill_manager
     
-    # 情况1：从 Skill 上下文调用
-    if session and session.active_skill:
-        skill = skill_manager.get_skill(session.active_skill)
-        if skill:
-            # 检查 skill 是否有 execute_script 权限
-            if not skill.metadata.has_tool_permission("execute_script"):
-                return False, f"SKILL '{skill.metadata.name}' 无权使用 execute_script 工具"
-            
-            # 检查脚本路径是否在 skill 目录内
-            if not script_path.is_absolute():
-                script_abs = skill.directory / script_path
-            else:
-                script_abs = script_path
-            script_abs = script_abs.resolve()
-            
-            if not _is_path_safe(script_abs, skill.directory):
-                return False, f"脚本路径超出 SKILL '{skill.metadata.name}' 目录范围"
-            
-            return True, ""
+    # 检查 skill 是否有 execute_script 权限
+    if not skill.metadata.has_tool_permission("execute_script"):
+        return False, f"SKILL '{skill.metadata.name}' 无权使用 execute_script 工具"
     
-    # 情况2：直接调用（非 skill 上下文）
-    # 需要超级用户权限
-    if event:
-        is_su = await SUPERUSER(bot, event)
-        if not is_su:
-            return False, "只有超级用户可以直接执行脚本"
+    # 检查脚本路径是否在 skill 目录内
+    script_path = Path(script_name)
+    if script_path.is_absolute():
+        return False, "脚本路径必须是相对路径"
     
-    # 情况3：系统调用或测试（无 event）
-    # 允许执行，但记录警告
-    logger.warning(f"非 Skill 上下文执行脚本: {script_path}")
+    script_abs = (skill.directory / script_path).resolve()
+    if not _is_path_safe(script_abs, skill.directory):
+        return False, f"脚本路径超出 SKILL '{skill.metadata.name}' 目录范围"
+    
     return True, ""

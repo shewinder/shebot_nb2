@@ -167,9 +167,31 @@ class SkillManager:
         
         sections = []
         for skill_name in state.active_skills:
+            skill = self._skills.get(skill_name)
             content = state.skill_contents.get(skill_name, "")
             if content:
-                sections.append(f"## SKILL: {skill_name}\n{content}")
+                section_lines = [f"## SKILL: {skill_name}", ""]
+                
+                # 如果有 execute_script 权限，添加使用说明
+                if skill and skill.metadata.has_tool_permission("execute_script"):
+                    section_lines.extend([
+                        "### 脚本执行说明",
+                        f"本 SKILL 支持使用 `execute_script` 工具执行目录下的脚本。",
+                        f"",
+                        f"**使用示例：**",
+                        f"```python",
+                        f'execute_script(skill_name="{skill_name}", script_path="scripts/example.py", args=["arg1"])',
+                        f"```",
+                        f"",
+                        f"**注意事项：**",
+                        f"- `skill_name` 必须填写 `{skill_name}`",
+                        f"- `script_path` 是相对于 SKILL 目录的相对路径",
+                        f"- 只能访问本 SKILL 目录下的文件",
+                        f"",
+                    ])
+                
+                section_lines.append(content)
+                sections.append("\n".join(section_lines))
         
         if not sections:
             return ""
