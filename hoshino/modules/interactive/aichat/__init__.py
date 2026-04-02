@@ -1125,52 +1125,6 @@ async def mcp_tools(bot: Bot, event: Event):
 
 # ========== SKILL 系统命令 ==========
 
-use_skill_cmd = sv.on_command('#使用', aliases=('使用技能', '激活技能', '#激活'), only_group=False)
-
-@use_skill_cmd.handle()
-async def use_skill(bot: Bot, event: Event):
-    """激活指定 SKILL"""
-    if not conf.enable_skills:
-        await use_skill_cmd.finish("SKILL 系统未启用")
-        return
-    
-    args = str(event.message).strip().split(maxsplit=1)
-    if len(args) < 2:
-        await use_skill_cmd.finish("请提供 SKILL 名称，例如：#使用 calculate\n使用「#技能列表」查看可用 SKILL")
-        return
-    
-    skill_name = args[1].strip()
-    user_id = event.user_id
-    group_id = getattr(event, 'group_id', None)
-    
-    # 检查 SKILL 是否存在
-    skill = skill_manager.get_skill(skill_name)
-    if not skill:
-        await use_skill_cmd.finish(f"SKILL '{skill_name}' 不存在\n使用「#技能列表」查看可用 SKILL")
-        return
-    
-    # 检查是否允许用户手动触发
-    if not skill.metadata.user_invocable:
-        await use_skill_cmd.finish(f"SKILL '{skill_name}' 不允许手动触发")
-        return
-    
-    # 激活 SKILL
-    session_id = session_manager.get_session_id(user_id, group_id)
-    success, message, content = skill_manager.activate_skill(session_id, skill_name)
-    
-    if success:
-        # 同时更新 session 中的激活状态
-        session_manager.activate_skill(user_id, group_id, skill_name)
-        
-        msg_lines = [f"✅ {message}"]
-        msg_lines.append(f"📖 描述：{skill.metadata.description}")
-        if skill.metadata.allowed_tools:
-            msg_lines.append(f"🔧 可用工具：{', '.join(skill.metadata.allowed_tools)}")
-        await use_skill_cmd.finish("\n".join(msg_lines))
-    else:
-        await use_skill_cmd.finish(f"❌ {message}")
-
-
 list_skills_cmd = sv.on_command('#技能列表', aliases=('列出技能', '可用技能', '技能列表'), only_group=False)
 
 @list_skills_cmd.handle()
@@ -1221,7 +1175,7 @@ async def current_skills(bot: Bot, event: Event):
     active_skills = skill_manager.get_active_skills(session_id)
     
     if not active_skills:
-        await current_skills_cmd.finish("当前没有激活的 SKILL\n\n使用「#技能列表」查看可用 SKILL，「#使用 <名称>」激活")
+        await current_skills_cmd.finish("当前没有激活的 SKILL\n\n使用「#技能列表」查看可用 SKILL")
         return
     
     lines = [f"当前已激活 {len(active_skills)} 个 SKILL：\n"]
@@ -1231,68 +1185,8 @@ async def current_skills(bot: Bot, event: Event):
         if skill:
             lines.append(f"• {skill.metadata.name}: {skill.metadata.description}")
     
-    lines.append("\n使用「#停用技能 <名称>」停用指定 SKILL")
     
     await current_skills_cmd.finish("\n".join(lines))
-
-
-deactivate_skill_cmd = sv.on_command('#停用技能', aliases=('停用技能', '关闭技能', '#关闭技能'), only_group=False)
-
-@deactivate_skill_cmd.handle()
-async def deactivate_skill(bot: Bot, event: Event):
-    """停用指定 SKILL"""
-    if not conf.enable_skills:
-        await deactivate_skill_cmd.finish("SKILL 系统未启用")
-        return
-    
-    args = str(event.message).strip().split(maxsplit=1)
-    if len(args) < 2:
-        await deactivate_skill_cmd.finish("请提供要停用的 SKILL 名称，例如：#停用技能 calculate\n使用「#当前技能」查看已激活的 SKILL")
-        return
-    
-    skill_name = args[1].strip()
-    user_id = event.user_id
-    group_id = getattr(event, 'group_id', None)
-    session_id = session_manager.get_session_id(user_id, group_id)
-    
-    success = skill_manager.deactivate_skill(session_id, skill_name)
-    if success:
-        # 同时更新 session
-        session_manager.deactivate_skill(user_id, group_id, skill_name)
-        await deactivate_skill_cmd.finish(f"✅ SKILL '{skill_name}' 已停用")
-    else:
-        await deactivate_skill_cmd.finish(f"SKILL '{skill_name}' 未激活或不存在")
-
-
-deactivate_all_skills_cmd = sv.on_command('#停用所有技能', aliases=('停用全部技能', '关闭所有技能'), only_group=False)
-
-@deactivate_all_skills_cmd.handle()
-async def deactivate_all_skills(bot: Bot, event: Event):
-    """停用所有 SKILL"""
-    if not conf.enable_skills:
-        await deactivate_all_skills_cmd.finish("SKILL 系统未启用")
-        return
-    
-    user_id = event.user_id
-    group_id = getattr(event, 'group_id', None)
-    session_id = session_manager.get_session_id(user_id, group_id)
-    
-    active_skills = skill_manager.get_active_skills(session_id)
-    
-    if not active_skills:
-        await deactivate_all_skills_cmd.finish("当前没有激活的 SKILL")
-        return
-    
-    # 停用所有
-    count = 0
-    for skill_name in list(active_skills):
-        if skill_manager.deactivate_skill(session_id, skill_name):
-            count += 1
-    
-    # 同时更新 session
-    session_manager.deactivate_all_skills(user_id, group_id)
-    
-    await deactivate_all_skills_cmd.finish(f"✅ 已停用 {count} 个 SKILL")
 
 
 # ========== Token 查询命令 ==========
