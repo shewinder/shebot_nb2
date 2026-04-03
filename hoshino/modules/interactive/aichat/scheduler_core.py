@@ -171,8 +171,7 @@ class TaskManager:
         
         logger.info(f"开始执行任务 {task_id}: {task.task_summary}")
         
-        from .chat import call_ai_api_with_tools
-        from .tools import get_available_tools
+        from .session import Session
         from .persona import persona_manager
         
         persona = persona_manager.get_persona(task.user_id, task.group_id)
@@ -202,7 +201,7 @@ class TaskManager:
             return
         
         try:
-            result = await call_ai_api_with_tools(
+            result = await Session.chat_with_messages(
                 messages=messages,
                 api_config=api_config,
                 max_tool_rounds=10,

@@ -400,12 +400,16 @@ class Session:
         # 创建一个临时 Session 来复用其 _chat_with_api 方法
         temp_session = cls("temp_scheduled_task")
         
+        # 将临时 session 放入 context，以便工具调用时可以注入
+        call_context = context.copy() if context else {}
+        call_context['session'] = temp_session
+        
         result = await temp_session._chat_with_api(
             messages=messages,
             api_config=api_config,
             tools=tools,
             max_tool_rounds=max_tool_rounds,
-            context=context,
+            context=call_context,
         )
         
         return {

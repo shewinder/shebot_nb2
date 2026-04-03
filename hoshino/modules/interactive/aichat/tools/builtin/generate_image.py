@@ -187,7 +187,7 @@ def _convert_to_png(image_bytes: bytes) -> bytes:
 )
 async def generate_image(
     prompt: str,
-    session: "Session",
+    session: Optional["Session"],
     image_identifiers: List[str] = None,
     aspect_ratio: str = None,
     size: str = None,
@@ -195,6 +195,10 @@ async def generate_image(
     try:
         image_identifiers = image_identifiers or []
         image_count = len(image_identifiers)
+        
+        # 如果提供了 image_identifiers 但没有 session，无法解析图片
+        if image_count > 0 and not session:
+            return fail("无法解析图片标识符：无可用 Session")
         
         model_entry = _select_image_model(image_count)
         if not model_entry:
@@ -227,6 +231,9 @@ async def generate_image(
                 aspect_ratio=aspect_ratio, size=size
             )
         else:
+            if not session:
+                return fail("编辑图片需要提供图片标识符，但当前无可用 Session")
+            
             image_urls = []
             for identifier in image_identifiers:
                 image_data = session.resolve_image_identifier(identifier)
@@ -252,19 +259,19 @@ async def generate_image(
         
         logger.info(f"成功生成/编辑 {len(urls)} 张图片")
         
-        # 存储图片到 session
+        # 存储图片到 session（如果 session 存在）
         identifiers = []
-        for url in urls:
-            identifier = session.store_ai_image(url)
-            identifiers.append(identifier)
-            logger.info(f"generate_image: 存储 AI 图片 {identifier}")
+        if session:
+            for url in urls:
+                identifier = session.store_ai_image(url)
+                identifiers.append(identifier)
+                logger.info(f"generate_image: 存储 AI 图片 {identifier}")
+        else:
+            logger.debug("generate_image: 无 session，跳过图片存储")
         
         # 构造 content：描述性文字，不包含标识符（避免 AI 在回复中输出标识符）
         # 标识符通过 metadata 传给 AI，让 AI 知道可以用什么引用
-        if identifiers:
-            content = f"已成功生成 {len(identifiers)} 张图片。"
-        else:
-            content = f"已成功生成 {len(urls)} 张图片"
+        content = f"已成功生成 {len(urls)} 张图片"
         
         return ok(
             content,
