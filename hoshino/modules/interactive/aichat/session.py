@@ -116,7 +116,26 @@ class Session:
         
         return None
     
+    @staticmethod
+    def build_image_rules_prompt() -> str:
+        """构建图片发送规则提示（固定内容，用于系统消息）"""
+        return """
+【图片发送规则】
+当需要向用户展示图片时，请遵循以下规则：
+1. 在回复文本中直接写出图片标识符（如 <user_image_1> 或 <ai_image_1>）
+2. 系统会自动检测标识符、发送对应图片，并将标识符从用户看到的文本中移除
+3. 正确示例：
+   你回复："这是<user_image_1>，一只可爱的猫"
+   用户看到：[图片] + "这是一只可爱的猫"
+4. 错误示例（不要这样做）：
+   "这是你发的图片"（没有标识符，用户看不到图片）
+   "图片在这：<user_image_1>"（标识符会被移除，露出空白）
+5. generate_image/edit_image 工具的 image_identifiers 参数仍可使用这些标识符
+【规则结束】
+"""
+    
     def build_image_list_prompt(self) -> str:
+        """构建可用图片列表提示（动态内容，附加到用户消息）"""
         has_images = self._user_images or self._ai_images
         if not has_images:
             return ""
@@ -124,27 +143,15 @@ class Session:
         lines = [
             "",
             "=" * 40,
-            "【系统内部信息：可用图片列表】",
-            "=" * 40,
-            "",
-            "⚠️ 严格规则（必须遵守）：",
-            "1. 以下标识符仅用于调用 generate_image/edit_image 工具时的参数",
-            "2. 绝对禁止在回复中输出这些标识符给用户",
-            "3. 如果需要提及图片，请用文字描述（如\"刚才生成的图片\"、\"你发的第一张图\"）",
-            "4. 违规输出会被系统过滤，影响回复质量",
-            "",
-            "可用图片标识符：",
+            "【当前可用图片】",
         ]
         
         if self._user_images:
-            lines.append("  用户图片：" + ", ".join(self._user_images.keys()))
+            lines.append("用户图片：" + ", ".join(self._user_images.keys()))
         if self._ai_images:
-            lines.append("  AI生成的图片：" + ", ".join(self._ai_images.keys()))
-
+            lines.append("AI图片：" + ", ".join(self._ai_images.keys()))
+        
         lines.extend([
-            "",
-            "=" * 40,
-            "【系统信息结束】",
             "=" * 40,
             ""
         ])
@@ -279,6 +286,10 @@ class Session:
         # 工具提示
         tool_hint = "<instructions>\n你可以调用 get_current_time 工具获取当前准确时间。\n</instructions>"
         system_content = f"{system_content}\n\n{tool_hint}" if system_content else tool_hint
+        
+        # 图片发送规则（固定内容，提高缓存利用率）
+        image_rules = self.build_image_rules_prompt()
+        system_content = f"{system_content}\n\n{image_rules}"
         
         # SKILL 内容注入
         if conf.enable_skills:
@@ -544,7 +555,6 @@ class Session:
                 "tool_call_id": tool_id,
                 "role": "tool",
                 "content": json.dumps({"success": False, "error": "参数解析失败"}, ensure_ascii=False),
-                "_image_urls": []
             }
         
         # 获取工具函数
@@ -555,7 +565,6 @@ class Session:
                 "tool_call_id": tool_id,
                 "role": "tool",
                 "content": json.dumps({"success": False, "error": f"未知工具: {function_name}"}, ensure_ascii=False),
-                "_image_urls": []
             }
         
         # 注入上下文参数
@@ -577,11 +586,10 @@ class Session:
             
             success = result.get("success", False)
             content = result.get("content", "")
-            images = result.get("images", [])
             error = result.get("error")
             metadata = result.get("metadata", {})
             
-            # 简化日志中的图片数据
+            # 简化日志中的图片数据（如果 content 中包含 base64）
             if "data:image" in content:
                 import re
                 pattern = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}'
@@ -603,7 +611,6 @@ class Session:
                 "tool_call_id": tool_id,
                 "role": "tool",
                 "content": json.dumps(content_for_ai, ensure_ascii=False),
-                "_image_urls": images
             }
             
         except Exception as e:
@@ -612,7 +619,6 @@ class Session:
                 "tool_call_id": tool_id,
                 "role": "tool",
                 "content": json.dumps({"success": False, "error": str(e)}, ensure_ascii=False),
-                "_image_urls": []
             }
 
     async def _chat_with_api(

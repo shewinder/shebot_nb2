@@ -9,36 +9,43 @@ class ToolResult(TypedDict, total=False):
     
     使用辅助函数 ok() 和 fail() 创建，避免手写重复字典
     
+    图片发送机制：在 content 中包含图片标识符（如 <ai_image_1>），
+    系统会自动识别并发送对应图片。
+    
     Example:
-        return ok("图片已生成", images=[url], metadata={"id": 1})
+        return ok("图片已生成 <ai_image_1>", metadata={"id": 1})
         return fail("API 调用失败")
     """
     success: bool
     content: str
-    images: List[str]
     error: Optional[str]
     metadata: Dict[str, Any]
 
 
-def ok(content: str, images: Optional[List[str]] = None, metadata: Optional[Dict[str, Any]] = None) -> ToolResult:
+def ok(content: str, metadata: Optional[Dict[str, Any]] = None) -> ToolResult:
     """创建成功的工具返回结果
     
     Args:
-        content: 给 AI 看的结果描述
-        images: 图片 URL 列表（可选）
+        content: 给 AI 看的结果描述。如需发送图片，请在 content 中包含标识符
+                （如 "已生成图片 <ai_image_1>"），系统会自动识别并发送。
         metadata: 额外元数据（可选）
         
     Returns:
         ToolResult 字典
         
     Example:
+        # 在 content 中包含标识符来发送图片
         return ok("已成功生成图片 <ai_image_1>")
+        
+        # 多个图片
+        return ok("生成了两张图片：<ai_image_1> 和 <ai_image_2>")
+        
+        # 带元数据
         return ok("任务已创建", metadata={"task_id": "xxx"})
     """
     return {
         "success": True,
         "content": content,
-        "images": images or [],
         "error": None,
         "metadata": metadata or {}
     }

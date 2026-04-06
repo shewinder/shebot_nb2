@@ -269,13 +269,15 @@ async def generate_image(
         else:
             logger.debug("generate_image: 无 session，跳过图片存储")
         
-        # 构造 content：描述性文字，不包含标识符（避免 AI 在回复中输出标识符）
-        # 标识符通过 metadata 传给 AI，让 AI 知道可以用什么引用
-        content = f"已成功生成 {len(urls)} 张图片"
+        # 构造 content：包含标识符，让 AI 知道可以在回复中引用
+        # AI 会在后续回复中使用这些标识符来触发图片发送
+        if identifiers:
+            content = f"已成功生成 {len(urls)} 张图片：{', '.join(identifiers)}"
+        else:
+            content = f"已成功生成 {len(urls)} 张图片"
         
         return ok(
             content,
-            images=urls,
             metadata={
                 "identifiers": identifiers,
                 "model": target_model,

@@ -25,6 +25,9 @@ conf = Config.get_instance('aichat')
 CHOICES_PATTERN = re.compile(r'\[CHOICES\](.*?)\[/CHOICES\]', re.DOTALL)
 CHOICE_ITEM_PATTERN = re.compile(r'^(\d+)\.\s*(.+)$', re.MULTILINE)
 
+# 图片标识符正则表达式
+IMAGE_IDENTIFIER_PATTERN = re.compile(r'<(user_image_\d+|ai_image_\d+)>')
+
 
 def parse_choices_from_response(response: str) -> Tuple[str, Dict[int, str]]:
     choices_dict = {}
@@ -104,20 +107,71 @@ async def download_image_to_base64(image_url: str) -> Optional[str]:
         return None
 
 
+async def send_image_by_identifier(
+    bot: Bot,
+    event: Event,
+    identifier: str,
+    session: Session,
+) -> bool:
+    """通过标识符发送图片
+    
+    支持格式：<user_image_N>, <ai_image_N>（带或不带尖括号）
+    """
+    # 标准化标识符（确保有尖括号）
+    if not identifier.startswith('<'):
+        identifier = f"<{identifier}>"
+    
+    # 解析标识符获取数据
+    image_data = session.resolve_image_identifier(identifier)
+    if not image_data:
+        logger.warning(f"图片标识符未找到: {identifier}")
+        return False
+    
+    try:
+        if image_data.startswith("data:image"):
+            # Base64 图片
+            base64_data = image_data.split(",", 1)[1]
+            img_bytes = base64.b64decode(base64_data)
+            await bot.send(event, MessageSegment.image(file=img_bytes))
+            logger.info(f"已发送标识符图片 [{identifier}], 大小: {len(img_bytes)} bytes")
+        elif image_data.startswith(("http://", "https://")):
+            # URL 图片
+            from hoshino.sres import Res
+            img_seg = await Res.image_from_url(image_data)
+            await bot.send(event, img_seg)
+            logger.info(f"已发送标识符图片 [{identifier}], URL: {image_data[:50]}...")
+        else:
+            logger.warning(f"未知的图片数据格式: {identifier}")
+            return False
+        return True
+    except Exception as e:
+        logger.exception(f"发送标识符图片失败 [{identifier}]: {e}")
+        return False
+
+
 async def send_response(
     bot: Bot,
     event: Event,
     content: str,
+    session: Session,
     enable_markdown: bool = False,
     markdown_min_length: int = 100,
 ) -> bool:
-    """统一发送 AI 回复内容，支持 Markdown 渲染和图片提取"""
+    """统一发送 AI 回复内容，支持 Markdown 渲染、图片提取和图片标识符"""
     if not content or not content.strip():
         return False
     
     text = content.strip()
     
-    # 尝试 Markdown 渲染
+    # 第一步：处理图片标识符（如 <user_image_1>, <ai_image_1>）
+    image_identifiers = IMAGE_IDENTIFIER_PATTERN.findall(text)
+    if image_identifiers:
+        for identifier in image_identifiers:
+            await send_image_by_identifier(bot, event, identifier, session)
+        # 从文本中移除标识符
+        text = IMAGE_IDENTIFIER_PATTERN.sub('', text).strip()
+    
+    # 第二步：尝试 Markdown 渲染（如果文本足够长）
     if enable_markdown and len(text) >= markdown_min_length:
         try:
             img_bytes = await render_text_if_markdown(text, min_length=markdown_min_length)
@@ -128,7 +182,7 @@ async def send_response(
         except Exception as render_err:
             logger.warning(f"Markdown 渲染失败: {render_err}")
     
-    # 提取并发送图片 URL
+    # 第三步：提取并发送 Markdown 图片 URL
     from .md_render import extract_image_urls
     image_urls = extract_image_urls(text)
     
@@ -144,8 +198,9 @@ async def send_response(
             await bot.send(event, text_content)
         return True
     
-    # 纯文本发送
-    await bot.send(event, text)
+    # 第四步：发送纯文本（如果有内容）
+    if text:
+        await bot.send(event, text)
     return True
 
 
@@ -251,7 +306,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
     async def on_content(content: str):
         if content and content.strip():
             await send_response(
-                bot, event, content,
+                bot, event, content, session,
                 enable_markdown=conf.enable_markdown_render,
                 markdown_min_length=conf.markdown_min_length
             )
@@ -264,27 +319,8 @@ async def handle_ai_chat(bot: Bot, event: Event):
         on_content=on_content,
     )
     
-    # 处理工具图片输出
-    for tool_result in api_result.tool_results:
-        image_urls = tool_result["result"].get("_image_urls", [])
-        try:
-            for i, url in enumerate(image_urls):
-                try:
-                    if url.startswith("data:image"):
-                        base64_data = url.split(",", 1)[1]
-                        img_bytes = base64.b64decode(base64_data)
-                        await bot.send(event, MessageSegment.image(file=img_bytes))
-                        logger.info(f"已发送工具图片 [{i}], 大小: {len(img_bytes)} bytes")
-                    elif url.startswith("http://") or url.startswith("https://"):
-                        from hoshino.sres import Res
-                        img_seg = await Res.image_from_url(url)
-                        await bot.send(event, img_seg)
-                        logger.info(f"已发送工具图片 [{i}], URL: {url[:50]}...")
-                except Exception as e:
-                    logger.exception(f"发送工具图片失败 [{i}]: {e}")
-                    
-        except Exception as e:
-            logger.warning(f"处理工具图片失败: {e}")
+    # 工具图片输出已由 send_response 通过标识符处理，无需重复发送
+    # 注意：旧版 _image_urls 机制已废弃，请使用标识符机制 <ai_image_N>
     
     if api_result.error and not api_result.content:
         await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result.error}")
@@ -315,7 +351,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
             return
         
         await send_response(
-            bot, event, display_response,
+            bot, event, display_response, session,
             enable_markdown=conf.enable_markdown_render,
             markdown_min_length=conf.markdown_min_length
         )
