@@ -13,6 +13,7 @@ class MCPServerConfig(BaseModel):
     args: List[str] = []              # stdio 模式：参数
     url: Optional[str] = None         # sse/http 模式：URL
     env: Dict[str, str] = {}          # 环境变量
+    headers: Dict[str, str] = {}      # HTTP 请求头，用于鉴权（如 Authorization）
     enabled: bool = True              # 是否启用
 
 

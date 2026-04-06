@@ -130,7 +130,7 @@ class MCPClient:
             logger.info(f"SSE URL: {self.config.url}")
             
             # 创建 SSE 客户端
-            self._client_ctx = sse_client(self.config.url)
+            self._client_ctx = sse_client(self.config.url, headers=self.config.headers)
             self._read_stream, self._write_stream = await self._client_ctx.__aenter__()
             
             # 创建会话
@@ -165,7 +165,7 @@ class MCPClient:
             
             # 创建 HTTP 客户端
             # streamable_http_client 返回三元组: (read_stream, write_stream, get_session_id)
-            self._client_ctx = streamable_http_client(self.config.url)
+            self._client_ctx = streamable_http_client(self.config.url, headers=self.config.headers)
             self._read_stream, self._write_stream, self._get_session_id = await self._client_ctx.__aenter__()
             
             # 创建会话
