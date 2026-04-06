@@ -11,6 +11,7 @@ from loguru import logger
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
+import httpx
 
 from .config import MCPServerConfig
 
@@ -165,7 +166,9 @@ class MCPClient:
             
             # 创建 HTTP 客户端
             # streamable_http_client 返回三元组: (read_stream, write_stream, get_session_id)
-            self._client_ctx = streamable_http_client(self.config.url, headers=self.config.headers)
+            # 使用自定义 headers 创建 httpx 客户端
+            http_client = httpx.AsyncClient(headers=self.config.headers) if self.config.headers else None
+            self._client_ctx = streamable_http_client(self.config.url, http_client=http_client)
             self._read_stream, self._write_stream, self._get_session_id = await self._client_ctx.__aenter__()
             
             # 创建会话
