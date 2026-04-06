@@ -177,26 +177,6 @@ class TaskManager:
         from .session import Session
         from .persona import persona_manager
         
-        persona = persona_manager.get_persona(task.user_id, task.group_id)
-        
-        if persona:
-            system_content = f"{persona}\n\n你正在执行一个定时任务。请根据用户的任务描述执行操作，"
-            system_content += "你可以调用任何可用工具来完成任务。请尽可能详细地完成任务，并在完成后总结执行结果。"
-        else:
-            system_content = "你是一个任务执行助手。请根据用户的任务描述执行操作。\n"
-            system_content += "你可以调用任何可用工具来完成任务。请尽可能详细地完成任务，并在完成后总结执行结果。"
-        
-        messages = [
-            {
-                "role": "system",
-                "content": system_content
-            },
-            {
-                "role": "user",
-                "content": task.raw_description
-            }
-        ]
-        
         api_config = api_manager.get_api_config()
         if not api_config:
             logger.error("API 未配置，无法执行任务")
@@ -204,16 +184,27 @@ class TaskManager:
             return
         
         try:
-            result = await Session.chat_with_messages(
-                messages=messages,
-                api_config=api_config,
-                max_tool_rounds=10,
-                context={"scheduled_task": task}
-            )
+            # 构建 session_id（复用 chat 的环境信息解析逻辑）
+            if task.group_id:
+                session_id = f"group_{task.group_id}_user_{task.user_id}"
+            else:
+                session_id = f"private_{task.user_id}"
+            
+            # 获取 persona
+            persona = persona_manager.get_persona(task.user_id, task.group_id)
+            
+            # 创建临时 Session（复用 chat 的全部逻辑：system 构建、skill、图片规则）
+            temp_session = Session(session_id, persona=persona)
+            
+            # 添加任务描述作为用户消息
+            temp_session.add_message("user", task.raw_description)
+            
+            # 调用 chat 执行对话（event=None，复用 session 的环境信息）
+            result = await temp_session.chat(api_config)
             
             task.execution_count += 1
             task.last_execution = datetime.now()
-            task.last_result = result.get("content", "")[:500] if result.get("content") else None
+            task.last_result = result.content[:500] if result.content else None
             task.updated_at = datetime.now()
             
             if task.is_one_time:
@@ -222,17 +213,16 @@ class TaskManager:
             else:
                 self.save_tasks()
             
-            content = result.get("content", "任务执行完成，但没有返回内容")
-            await self._send_result(task, content)
+            content = result.content if result.content else "任务执行完成，但没有返回内容"
+            await self._send_result(task, content, temp_session)
             
             if not task.is_one_time:
                 logger.info(f"任务 {task_id} 执行完成")
             
         except Exception as e:
             logger.exception(f"任务 {task_id} 执行异常: {e}")
-            await self._send_result(task, f"任务执行异常: {str(e)[:200]}")
     
-    async def _send_result(self, task: ScheduledTask, content: str):
+    async def _send_result(self, task: ScheduledTask, content: str, session):
         try:
             bots = get_bot_list()
             if not bots:
@@ -244,9 +234,6 @@ class TaskManager:
             logger.debug(f"[Scheduler] 发送任务结果: task_id={task.id}, silent={task.silent}, mention_user={task.mention_user}")
             
             # 构建完整消息（处理图片标识符）
-            from .session import session_manager  # 函数内导入避免循环导入
-            
-            session = session_manager.get_session(task.user_id, task.group_id)
             content_messages = await session.build_message(content)
             
             # 构建任务报告框架
