@@ -1,8 +1,9 @@
 """Session 管理模块"""
 import json
+import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
 
 from loguru import logger
 
@@ -11,6 +12,9 @@ from .skills import skill_manager
 from .tools import get_tool_function
 from .tools.registry import get_injectable_params
 from hoshino.util import aiohttpx, log_json, truncate_log
+
+if TYPE_CHECKING:
+    from hoshino import Message, MessageSegment
 
 conf = Config.get_instance('aichat')
 
@@ -115,6 +119,113 @@ class Session:
             return self._ai_images[identifier]
         
         return None
+    
+    async def get_image_segment(self, identifier: str) -> Optional["MessageSegment"]:
+        """根据标识符获取图片 MessageSegment
+        
+        这是一个便捷方法，用于复用图片发送逻辑。
+        
+        Args:
+            identifier: 图片标识符，如 "<ai_image_1>" 或 "ai_image_1"
+        
+        Returns:
+            MessageSegment.image 或 None（如果标识符无效）
+        """
+        from hoshino import MessageSegment
+        
+        image_data = self.resolve_image_identifier(identifier)
+        if not image_data:
+            return None
+        
+        try:
+            if image_data.startswith("data:image"):
+                import base64
+                base64_data = image_data.split(",", 1)[1]
+                img_bytes = base64.b64decode(base64_data)
+                return MessageSegment.image(file=img_bytes)
+            elif image_data.startswith(("http://", "https://")):
+                from hoshino.sres import Res
+                return await Res.image_from_url(image_data)
+        except Exception:
+            # 图片解析失败，返回 None 让调用方处理
+            pass
+        
+        return None
+    
+    async def build_message(
+        self,
+        content: str,
+        enable_markdown: bool = False,
+        markdown_min_length: int = 100
+    ) -> "List[Message]":
+        """构建消息对象列表
+        
+        根据是否启用 Markdown，采用不同的处理策略：
+        
+        **未启用 Markdown**：图文混合，标识符替换为图片
+        - 返回单个 Message，包含文本和图片段
+        
+        **启用 Markdown**：分离处理
+        - 文本部分走 Markdown 渲染（返回渲染后的图片或原文本）
+        - 标识符图片单独提取，各自作为独立 Message
+        - 返回 Message 列表
+        
+        Args:
+            content: 原始内容，可能包含图片标识符
+            enable_markdown: 是否启用 Markdown 渲染
+            markdown_min_length: Markdown 渲染的最小文本长度
+        
+        Returns:
+            Message 列表（未启用 Markdown 时长度为1，启用时可能多个）
+        """
+        # 函数内导入避免循环导入（session 是底层模块）
+        from hoshino import Message, MessageSegment
+        
+        IMAGE_PATTERN = re.compile(r'<(user_image_\d+|ai_image_\d+)>')
+        identifiers = IMAGE_PATTERN.findall(content)
+        clean_text = IMAGE_PATTERN.sub('', content).strip()
+        
+        # 获取所有图片段
+        image_segments = []
+        for identifier in identifiers:
+            img_seg = await self.get_image_segment(identifier)
+            if img_seg:
+                image_segments.append(img_seg)
+        
+        if not enable_markdown:
+            # 模式1：图文混合，单个 Message（使用 + 拼接）
+            msg = Message()
+            if clean_text:
+                msg = MessageSegment.text(clean_text)
+            for img_seg in image_segments:
+                msg = msg + img_seg if msg else img_seg
+            return [msg] if msg else []
+        
+        # 模式2：启用 Markdown，分离处理
+        messages = []
+        
+        # 处理文本（Markdown 渲染）
+        if clean_text:
+            text_msg = None
+            if len(clean_text) >= markdown_min_length:
+                try:
+                    from .md_render import render_text_if_markdown
+                    img_bytes = await render_text_if_markdown(clean_text, min_length=markdown_min_length)
+                    if img_bytes:
+                        text_msg = MessageSegment.image(file=img_bytes)
+                except Exception:
+                    pass
+            
+            if not text_msg:
+                text_msg = MessageSegment.text(clean_text)
+            
+            messages.append(Message(text_msg))
+        
+        # 每个图片作为独立 Message
+        for img_seg in image_segments:
+            messages.append(Message(img_seg))
+        
+        return messages
     
     @staticmethod
     def build_image_rules_prompt() -> str:

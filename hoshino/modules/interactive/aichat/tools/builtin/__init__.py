@@ -11,5 +11,6 @@ from . import service_manage
 from . import skill_tools
 from . import web_search
 from . import execute_script
+from . import broadcast
 
-__all__ = ["generate_image", "scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script"]
+__all__ = ["generate_image", "scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "broadcast"]

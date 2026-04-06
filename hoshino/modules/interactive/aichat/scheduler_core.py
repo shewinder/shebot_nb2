@@ -6,17 +6,20 @@ import re
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 from pydantic import BaseModel
 
 from hoshino.schedule import scheduler, add_job
-from hoshino import get_bot_list, MessageSegment
+from hoshino import get_bot_list, Message, MessageSegment
 
 from .config import Config
 from .api import api_manager
 from hoshino import userdata_dir
+
+if TYPE_CHECKING:
+    from .session import Session
 
 conf = Config.get_instance('aichat')
 aichat_data_dir: Path = userdata_dir.joinpath('aichat')
@@ -240,30 +243,44 @@ class TaskManager:
             
             logger.debug(f"[Scheduler] 发送任务结果: task_id={task.id}, silent={task.silent}, mention_user={task.mention_user}")
             
-            if task.silent:
-                message = content[:1000]
-                logger.debug(f"[Scheduler] 静默模式，直接发送内容")
-            else:
-                msg_lines = [
-                    "📋 定时任务执行结果",
-                    f"任务: {task.task_summary[:50]}{'...' if len(task.task_summary) > 50 else ''}",
-                    "",
-                    f"{content[:800]}{'...' if len(content) > 800 else ''}"
-                ]
-                message = "\n".join(msg_lines)
+            # 构建完整消息（处理图片标识符）
+            from .session import session_manager  # 函数内导入避免循环导入
             
-            if task.mention_user and task.group_id:
+            session = session_manager.get_session(task.user_id, task.group_id)
+            content_messages = await session.build_message(content)
+            
+            # 构建任务报告框架
+            if task.silent:
+                # 静默模式：直接发送内容消息
+                final_messages = content_messages
+            else:
+                # 非静默模式：添加报告框架到第一条消息
+                report_text = f"📋 定时任务执行结果\n任务: {task.task_summary[:50]}{'...' if len(task.task_summary) > 50 else ''}\n\n"
+                report_msg = MessageSegment.text(report_text)
+                
+                final_messages = []
+                for i, content_msg in enumerate(content_messages):
+                    if i == 0:
+                        # 第一条消息添加报告框架（使用 + 拼接）
+                        final_messages.append(report_msg + content_msg)
+                    else:
+                        final_messages.append(content_msg)
+            
+            # 添加 @ 提醒（只在第一条消息添加，使用 + 拼接）
+            if task.mention_user and task.group_id and final_messages:
                 try:
-                    message = MessageSegment.at(task.user_id) + " " + message
+                    at_prefix = MessageSegment.at(task.user_id) + MessageSegment.text(" ")
+                    final_messages[0] = at_prefix + final_messages[0]
                 except Exception as e:
                     logger.warning(f"构造 @ 消息失败: {e}")
             
+            # 发送所有消息
             if task.group_id:
-                # 群聊场景：发送到群
-                await bot.send_group_msg(group_id=task.group_id, message=message)
+                for msg in final_messages:
+                    await bot.send_group_msg(group_id=task.group_id, message=msg)
             else:
-                # 私聊场景：私聊反馈
-                await bot.send_private_msg(user_id=task.user_id, message=message)
+                for msg in final_messages:
+                    await bot.send_private_msg(user_id=task.user_id, message=msg)
                 
         except Exception as e:
             logger.exception(f"发送任务结果失败: {e}")

@@ -6,15 +6,13 @@ import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 from loguru import logger
 
-from io import BytesIO
-
-from hoshino import Bot, Event, MessageSegment
+from hoshino import Bot, Event
 from hoshino.util import aiohttpx, get_event_imageurl, truncate_log, log_json
 from hoshino.util.message_util import extract_images_from_reply
 
 from .api import api_manager
 from .config import Config
-from .md_render import render_text_if_markdown, strip_thinking_tags, MD_IMAGE_PATTERN
+from .md_render import strip_thinking_tags
 from .persona import persona_manager
 from .session import session_manager, ChatResult, Session
 
@@ -24,9 +22,6 @@ conf = Config.get_instance('aichat')
 # 选项标记的正则表达式
 CHOICES_PATTERN = re.compile(r'\[CHOICES\](.*?)\[/CHOICES\]', re.DOTALL)
 CHOICE_ITEM_PATTERN = re.compile(r'^(\d+)\.\s*(.+)$', re.MULTILINE)
-
-# 图片标识符正则表达式
-IMAGE_IDENTIFIER_PATTERN = re.compile(r'<(user_image_\d+|ai_image_\d+)>')
 
 
 def parse_choices_from_response(response: str) -> Tuple[str, Dict[int, str]]:
@@ -107,48 +102,6 @@ async def download_image_to_base64(image_url: str) -> Optional[str]:
         return None
 
 
-async def send_image_by_identifier(
-    bot: Bot,
-    event: Event,
-    identifier: str,
-    session: Session,
-) -> bool:
-    """通过标识符发送图片
-    
-    支持格式：<user_image_N>, <ai_image_N>（带或不带尖括号）
-    """
-    # 标准化标识符（确保有尖括号）
-    if not identifier.startswith('<'):
-        identifier = f"<{identifier}>"
-    
-    # 解析标识符获取数据
-    image_data = session.resolve_image_identifier(identifier)
-    if not image_data:
-        logger.warning(f"图片标识符未找到: {identifier}")
-        return False
-    
-    try:
-        if image_data.startswith("data:image"):
-            # Base64 图片
-            base64_data = image_data.split(",", 1)[1]
-            img_bytes = base64.b64decode(base64_data)
-            await bot.send(event, MessageSegment.image(file=img_bytes))
-            logger.info(f"已发送标识符图片 [{identifier}], 大小: {len(img_bytes)} bytes")
-        elif image_data.startswith(("http://", "https://")):
-            # URL 图片
-            from hoshino.sres import Res
-            img_seg = await Res.image_from_url(image_data)
-            await bot.send(event, img_seg)
-            logger.info(f"已发送标识符图片 [{identifier}], URL: {image_data[:50]}...")
-        else:
-            logger.warning(f"未知的图片数据格式: {identifier}")
-            return False
-        return True
-    except Exception as e:
-        logger.exception(f"发送标识符图片失败 [{identifier}]: {e}")
-        return False
-
-
 async def send_response(
     bot: Bot,
     event: Event,
@@ -161,47 +114,19 @@ async def send_response(
     if not content or not content.strip():
         return False
     
-    text = content.strip()
+    # 构建消息列表（根据 Markdown 设置采用不同策略）
+    messages = await session.build_message(
+        content,
+        enable_markdown=enable_markdown,
+        markdown_min_length=markdown_min_length
+    )
     
-    # 第一步：处理图片标识符（如 <user_image_1>, <ai_image_1>）
-    image_identifiers = IMAGE_IDENTIFIER_PATTERN.findall(text)
-    if image_identifiers:
-        for identifier in image_identifiers:
-            await send_image_by_identifier(bot, event, identifier, session)
-        # 从文本中移除标识符
-        text = IMAGE_IDENTIFIER_PATTERN.sub('', text).strip()
+    # 逐个发送所有消息
+    for msg in messages:
+        if msg:
+            await bot.send(event, msg)
     
-    # 第二步：尝试 Markdown 渲染（如果文本足够长）
-    if enable_markdown and len(text) >= markdown_min_length:
-        try:
-            img_bytes = await render_text_if_markdown(text, min_length=markdown_min_length)
-            if img_bytes:
-                await bot.send(event, MessageSegment.image(BytesIO(img_bytes)))
-                logger.info("Markdown 渲染成功，发送渲染后的图片")
-                return True
-        except Exception as render_err:
-            logger.warning(f"Markdown 渲染失败: {render_err}")
-    
-    # 第三步：提取并发送 Markdown 图片 URL
-    from .md_render import extract_image_urls
-    image_urls = extract_image_urls(text)
-    
-    if image_urls:
-        for url in image_urls:
-            try:
-                await bot.send(event, MessageSegment.image(url))
-            except Exception as img_err:
-                logger.error(f"发送图片失败: {url}, 错误: {img_err}")
-        
-        text_content = MD_IMAGE_PATTERN.sub('', text).strip()
-        if text_content:
-            await bot.send(event, text_content)
-        return True
-    
-    # 第四步：发送纯文本（如果有内容）
-    if text:
-        await bot.send(event, text)
-    return True
+    return len(messages) > 0
 
 
 async def handle_ai_chat(bot: Bot, event: Event):
