@@ -13,5 +13,6 @@ from . import web_search
 from . import execute_script
 from . import broadcast
 from . import fetch_url
+from . import send_images
 
-__all__ = ["generate_image", "scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "broadcast", "fetch_url"]
+__all__ = ["generate_image", "scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "broadcast", "fetch_url", "send_images"]
