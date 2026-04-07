@@ -155,12 +155,20 @@ async def activate_skill(
             if skill.metadata.allowed_tools:
                 result_lines.append(f"🔧 可用工具：{', '.join(skill.metadata.allowed_tools)}")
             
-            # 添加指导内容预览（前 200 字符）
+            # 添加完整的指导内容，让 AI 在当前轮次就能看到
             if content:
-                preview = content[:200].replace('\n', ' ')
-                if len(content) > 200:
-                    preview += "..."
-                result_lines.append(f"\n📋 指导内容预览：{preview}")
+                result_lines.extend([
+                    f"",
+                    f"=" * 40,
+                    f"【{skill_name} 指导内容】",
+                    f"=" * 40,
+                    f"",
+                    content,
+                    f"",
+                    f"=" * 40,
+                    f"【指导内容结束】",
+                    f"=" * 40,
+                ])
             
             return ok(
                 "\n".join(result_lines),

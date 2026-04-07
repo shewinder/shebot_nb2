@@ -348,6 +348,8 @@ class Session:
         Args:
             event: 消息事件（优先使用），如为 None 则使用 session 解析的值
         """
+        from datetime import datetime
+        
         attrs = []
         
         # 优先从 event 获取，否则使用 session 解析的值
@@ -363,8 +365,9 @@ class Session:
         if group_id:
             attrs.append(f'group_id="{group_id}"')
         
-        if not attrs:
-            return ""
+        # 当前日期（避免AI使用错误日期，只注入日期不影响缓存）
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        attrs.append(f'current_date="{current_date}"')
         
         return f'<context type="environment" {" ".join(attrs)} />'
     
@@ -389,7 +392,7 @@ class Session:
             choice_prompt = CHOICE_MODE_PROMPT_TEMPLATE.format(guideline_section=guideline_section)
             system_content = f"{system_content}\n\n{choice_prompt}" if system_content else choice_prompt
         
-        # 环境信息（从 event 构建）
+        # 环境信息（从 event 构建，包含当前日期时间）
         env_info = self._build_env_info(event)
         if env_info:
             system_content = f"{system_content}\n\n{env_info}" if system_content else env_info
@@ -407,10 +410,19 @@ class Session:
             skill_summary = skill_manager.get_metadata_summary()
             if skill_summary:
                 system_content = f"{system_content}\n\n{skill_summary}" if system_content else skill_summary
+                logger.debug(f"[SKILL] 可用 SKILL 列表已注入")
+            
+            # 获取已激活的 SKILL
+            active_skills = skill_manager.get_active_skill_names(self.session_id)
+            logger.info(f"[SKILL] 当前会话已激活 SKILL: {active_skills if active_skills else '无'}")
             
             skill_content = skill_manager.get_injected_content(self.session_id)
             if skill_content:
+                content_preview = skill_content[:500] + "..." if len(skill_content) > 500 else skill_content
+                logger.info(f"[SKILL] 注入内容预览:\n{content_preview}")
                 system_content = f"{system_content}\n\n{skill_content}" if system_content else skill_content
+            else:
+                logger.info(f"[SKILL] 没有需要注入的 SKILL 内容")
         
         # 组装消息列表
         non_system_msgs = [msg for msg in self.messages if msg.get("role") != "system"]
@@ -419,6 +431,9 @@ class Session:
             messages.append({"role": "system", "content": system_content})
             # 同步更新 session.messages，供 web 端调试查看
             self.messages = [{"role": "system", "content": system_content}] + non_system_msgs
+            # 调试日志：记录完整系统消息（截断）
+            system_log = system_content[:2000] + "...[截断]" if len(system_content) > 2000 else system_content
+            logger.debug(f"[SKILL] 完整系统消息:\n{system_log}")
         else:
             self.messages = non_system_msgs
         
