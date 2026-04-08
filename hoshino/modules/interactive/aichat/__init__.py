@@ -1,4 +1,5 @@
 """AI Chat 插件"""
+import asyncio
 from typing import Tuple, List, Optional, Set
 from loguru import logger
 from hoshino import Bot, Event, Service
@@ -49,6 +50,9 @@ async def init_mcp_servers():
                 logger.info(f"MCP server {server_config.id} 启动成功")
             else:
                 logger.warning(f"MCP server {server_config.id} 启动失败")
+        except asyncio.CancelledError:
+            # 任务被取消（如超时），记录警告但不阻塞启动
+            logger.warning(f"MCP server {server_config.id} 连接被取消（可能超时或服务器不可达）")
         except Exception as e:
             logger.exception(f"初始化 MCP server {server_config.id} 失败: {e}")
 

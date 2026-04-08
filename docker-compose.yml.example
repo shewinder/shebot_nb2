@@ -18,7 +18,7 @@ services:
       - browser
     environment:
       # 浏览器服务地址（容器内通信）
-      - BROWSER_WS_URL=ws://localhost:3003/chromium?launch={"headless":false}
+      - BROWSER_WS_URL=ws://browser:3000/chromium?launch={"headless":false}
 
   # QQ 客户端 (PMHQ)
   pmhq:
@@ -106,7 +106,7 @@ services:
       - PW_HEADLESS=true
     # 镜像已自带启动参数: node cli.js --headless --browser chromium --no-sandbox
     # 只需指定端口参数
-    command: ["--port", "8931"]
+    command: ["--allowed-hosts", "*", "--host", "0.0.0.0", "--port", "8931"]
     networks:
       - bot-network
     # 资源限制（可选）
