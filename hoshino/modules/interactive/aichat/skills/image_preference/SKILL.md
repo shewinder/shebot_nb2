@@ -1,9 +1,10 @@
 ---
 name: image_preference
-description: 识别到图片点评或偏好相关意图时激活。场景：1）用户发图并请求点评/分析；2）用户对图片反馈喜欢/不喜欢；3）用户直接声明偏好（如"我喜欢兽耳""不喜欢男同"）
+description: 识别到图片点评、偏好学习或画像查询意图时激活。场景：1）用户发图并请求点评/分析；2）用户对图片反馈喜欢/不喜欢；3）用户查询画像（"我的喜好"/"画像"/"图像偏好"/"喜欢什么"）；4）用户直接声明偏好（"我喜欢兽耳""不喜欢男同"）
 allowed-tools:
   - "read_file"
   - "write_file"
+  - "web_search"
 user-invocable: true
 disable-model_invocation: false
 ---
@@ -71,11 +72,14 @@ disable-model_invocation: false
 
 ## 场景 3: 查看画像
 
-**触发**: "我的喜好"/"画像"/"偏好"
+**触发**: "我的喜好"/"画像"/"偏好"/"图像偏好"/"喜欢什么"
 
 **AI 执行**:
-- `read_file` 读取画像
-- 展示：核心偏好摘要 + 高频标签 + 回避内容
+1. **必须**先调用 `read_file` 读取画像文件（路径: `aichat/preferences/{user_id}.md`）
+2. **等待工具返回后再回复** —— 不要假设没有画像
+3. 展示：核心偏好摘要 + 高频标签 + 回避内容
+
+**注意**: 用户询问画像时，不要直接说"没有"，必须先调用工具确认
 
 ## 场景 4: 直接偏好声明（无需图片）
 
@@ -138,11 +142,14 @@ disable-model_invocation: false
 ## 工具使用
 
 ```python
-# 读取画像
-read_file(path="aichat/preferences/{user_id}.md")
+# 获取用户ID
+user_id = session.user_id
+
+# 读取画像（路径相对于 data 目录）
+read_file(path=f"aichat/preferences/{user_id}.md")
 
 # 写入画像（AI组织完整Markdown）
-write_file(path="aichat/preferences/{user_id}.md", content="...")
+write_file(path=f"aichat/preferences/{user_id}.md", content="...")
 ```
 
 ## 注意事项

@@ -8,7 +8,8 @@ from loguru import logger
 
 from hoshino import Bot, Event
 from hoshino.util import aiohttpx, get_event_imageurl, truncate_log, log_json
-from hoshino.util.message_util import extract_images_from_reply
+from hoshino.util.message_util import extract_images_from_reply, send_group_forward_msg
+from hoshino import MessageSegment
 
 from .api import api_manager
 from .config import Config
@@ -121,12 +122,31 @@ async def send_response(
         markdown_min_length=markdown_min_length
     )
     
-    # 逐个发送所有消息
-    for msg in messages:
-        if msg:
-            await bot.send(event, msg)
+    messages = [m for m in messages if m]
+    if not messages:
+        return False
     
-    return len(messages) > 0
+    group_id: Optional[int] = getattr(event, 'group_id', None)
+    
+    if group_id and len(messages) > 1:
+        try:
+            msg_segments: List[MessageSegment] = []
+            for msg in messages:
+                msg_segments.extend(msg)
+            await send_group_forward_msg(bot, group_id, msg_segments)
+            return True
+        except Exception as e:
+            logger.warning(f"转发消息发送失败，降级为逐条发送: {e}")
+    
+    success_count = 0
+    for i, msg in enumerate(messages):
+        try:
+            await bot.send(event, msg)
+            success_count += 1
+        except Exception as e:
+            logger.error(f"发送第 {i+1}/{len(messages)} 条消息失败: {e}")
+    
+    return success_count > 0
 
 
 async def handle_ai_chat(bot: Bot, event: Event):

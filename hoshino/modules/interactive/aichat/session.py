@@ -193,13 +193,21 @@ class Session:
                 image_segments.append(img_seg)
         
         if not enable_markdown:
-            # 模式1：图文混合，单个 Message（使用 + 拼接）
-            msg = Message()
-            if clean_text:
-                msg = MessageSegment.text(clean_text)
-            for img_seg in image_segments:
-                msg = msg + img_seg if msg else img_seg
-            return [msg] if msg else []
+            # 图片数量较多时(>3张)分批发送，避免QQ协议超时
+            if len(image_segments) > 3:
+                messages = []
+                if clean_text:
+                    messages.append(Message(MessageSegment.text(clean_text)))
+                for img_seg in image_segments:
+                    messages.append(Message(img_seg))
+                return messages
+            else:
+                msg = Message()
+                if clean_text:
+                    msg = MessageSegment.text(clean_text)
+                for img_seg in image_segments:
+                    msg = msg + img_seg if msg else img_seg
+                return [msg] if msg else []
         
         # 模式2：启用 Markdown，分离处理
         messages = []

@@ -4,11 +4,14 @@ AI 工具：批量下载并发送图片
 """
 import base64
 import os
+from io import BytesIO
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
+from PIL import Image
 
 from hoshino.util import aiohttpx
+from hoshino.util.sutil import anti_harmony
 
 from ..registry import tool_registry, ok, fail
 
@@ -16,8 +19,13 @@ if TYPE_CHECKING:
     from ...session import Session
 
 
-async def _download_image_to_base64(image_url: str) -> Optional[str]:
-    """下载图片并转换为 base64 data URL"""
+async def _download_image_to_base64(image_url: str, need_anti_harmony: bool = True) -> Optional[str]:
+    """下载图片并转换为 base64 data URL
+    
+    Args:
+        image_url: 图片 URL
+        need_anti_harmony: 是否需要反和谐处理（默认启用）
+    """
     try:
         resp = await aiohttpx.get(image_url)
         if not resp.ok:
@@ -46,6 +54,23 @@ async def _download_image_to_base64(image_url: str) -> Optional[str]:
                 url_ext = os.path.splitext(image_url.split("?")[0])[1].lower()
                 if url_ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
                     ext = url_ext.lstrip(".")
+        
+        # 反和谐处理
+        if need_anti_harmony:
+            try:
+                img = Image.open(BytesIO(image_data))
+                # 转换为 RGB 模式（去除透明通道，避免部分格式问题）
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img = img.convert('RGB')
+                img = anti_harmony(img)
+                # 重新编码
+                buffer = BytesIO()
+                save_format = 'JPEG' if ext in ['jpg', 'jpeg'] else 'PNG'
+                img.save(buffer, format=save_format, quality=95)
+                image_data = buffer.getvalue()
+                ext = 'jpg' if save_format == 'JPEG' else 'png'
+            except Exception as e:
+                logger.warning(f"反和谐处理失败，使用原图: {e}")
         
         base64_data = base64.b64encode(image_data).decode('utf-8')
         image_url_data = f"data:image/{ext};base64,{base64_data}"
@@ -150,8 +175,7 @@ async def send_images(
             identifiers.append(identifier)
             logger.info(f"图片 {i} 下载成功: {identifier}")
         else:
-            failed_urls.append(url[:80] + "..." if len(url) > 80 else url)
-            logger.warning(f"图片 {i} 下载失败: {url[:80]}...")
+            logger.warning(f"图片 {i} 下载失败: {url}")
     
     if not identifiers:
         return fail(
