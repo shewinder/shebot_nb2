@@ -1,297 +1,92 @@
 ---
 name: pixivrank
-description: 获取 Pixiv 每日排行榜图片，支持基于用户画像的个性化推荐，直接发送图片到聊天
+description: 获取 Pixiv 日榜图片，自动根据用户画像过滤推荐
 allowed-tools:
   - "fetch_url"
   - "send_images"
-  - "web_search"
   - "read_file"
 user-invocable: true
-disable-model-invocation: false
+disable-model_invocation: false
 ---
 
 # Pixiv 日榜 SKILL
 
 ## 功能
 
-帮助用户查看 Pixiv 每日排行榜：
-- 获取普通日榜（day）
-- 获取 R18 日榜（day_r18）
-- **基于用户画像的个性化推荐**（读取偏好，过滤推荐）
-- **直接发送图片到聊天**（使用 `send_images` 工具）
+- 获取 Pixiv 日榜（普通/R18）
+- **自动根据用户画像过滤推荐**（默认行为）
+- 直接发送图片到聊天
 
-**✅ 本 SKILL 支持直接发送图片，无需用户点击链接查看！**
-**✅ 支持个性化推荐，优先展示符合用户喜好的作品！**
+## API
 
-## API 接口（激活后立即阅读此部分）
-
-### ⚠️⚠️⚠️ 关键提醒
-**必须使用以下指定的 API 地址：**
-- ✅ **正确**: `https://api.shewinder.win/pixiv/...`
-- ❌ **错误**: `https://api.pixivic.com/...` (不要用！)
-- ❌ **错误**: 其他任何 Pixiv API
-
-### 1. 获取排行榜列表
-
-**API URL 模板**：
-```
-https://api.shewinder.win/pixiv/rank?date={date}&mode={mode}&num=60
-```
-
-**实际调用示例**（替换为实际日期）：
-```
-https://api.shewinder.win/pixiv/rank?date=2024-01-15&mode=day&num=60
-```
+**日榜接口**：`https://api.shewinder.win/pixiv/rank?date=YYYY-MM-DD&mode=day&num=N`
 
 参数：
-- `date`: 日期格式 `YYYY-MM-DD`，通常使用昨天日期
-- `mode`: 排行榜类型
-  - `day` - 普通日榜
-  - `day_r18` - R18 日榜
-- `num`: 获取数量，默认 60
+- `date`: 昨天日期（YYYY-MM-DD）
+- `mode`: `day` 或 `day_r18`
+- `num`: 获取数量（推荐 30，用于过滤）
 
-返回：JSON 数组，每个元素包含：
-- `id`: 作品 PID
-- `title`: 标题
-- `user.name`: 作者名
-- `user.id`: 作者 ID
-- `tags`: 标签数组
-- `page_count`: 图片张数
-- `urls`: 图片 URL 数组（替换域名使用）
+**图片域名替换**：`i.pximg.net` → `pixiv.shewinder.win`
 
-### 2. 获取作品详情
+## 默认行为：自动根据喜好过滤
 
-**API URL 模板**：
+**所有日榜请求都自动应用此流程**：
+
+1. `read_file` 读取用户画像（路径：`aichat/preferences/{user_id}.md`）
+2. `fetch_url` 获取日榜（num=30，获取更多用于筛选）
+3. 根据画像中的偏好标签，匹配作品的 `tags` 字段
+4. 排除包含回避标签的作品
+5. 选择匹配度最高的 5-6 张发送
+
+**匹配逻辑**：
+- 作品的 `tags` 数组与用户的偏好标签匹配越多，优先级越高
+- 包含用户回避标签的作品直接排除
+- 可参考 `total_bookmarks`（收藏数）作为质量参考
+
+**如果用户画像不存在或为空**：
+- 直接发送热门作品（前 6 张）
+
+## 场景 1：普通日榜
+
+用户说："看看日榜"、"P站排行"
+
+执行：按默认过滤流程，返回匹配用户喜好的作品
+
+回复示例：
 ```
-https://api.shewinder.win/pixiv/illust_detail?illust_id={pid}
-```
+📅 2026-04-06 Pixiv 日榜（已按你的喜好筛选）
 
-**实际调用示例**：
-```
-https://api.shewinder.win/pixiv/illust_detail?illust_id=12345678
-```
-
-返回单个作品的详细信息。
-
-## 图片域名替换
-
-API 返回的图片 URL 域名是 `i.pximg.net`，直接访问会被拒绝。
-需要将域名替换为 `pixiv.shewinder.win` 才能正常访问：
-
-```
-原 URL: https://i.pximg.net/img-original/img/2024/01/01/00/00/00/12345678_p0.png
-替换后: https://pixiv.shewinder.win/img-original/img/2024/01/01/00/00/00/12345678_p0.png
-```
-
-## 使用方法
-
-### 场景 1：用户请求查看日榜（直接发送图片）
-
-用户说："看看今天的 Pixiv 日榜"、"P 站今天有什么图"
-
-执行步骤：
-1. 计算昨天的日期（格式：YYYY-MM-DD）
-2. **使用 `fetch_url` 调用 API（必须是 api.shewinder.win，建议 num=5-8 避免数据过大）：**
-   ```
-   fetch_url("https://api.shewinder.win/pixiv/rank?date=YYYY-MM-DD&mode=day&num=6")
-   ```
-3. 取前 6 个作品
-4. **重要：将图片 URL 域名从 `i.pximg.net` 替换为 `pixiv.shewinder.win`**
-5. **使用 `send_images` 工具下载并发送图片（关键步骤）：**
-   ```python
-   send_images(urls=[
-       "https://pixiv.shewinder.win/xxx_p0.png",  # 第1张
-       "https://pixiv.shewinder.win/xxx_p0.png",  # 第2张
-       ...
-   ])
-   ```
-6. 工具返回标识符（如 `<ai_image_1>`）
-7. **在回复中包含标识符**，用户就能看到图片
-
-示例输出格式：
-```
-📅 Pixiv 日榜（2024-01-15）- 前6名
-
-1. 🎨 作品标题1
-   👤 作者：作者名1 <ai_image_1>
-
-2. 🎨 作品标题2
-   👤 作者：作者名2 <ai_image_2>
-
-...
-
-💡 发送 "pr{数字}" 查看指定排名的详情
-```
-
-**✅ 关键：必须先调用 `send_images` 下载图片，然后在回复中包含返回的标识符！**
-
-### 场景 2：用户请求查看指定排名的原图（直接发送图片）
-
-用户说："pr3"、"第3张"、"看下第5名"
-
-执行步骤：
-1. 提取数字 N
-2. 如果之前已经获取过日榜数据，从缓存中取第 N 个作品的 PID
-3. 如果没有缓存，重新获取日榜
-4. **使用 `fetch_url` 调用 API：**
-   ```
-   fetch_url("https://api.shewinder.win/pixiv/illust_detail?illust_id=12345678")
-   ```
-5. **重要：将图片 URL 域名从 `i.pximg.net` 替换为 `pixiv.shewinder.win`**
-6. **使用 `send_images` 下载图片：**
-   ```python
-   send_images(urls=["https://pixiv.shewinder.win/xxx_p0.png"])
-   ```
-7. 工具返回 `<ai_image_1>`
-8. 回复作品信息 + 标识符，如："🎨 作品标题 <ai_image_1>"
-
-### 场景 3：用户请求 R18 日榜
-
-用户说："R18 榜"、"成人榜"
-
-执行步骤：
-1. 获取 `mode=day_r18` 的数据
-2. 其他步骤同普通日榜
-3. ⚠️ 注意：R18 内容需要确保在适当的群组/私聊环境下展示
-
-### 场景 4：用户根据标签/作者搜索偏好
-
-用户说："推荐点二次元图"、"有初音未来的图吗"
-
-执行步骤：
-1. 获取日榜数据
-2. 根据用户关键词匹配标签
-3. 筛选匹配的作品优先展示
-4. 如果没有完全匹配的，展示热门作品并说明
-
-### 场景 5：基于用户画像的个性化推荐（重要）
-
-用户说："推荐我喜欢的"、"根据我的喜好推荐"、"来点心动的"
-
-执行步骤：
-
-1. **读取用户画像**
-   ```python
-   read_file(path="aichat/preferences/{user_id}.md")
-   ```
-
-2. **解析画像内容**，提取偏好信息：
-   - 偏好标签（如：兽耳、少女、赛博朋克）
-   - 偏好画风（如：赛璐璐、厚涂）
-   - 偏好氛围（如：治愈、温馨）
-   - 回避内容（如：恐怖、男同）
-
-3. **获取日榜数据**（num=30，获取更多用于筛选）
-   ```
-   fetch_url("https://api.shewinder.win/pixiv/rank?date=YYYY-MM-DD&mode=day&num=30")
-   ```
-
-4. **匹配评分**（AI 自主计算匹配度）：
-   - 标签匹配：每匹配一个偏好标签 +2 分
-   - 作者匹配：匹配偏好作者 +3 分
-   - 回避内容：包含回避标签直接排除
-   - 质量门槛：只考虑完成度高的作品
-
-5. **排序推荐**：
-   - 按匹配度从高到低排序
-   - 选择 top 5-8 张发送
-   - 说明推荐理由（如：「符合你对兽耳少女的偏好」）
-
-**示例回复**：
-```
-📅 根据你的喜好推荐（兽耳、少女、治愈系）
-
-1. 🎨 标题1 <ai_image_1>
-   👤 作者1
-   💡 匹配度 95%（兽耳+少女+治愈）
-
-2. 🎨 标题2 <ai_image_2>
-   👤 作者2
-   💡 匹配度 88%（少女+温馨）
-
-...
-```
-
-## 交互示例（含图片发送）
-
-**示例 1：获取普通日榜（直接发图片）**
-```
-用户：看看今天的 P 站日榜
-
-AI 执行：
-1. fetch_url 获取数据
-2. send_images(urls=[6个图片URL]) → 返回 <ai_image_1> 到 <ai_image_6>
-
-AI 回复：
-📅 Pixiv 日榜（2024-01-15）- 前6名
-
-1. 🎨 じいさんばあさん若返る <ai_image_1>
-   👤 作者：新挑限
+1. 🎨 作品标题1 <ai_image_1>
+   👤 作者：作者名1
+   🏷️ 匹配标签：少女、兽耳
 
 2. 🎨 作品标题2 <ai_image_2>
    👤 作者：作者名2
-
-3. 🎨 作品标题3 <ai_image_3>
-   👤 作者：作者名3
+   🏷️ 匹配标签：治愈、日常
 
 ...
-
-💡 发送 "pr数字" 查看详情
 ```
 
-**结果：用户直接看到 6 张图片**
+## 场景 2：查看指定排名
 
----
+用户说："pr3"、"第5张"
 
-**示例 2：获取指定作品**
-```
-用户：pr3
+执行：
+1. 从会话记忆中找到对应作品
+2. 若无记忆，重新获取日榜（并应用过滤）
+3. `send_images` 发送该作品
 
-AI 执行：
-1. fetch_url 获取作品详情
-2. send_images(urls=["https://pixiv.shewinder.win/xxx_p0.png"])
-   → 返回 <ai_image_1>
+## 场景 3：R18 日榜
 
-AI 回复：
-🎨 作品标题 <ai_image_1>
-👤 作者：作者名
-🏷️ 标签：tag1, tag2
-📄 页数：3 张
-```
+用户说："R18 榜"
 
-**结果：用户直接看到作品图片**
+执行：
+1. `fetch_url` 获取 `mode=day_r18` 数据
+2. 同样应用用户画像过滤
+3. ⚠️ 确认环境适合展示 R18 内容
 
-## 注意事项（必读）
+## 注意事项
 
-1. **🚨 API 地址（关键）：**
-   - **正确**: `https://api.shewinder.win/pixiv/rank?date=...`
-   - **错误**: `https://api.pixivic.com/...` ❌ 已确认无法访问！
-   - **每次调用 fetch_url 前，务必检查 URL 是否以 `api.shewinder.win` 开头**
-
-2. **🖼️ 发送图片的正确流程（重要）：**
-   - 第1步：获取图片 URL（替换域名后）
-   - 第2步：**调用 `send_images(urls=[...])` 下载图片**
-   - 第3步：**工具返回标识符（如 `<ai_image_1>`）**
-   - 第4步：**在你的回复中包含这些标识符**，用户才能看到图片
-   - ❌ 错误：直接发送 URL 链接
-   - ✅ 正确：使用 `send_images` 工具
-
-3. **域名替换**：API 返回的图片 URL 域名是 `i.pximg.net`，**必须替换为 `pixiv.shewinder.win`**
-
-4. **数量限制**：`send_images` 一次最多 10 张图片，建议日榜展示 5-8 张
-
-5. **多图作品**：`page_count > 1` 时，`urls` 数组包含多张图片
-
-6. **R18 内容**：获取 R18 榜前请确认当前环境适合展示
-
-7. **缓存复用**：同一会话内获取日榜后可以缓存结果，方便后续 pr 查询
-
-## 日期计算参考
-
-Python 代码参考：
-```python
-from datetime import datetime, timedelta
-yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-```
-
-AI 可以使用当前时间工具获取昨天日期。
+- 图片 URL 必须替换为 `pixiv.shewinder.win`
+- `send_images` 返回 `<ai_image_N>`，在回复中引用
+- 无画像时发送默认热门作品
