@@ -8,7 +8,7 @@ from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
 from hoshino import Bot, Service
-from hoshino.config import get_plugin_config, get_plugin_config_by_name
+from hoshino.config import get_plugin_config, get_plugin_config_by_name, save_plugin_config
 from loguru import logger
 
 import os
@@ -104,7 +104,11 @@ class PlgConfig(BaseModel):
 @router.post("/set_plugin")
 async def set_plugin(pc: PlgConfig):
     config = get_plugin_config_by_name(pc.name)
-    config.update(pc.config)
+    if config is None:
+        return {"status": 404, "data": f"Plugin config '{pc.name}' not found"}
+    for key, value in pc.config.items():
+        setattr(config, key, value)
+    save_plugin_config(pc.name, config)
     return {"status": 200, "data": "SUCCESS"}
 
 

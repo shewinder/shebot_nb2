@@ -11,6 +11,7 @@ from hoshino import (
     Service,
     font_dir,
     get_bot_list,
+    hsn_config,
     scheduled_job,
     sucmd,
 )
@@ -22,7 +23,7 @@ from hoshino.util.handle_msg import handle_msg
 from PIL import Image, ImageFont, ImageDraw
 
 from .config import Config
-from .data_source import RankPic, filter_rank, get_rank, get_rankpic
+from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic
 from .score import score_data, save_score_data, load_score_data
 from hoshino.util import _strip_cmd
 
@@ -134,6 +135,12 @@ async def generate_forward(sv: Service, pics: List[RankPic]):
 
 async def send_rank(sv: Service, pics: List[RankPic], gids: List[int]=None):
     preview = await generate_preview(sv, pics)
+    
+    # 检查预览图生成是否成功
+    if preview is None:
+        sv.logger.warning("预览图生成失败（无可用图片），跳过发送")
+        return
+    
     bot: Bot = get_bot_list()[0]
     if not gids:
         gids = await get_service_groups(sv_name=sv.name)
@@ -141,8 +148,8 @@ async def send_rank(sv: Service, pics: List[RankPic], gids: List[int]=None):
 
     for gid in gids:
         try:
-            preview = anti_harmony(preview)
-            await bot.send_group_msg(group_id=gid, message=R.image_from_memory(preview))
+            preview_modified = anti_harmony(preview)
+            await bot.send_group_msg(group_id=gid, message=R.image_from_memory(preview_modified))
             # await send_group_forward_msg(bot, gid, msgs)
             sv.logger.info(f"群{gid} 投递成功！")
         except Exception as e:
@@ -207,21 +214,35 @@ async def pixiv_rank():
     await send_rank(sv_r18, _today_rank_r18)
 
 
+def _get_superuser_id() -> str:
+    """获取第一个 superuser 的 ID 作为画像 user_id"""
+    superusers = getattr(hsn_config, 'superusers', set())
+    if superusers:
+        # 转换为列表并取第一个
+        su_list = list(superusers)
+        return str(su_list[0])
+    return "default"
+
+
 async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
     today = datetime.date.today()
     yesterday = today - datetime.timedelta(days=1)
     date = f"{yesterday}"
+    
+    # 使用 superuser 的 ID 读取画像
+    user_id = _get_superuser_id()
+    
     logger.info("正在下载日榜")
     pics = await get_rank(date)
     logger.info("日榜下载完成")
-    pics = await filter_rank(pics)
+    pics = await filter_rank_ai(pics, user_id=user_id)
     update_last_3_days(pics)
     _today_rank.clear()
     _today_rank.extend(pics)
 
     logger.info("正在下载r18日榜")
     pics = await get_rank(date, "day_r18")
-    pics = await filter_rank(pics)
+    pics = await filter_rank_ai(pics, user_id=user_id)
     logger.info("r18日榜下载完成")
     score_data.last_three_days[-1].extend([p.pid for p in pics])
     _today_rank_r18.clear()
