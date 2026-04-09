@@ -27,7 +27,10 @@ async def _download_image_to_base64(image_url: str, need_anti_harmony: bool = Tr
         need_anti_harmony: 是否需要反和谐处理（默认启用）
     """
     try:
-        resp = await aiohttpx.get(image_url)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        resp = await aiohttpx.get(image_url, headers=headers)
         if not resp.ok:
             logger.error(f"下载图片失败: {resp.status_code}, URL: {image_url}")
             return None

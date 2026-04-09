@@ -63,9 +63,8 @@ async def get_enable_groups(sv_name: str):
 async def get_group_services(group_id: int):
     svs = Service.get_loaded_services()
     conf = {}
-    conf[group_id] = {}
     for sv_name in svs:
-        conf[group_id][sv_name] = svs[sv_name].check_enabled(group_id)
+        conf[sv_name] = svs[sv_name].check_enabled(group_id)
     return {"status": 200, "data": conf}
 
 
