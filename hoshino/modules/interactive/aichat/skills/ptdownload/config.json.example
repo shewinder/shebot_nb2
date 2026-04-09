@@ -6,8 +6,16 @@
     "base_url": "http://192.168.1.100:8080",
     "username": "admin",
     "password": "your_password_here",
-    "default_save_path": "/downloads/movies",
+    "default_save_path": "/downloads/other",
     "verify_ssl": false
+  },
+  "save_paths": {
+    "movie": "/downloads/movies",
+    "tv": "/downloads/tv",
+    "anime": "/downloads/anime",
+    "documentary": "/downloads/documentary",
+    "music": "/downloads/music",
+    "other": "/downloads/other"
   },
   "pt_stations": [
     {
@@ -24,22 +32,6 @@
         "download": "a[href*='download.php']",
         "size": "td:nth-child(5)",
         "seeders": "td:nth-child(6)"
-      }
-    },
-    {
-      "name": "天雪",
-      "enabled": true,
-      "search_url": "https://www.skyey2.com/torrents.php?search={keyword}",
-      "search_method": "get",
-      "headers": {
-        "Cookie": "your_cookie_here"
-      },
-      "result_selector": "table.torrents tr",
-      "field_mapping": {
-        "title": "a[title][href*='details.php']",
-        "download": "a[href*='download.php']",
-        "size": "td.rowfollow:nth-child(5)",
-        "seeders": "td.rowfollow:nth-child(6)"
       }
     }
   ]

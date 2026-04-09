@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 qBittorrent 添加下载任务脚本
-用法: python qb_add.py --url <下载链接>
+用法: python qb_add.py --url <下载链接> --category <分类>
 """
 import sys
 import json
@@ -21,7 +21,7 @@ except ImportError as e:
 
 # 添加 skill 目录到路径
 sys.path.insert(0, str(__file__).rsplit('/', 2)[0])
-from config import get_qb_config, get_stations
+from config import get_qb_config, get_stations, get_save_path, Config
 
 
 class QBittorrentClient:
@@ -97,7 +97,7 @@ def find_station_by_url(url: str) -> Optional[Dict[str, Any]]:
     
     stations = get_stations()
     for station in stations:
-        station_url = station.get('search_url', '')
+        station_url = station.search_url
         if domain in station_url.lower():
             return station
     return None
@@ -110,8 +110,8 @@ async def download_torrent(url: str) -> Optional[bytes]:
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     
     if station:
-        headers.update(station.get('headers', {}))
-        print(f"使用 {station.get('name')} 的 Cookie 下载种子", file=sys.stderr)
+        headers.update(station.headers)
+        print(f"使用 {station.name} 的 Cookie 下载种子", file=sys.stderr)
     
     try:
         async with aiohttp.ClientSession() as session:
@@ -132,21 +132,24 @@ async def download_torrent(url: str) -> Optional[bytes]:
         return None
 
 
-async def add_by_url(url: str, title: str = "") -> Dict[str, Any]:
+async def add_by_url(url: str, title: str = "", category: str = "other") -> Dict[str, Any]:
     """根据 URL 添加下载"""
     
     config = get_qb_config()
-    if not config or not config.get('enabled'):
+    if not config.enabled:
         return {
             "success": False,
             "error": "qBittorrent 未启用，请在 config.json 中配置"
         }
     
+    # 根据分类获取保存路径
+    save_path = get_save_path(category)
+    
     client = QBittorrentClient(
-        base_url=config.get('base_url', 'http://localhost:8080'),
-        username=config.get('username', ''),
-        password=config.get('password', ''),
-        verify_ssl=config.get('verify_ssl', True)
+        base_url=config.base_url,
+        username=config.username,
+        password=config.password,
+        verify_ssl=config.verify_ssl
     )
     
     is_magnet = url.startswith('magnet:')
@@ -154,7 +157,6 @@ async def add_by_url(url: str, title: str = "") -> Dict[str, Any]:
     
     async with aiohttp.ClientSession() as session:
         if is_magnet:
-            # 磁力链接暂不支持（需要先用其他工具转换）
             return {
                 "success": False,
                 "error": "磁力链接暂不支持，请使用 PT 站下载链接"
@@ -170,11 +172,12 @@ async def add_by_url(url: str, title: str = "") -> Dict[str, Any]:
                 }
             
             print(f"种子文件大小: {len(torrent_data)} bytes", file=sys.stderr)
+            print(f"保存路径: {save_path}", file=sys.stderr)
             
             result = await client.add_torrent_file(
                 session=session,
                 torrent_data=torrent_data,
-                save_path=config.get('default_save_path', '/downloads')
+                save_path=save_path
             )
         else:
             return {
@@ -187,7 +190,7 @@ async def add_by_url(url: str, title: str = "") -> Dict[str, Any]:
             "success": True,
             "message": "下载任务已添加",
             "title": title or url[:50] + "...",
-            "save_path": config.get('default_save_path', '/downloads')
+            "category": category
         }
     else:
         return {
@@ -203,13 +206,22 @@ def format_result(data: Dict[str, Any]) -> str:
         return f"❌ 添加失败: {data.get('error')}"
     
     title = data.get('title', '未知')
-    save_path = data.get('save_path', '/downloads')
+    category = data.get('category', 'other')
+    
+    # 分类名称映射
+    cat_names = {
+        'movie': '电影',
+        'tv': '电视剧',
+        'anime': '动漫',
+        'r18': '成人向'
+    }
+    cat_name = cat_names.get(category, category)
     
     lines = [
         "✅ 已添加下载任务",
         "",
         f"📁 资源: {title}",
-        f"📂 保存路径: {save_path}",
+        f"🏷️ 分类: {cat_name}",
         "",
         "使用 qb_list.py 查看下载进度"
     ]
@@ -220,11 +232,15 @@ def format_result(data: Dict[str, Any]) -> str:
 def main():
     parser = argparse.ArgumentParser(description='qBittorrent 添加下载')
     parser.add_argument('--url', required=True, help='PT 站下载链接')
+    parser.add_argument('--title', default='', help='资源标题')
+    parser.add_argument('--category', default='other',
+                        choices=['movie', 'tv', 'anime', 'documentary', 'music', 'other'],
+                        help='资源分类')
     parser.add_argument('--json', action='store_true', help='输出 JSON 格式')
     
     args = parser.parse_args()
     
-    result = asyncio.run(add_by_url(args.url))
+    result = asyncio.run(add_by_url(args.url, args.title, args.category))
     
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

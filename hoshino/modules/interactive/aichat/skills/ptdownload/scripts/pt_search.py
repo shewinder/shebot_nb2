@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional
 
 # 添加 skill 目录到路径以便导入 config
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import get_stations, get_qb_config
+from config import get_stations, get_qb_config, PTStation
 
 
 try:
@@ -31,25 +31,25 @@ except ImportError as e:
 class PTSearcher:
     """PT 站搜索器"""
     
-    def __init__(self, station_config: Dict[str, Any]):
+    def __init__(self, station_config: PTStation):
         self.config = station_config
     
     async def search(self, keyword: str, session: aiohttp.ClientSession) -> List[Dict[str, Any]]:
         """搜索资源"""
         
-        if not self.config.get('search_url'):
+        if not self.config.search_url:
             return []
         
         try:
-            search_url = self.config['search_url'].format(keyword=quote(keyword))
-            method = self.config.get('search_method', 'get').lower()
+            search_url = self.config.search_url.format(keyword=quote(keyword))
+            method = self.config.search_method.lower()
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
-            headers.update(self.config.get('headers', {}))
+            headers.update(self.config.headers)
             
             if method == "post":
-                data = {k: v.format(keyword=keyword) for k, v in self.config.get('search_params', {}).items()}
+                data = {k: v.format(keyword=keyword) for k, v in self.config.search_params.items()}
                 async with session.post(search_url, headers=headers, data=data) as resp:
                     html = await resp.text()
             else:
@@ -58,11 +58,11 @@ class PTSearcher:
             
             results = self._parse_results(html)
             for r in results:
-                r["station"] = self.config.get('name', '未知站点')
+                r["station"] = self.config.name
             return results
             
         except Exception as e:
-            return [{"error": f"{self.config.get('name')}: {str(e)}"}]
+            return [{"error": f"{self.config.name}: {str(e)}"}]
     
     def _parse_results(self, html: str) -> List[Dict[str, Any]]:
         """解析搜索结果"""
@@ -70,10 +70,10 @@ class PTSearcher:
         results = []
         soup = BeautifulSoup(html, 'html.parser')
         
-        selector = self.config.get('result_selector', 'table.torrents tr')
+        selector = self.config.result_selector
         rows = soup.select(selector)
         
-        mapping = self.config.get('field_mapping', {})
+        mapping = self.config.field_mapping
         
         for row in rows:
             try:
@@ -123,7 +123,7 @@ class PTSearcher:
     def _make_absolute_url(self, url: str) -> str:
         """转换为绝对 URL"""
         from urllib.parse import urljoin
-        base = self.config.get('search_url', '').split('?')[0]
+        base = self.config.search_url.split('?')[0]
         return urljoin(base, url)
 
 
@@ -191,9 +191,6 @@ async def search_all(keyword: str) -> Dict[str, Any]:
     
     async with aiohttp.ClientSession() as session:
         for station_config in stations:
-            if not station_config.get('enabled', True):
-                continue
-            
             searcher = PTSearcher(station_config)
             try:
                 results = await searcher.search(keyword, session)
@@ -202,7 +199,7 @@ async def search_all(keyword: str) -> Dict[str, Any]:
                 else:
                     all_results.extend(results)
             except Exception as e:
-                errors.append(f"{station_config.get('name')}: {str(e)}")
+                errors.append(f"{station_config.name}: {str(e)}")
     
     if not all_results and errors:
         return {

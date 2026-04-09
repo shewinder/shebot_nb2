@@ -9,28 +9,58 @@ PT 下载 Skill 配置管理
 import json
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
-# 默认配置（内置，不存储敏感信息）
-DEFAULT_CONFIG: Dict[str, Any] = {
-    "qbittorrent": {
-        "enabled": False,
-        "base_url": "http://localhost:8080",
-        "username": "admin",
-        "password": "",
-        "default_save_path": "/downloads",
-        "verify_ssl": False
-    },
-    "pt_stations": []
-}
+class QBittorrentConfig(BaseModel):
+    """qBittorrent 配置"""
+    enabled: bool = False
+    base_url: str = "http://localhost:8080"
+    username: str = "admin"
+    password: str = ""
+    default_save_path: str = "/downloads"
+    verify_ssl: bool = False
+
+
+class PTStation(BaseModel):
+    """PT 站配置"""
+    name: str
+    enabled: bool = True
+    search_url: str
+    search_method: str = "get"
+    headers: Dict[str, str] = Field(default_factory=dict)
+    result_selector: str = "table.torrents tr"
+    field_mapping: Dict[str, str] = Field(default_factory=dict)
+
+
+class Config(BaseModel):
+    """PT Download Skill 配置"""
+    qbittorrent: QBittorrentConfig = Field(default_factory=QBittorrentConfig)
+    pt_stations: List[PTStation] = Field(default_factory=list)
+    save_paths: Dict[str, str] = Field(default_factory=dict)
+
+    def get_save_path(self, category: str) -> str:
+        """根据分类获取保存路径"""
+        defaults = {
+            'movie': '/downloads/movies',
+            'tv': '/downloads/tv',
+            'anime': '/downloads/anime',
+            'documentary': '/downloads/documentary',
+            'music': '/downloads/music',
+            'other': '/downloads/other'
+        }
+        return self.save_paths.get(
+            category, 
+            defaults.get(category, self.qbittorrent.default_save_path)
+        )
 
 
 def get_project_root() -> Path:
     """获取项目根目录（优先从环境变量读取）"""
     if project_root := os.environ.get("PROJECT_ROOT"):
         return Path(project_root)
-    # 回退：假设当前工作目录是项目根目录
     return Path("").resolve()
 
 
@@ -41,48 +71,49 @@ def get_user_config_path() -> Path:
     return config_path
 
 
-def load_config() -> Dict[str, Any]:
-    """加载配置（用户配置优先于默认配置）"""
+def load_config() -> Config:
+    """加载配置"""
     user_config_path = get_user_config_path()
     
     if user_config_path.exists():
         try:
-            user_config = json.loads(user_config_path.read_text(encoding='utf-8'))
-            merged = DEFAULT_CONFIG.copy()
-            merged.update(user_config)
-            return merged
+            data = json.loads(user_config_path.read_text(encoding='utf-8'))
+            return Config.model_validate(data)
         except Exception as e:
             print(f"[警告] 加载配置失败: {e}，使用默认配置", file=os.sys.stderr)
     
-    return DEFAULT_CONFIG.copy()
+    return Config()
 
 
-def save_config(config: Dict[str, Any]) -> bool:
-    """保存配置到用户目录"""
-    try:
-        get_user_config_path().write_text(
-            json.dumps(config, indent=2, ensure_ascii=False),
-            encoding='utf-8'
-        )
-        return True
-    except Exception as e:
-        print(f"[错误] 保存配置失败: {e}", file=os.sys.stderr)
-        return False
+# 全局配置实例
+_config: Optional[Config] = None
 
 
-def get_qb_config() -> Optional[Dict[str, Any]]:
+def get_config() -> Config:
+    """获取配置单例"""
+    global _config
+    if _config is None:
+        _config = load_config()
+    return _config
+
+
+def get_qb_config() -> QBittorrentConfig:
     """获取 qBittorrent 配置"""
-    return load_config().get('qbittorrent')
+    return get_config().qbittorrent
 
 
-def get_stations() -> List[Dict[str, Any]]:
+def get_stations() -> List[PTStation]:
     """获取启用的 PT 站列表"""
-    stations = load_config().get('pt_stations', [])
-    return [s for s in stations if s.get('enabled', True)]
+    return [s for s in get_config().pt_stations if s.enabled]
+
+
+def get_save_path(category: str) -> str:
+    """根据分类获取保存路径"""
+    return get_config().get_save_path(category)
 
 
 def get_skill_dir() -> Path:
-    """获取当前 Skill 目录（用于读取其他文件）"""
+    """获取当前 Skill 目录"""
     if skill_dir := os.environ.get("SKILL_DIR"):
         return Path(skill_dir)
     return Path(__file__).parent
