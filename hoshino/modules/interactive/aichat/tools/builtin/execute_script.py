@@ -163,15 +163,24 @@ async def execute_script(
     # 构建命令
     cmd = [interpreter, str(script_abs)] + args
     
+    # 准备环境变量
+    import os
+    
+    env = os.environ.copy()
+    env["PROJECT_ROOT"] = str(Path("").resolve())  # 项目根目录（bot启动目录）
+    env["SKILL_NAME"] = skill_name
+    env["SKILL_DIR"] = str(skill.directory)
+    
     # 执行脚本
     try:
-        logger.info(f"执行脚本: {' '.join(cmd)}, timeout={timeout}")
+        logger.info(f"执行脚本: {' '.join(cmd)}, timeout={timeout}, PROJECT_ROOT={env['PROJECT_ROOT']}")
         
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(script_abs.parent)
+            cwd=str(script_abs.parent),
+            env=env
         )
         
         try:
