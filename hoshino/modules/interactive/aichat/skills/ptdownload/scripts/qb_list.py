@@ -201,17 +201,17 @@ async def list_torrents() -> Dict[str, Any]:
     """获取并格式化任务列表"""
     
     config = get_qb_config()
-    if not config or not config.get('enabled'):
+    if not config.enabled:
         return {
             "success": False,
             "error": "qBittorrent 未启用，请在 config.json 中配置"
         }
     
     client = QBittorrentClient(
-        base_url=config.get('base_url', 'http://localhost:8080'),
-        username=config.get('username', ''),
-        password=config.get('password', ''),
-        verify_ssl=config.get('verify_ssl', True)
+        base_url=config.base_url,
+        username=config.username,
+        password=config.password,
+        verify_ssl=config.verify_ssl
     )
     
     async with aiohttp.ClientSession() as session:

@@ -1,6 +1,6 @@
 ---
 name: pt-download
-description: 搜索 PT 站资源并添加到 qBittorrent 下载。当用户表达想看/下载影视、动漫、纪录片、音乐等资源意图时使用，例如"我想看xxx电影"、"帮我下载xxx剧"、"搜索xxx纪录片"等。AI 需要根据用户请求判断资源类型并传入对应分类数。
+description: 搜索 PT 站资源并添加到 qBittorrent 下载，或查看下载进度。当用户想看/下载影视、动漫等资源（如"我想看xxx电影"、"帮我下载xxx"），或查询下载进度（如"查看下载"、"下载进度"、"qb状态"）时使用
 allowed-tools:
   - "execute_script"
 user-invocable: true

@@ -40,7 +40,6 @@ services:
       retries: 3
       start_period: 40s
 
-  # LLBot (本地构建，含 120s 超时修改)
   llonebot:
     container_name: llob
     image: linyuchen/llonebot:latest
@@ -67,6 +66,7 @@ services:
   # 为 Playwright 提供远程浏览器连接
   browser:
     image: browserless/chrome:latest
+    container_name: browser
     restart: always
     ports:
       - 3003:3000  # 浏览器服务端口（外部访问）
