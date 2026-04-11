@@ -19,31 +19,50 @@ uv pip install aiohttp beautifulsoup4
 
 ### 2. 配置
 
-**配置文件位置：`data/config/ptdownload.json`**
+**首次运行会自动生成配置文件到 `data/config/ptdownload.json`**
 
-首次使用时会自动生成默认配置，或手动创建：
+只需编辑该文件，填写你的 **Cookie** 和 **qBittorrent 密码** 即可。
 
-```bash
-cp hoshino/modules/interactive/aichat/skills/ptdownload/config.json.example \
-   data/config/ptdownload.json
-```
-
-然后编辑 `data/config/ptdownload.json`：
-
-#### qBittorrent 配置
+#### 默认生成的配置
 
 ```json
-"qbittorrent": {
-  "enabled": true,
-  "base_url": "http://你的qb地址:8080",
-  "username": "admin",
-  "password": "你的密码",
-  "default_save_path": "/downloads/movies",
-  "verify_ssl": false
+{
+  "qbittorrent": {
+    "enabled": false,
+    "base_url": "http://localhost:8080",
+    "username": "admin",
+    "password": "",
+    "verify_ssl": false
+  },
+  "pt_stations": [
+    {
+      "name": "北洋园",
+      "enabled": true,
+      "headers": {
+        "Cookie": "在此填写你的北洋园 Cookie"
+      }
+    },
+    {
+      "name": "馒头",
+      "enabled": false,
+      "headers": {
+        "Cookie": "在此填写你的馒头 Cookie"
+      }
+    }
+  ]
 }
 ```
 
-#### PT 站配置
+#### 如何获取 Cookie
+
+1. 登录 PT 站
+2. F12 打开开发者工具 → Network 标签
+3. 刷新页面，点击任意请求 → 复制 Cookie 值
+4. 粘贴到配置文件的 `"Cookie": "..."` 处
+
+### 3. 添加其他 PT 站
+
+如需添加未内置的站点，在 `pt_stations` 数组中添加完整配置：
 
 ```json
 {
@@ -52,7 +71,7 @@ cp hoshino/modules/interactive/aichat/skills/ptdownload/config.json.example \
   "search_url": "https://xxx.com/torrents.php?search={keyword}",
   "search_method": "get",
   "headers": {
-    "Cookie": "your_cookie_here"
+    "Cookie": "your_cookie"
   },
   "result_selector": "table.torrents tr",
   "field_mapping": {
@@ -64,19 +83,6 @@ cp hoshino/modules/interactive/aichat/skills/ptdownload/config.json.example \
 }
 ```
 
-### 如何获取 Cookie
-
-1. 登录 PT 站
-2. F12 打开开发者工具
-3. 刷新页面，任意请求 → 请求头 → 复制 Cookie
-
-### 如何选择器调试
-
-1. 打开 PT 站搜索页面
-2. F12 → Elements 标签
-3. 右键搜索结果行 → Copy → Copy selector
-4. 调整字段映射选择器
-
 ## 使用
 
 激活 Skill 后，AI 会自动处理：
@@ -87,14 +93,14 @@ AI：✅ SKILL 'pt-download' 已激活
 
 你：我想看肖申克的救赎
 AI：🔍 搜索到 5 个资源：
-    1. The.Shawshank.Redemption... (15.2GB) | 做种: 23 | 来源: 馒头 ⭐
+    1. The.Shawshank.Redemption... (15.2GB) | 做种: 23 | 来源: 北洋园 ⭐
     2. ...
     
     回复序号下载
 
 你：1
 AI：✅ 已添加下载任务
-    📁 The.Shawshank.Redemption...
+    📁 资源: The.Shawshank.Redemption...
     📂 保存路径: /downloads/movies
 
 你：查看下载进度
@@ -104,65 +110,28 @@ AI：📥 qBittorrent 任务列表...
 ## 手动测试脚本
 
 ```bash
-cd hoshino/modules/interactive/aichat/skills/ptdownload
-
 # 搜索
-python scripts/pt_search.py "肖申克的救赎"
-
-# 添加下载（根据序号）
-python scripts/qb_add.py --index 1
-
-# 添加下载（直接链接）
-python scripts/qb_add.py --url "magnet:?xt=urn:btih:..."
+python hoshino/modules/aichat/skills/ptdownload/scripts/pt_search.py "肖申克的救赎"
 
 # 查看列表
-python scripts/qb_list.py
-```
-
-## 文件说明
-
-```
-ptdownload/                         # 内置 Skill 目录
-├── SKILL.md                        # AI 指导文档（git 跟踪）
-├── README.md                       # 本文件（git 跟踪）
-├── config.json.example             # 配置示例（git 跟踪）
-├── config.py                       # 配置读取模块（git 跟踪）
-├── _meta.json                      # Skill 元数据（git 跟踪）
-├── .last_search.json               # 上次搜索结果缓存（自动生成）
-└── scripts/                        # 执行脚本（git 跟踪）
-    ├── pt_search.py
-    ├── qb_add.py
-    └── qb_list.py
-
-data/config/ptdownload.json         # 用户配置（不在 git 中）
+python hoshino/modules/aichat/skills/ptdownload/scripts/qb_list.py
 ```
 
 ## ⚠️ 重要提示
 
 **`data/config/ptdownload.json` 包含你的 Cookie 和密码，不要提交到 git！**
 
-该文件已在 `.gitignore` 中排除（如果没有请添加）：
-
-```gitignore
-# PT Download Skill 用户配置
-data/config/ptdownload.json
-```
+该文件已在 `.gitignore` 中排除。
 
 ## 故障排查
 
 ### 搜索不到结果
 
 - 检查 Cookie 是否过期
-- 检查 `result_selector` 是否正确
-- 检查 `field_mapping` 字段映射
+- 检查站点是否启用（`enabled: true`）
 
 ### 添加下载失败
 
 - 检查 qBittorrent Web UI 是否开启
 - 检查用户名密码是否正确
-- 检查 `base_url` 是否可以访问
-- 检查防火墙是否阻止端口
-
-### SSL 证书错误
-
-设置 `"verify_ssl": false`（局域网推荐）
+- 设置 `"verify_ssl": false`（局域网推荐）
