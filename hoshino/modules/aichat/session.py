@@ -476,6 +476,20 @@ AI回复：🎨 已生成：<ai_image_1>
             else:
                 logger.info(f"[SKILL] 没有需要注入的 SKILL 内容")
         
+        # MCP 内容注入
+        if conf.enable_mcp:
+            from .mcp import mcp_session_manager, mcp_tool_bridge
+            
+            # 1. 注入 MCP server 摘要（用于 AI 选择）
+            mcp_summary = mcp_tool_bridge.get_metadata_summary()
+            if mcp_summary:
+                system_content = f"{system_content}\n\n{mcp_summary}" if system_content else mcp_summary
+                logger.debug("[MCP] MCP server 摘要已注入")
+            
+            # 2. 记录已激活的 MCP server
+            active_mcp_servers = mcp_session_manager.get_active_servers(self.session_id)
+            logger.info(f"[MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
+        
         # 组装消息列表
         non_system_msgs = [msg for msg in self.messages if msg.get("role") != "system"]
         
@@ -528,11 +542,11 @@ AI回复：🎨 已生成：<ai_image_1>
         # 1. 内部自动构建消息
         await self._build_messages_for_chat(event)
         
-        # 2. 内部自动获取 tools
+        # 2. 内部自动获取 tools（传入 session 以支持 MCP 渐进式加载）
         tools = None
         if api_config.get("supports_tools", False):
             from .tools import get_available_tools
-            tools = await get_available_tools()
+            tools = await get_available_tools(session=self)
         
         # 3. 构建上下文（注入 session、bot、event）
         chat_context: Dict[str, Any] = {'session': self}
@@ -830,6 +844,13 @@ AI回复：🎨 已生成：<ai_image_1>
         
         for round_num in range(max_tool_rounds):
             logger.debug(f"Tool calling 第 {round_num + 1} 轮")
+            
+            # 每轮重新获取工具列表，支持 MCP 渐进式加载（激活后可立即使用）
+            if round_num > 0 and api_config.get("supports_tools", False):
+                from .tools import get_available_tools
+                tools = await get_available_tools(session=self)
+                logger.debug(f"[MCP] 第 {round_num + 1} 轮重新获取工具，共 {len(tools) if tools else 0} 个")
+            
             result = await self._call_ai_api(current_messages, api_config, tools=tools)
             
             # 累加 token 使用量

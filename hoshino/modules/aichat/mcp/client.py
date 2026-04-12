@@ -239,6 +239,18 @@ class MCPClient:
             self._session = None
             self._read_stream = None
             self._write_stream = None
+        except RuntimeError as e:
+            # 忽略 anyio CancelScope 相关错误（NoneBot2 已知问题）
+            if "cancel scope" in str(e).lower():
+                logger.debug(f"清理 MCP client {self.id} 时遇到 CancelScope 问题（可忽略）: {e}")
+            else:
+                logger.exception(f"清理 MCP client {self.id} 资源时出错: {e}")
+            # 强制清理
+            self._session_ctx = None
+            self._client_ctx = None
+            self._session = None
+            self._read_stream = None
+            self._write_stream = None
         except Exception as e:
             logger.exception(f"清理 MCP client {self.id} 资源时出错: {e}")
             # 同样强制清理

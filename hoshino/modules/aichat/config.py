@@ -15,6 +15,11 @@ class MCPServerConfig(BaseModel):
     env: Dict[str, str] = {}          # 环境变量
     headers: Dict[str, str] = {}      # HTTP 请求头，用于鉴权（如 Authorization）
     enabled: bool = True              # 是否启用
+    
+    # === 渐进式加载相关配置 ===
+    description: str = ""             # server 功能描述（用于 AI 选择）
+    auto_trigger: bool = True         # 是否允许 AI 自动激活
+    keywords: List[str] = []          # 触发关键词列表（可选，用于匹配用户意图）
 
 
 class ApiEntry(BaseModel):

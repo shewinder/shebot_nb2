@@ -27,7 +27,11 @@ conf = Config.get_instance('aichat')
 
 # MCP 初始化函数
 async def init_mcp_servers():
-    """初始化 MCP servers"""
+    """初始化 MCP servers（预连接 + 渐进式注入）
+    
+    启动时连接所有启用的 MCP server，确保首次激活时无延迟。
+    但工具只在激活后才注入到对话中（渐进式注入）。
+    """
     if not conf.enable_mcp:
         logger.info("MCP 功能已禁用")
         return
@@ -38,23 +42,58 @@ async def init_mcp_servers():
     
     logger.info(f"正在初始化 MCP servers，共 {len(conf.mcp_servers)} 个配置")
     
-    for server_config in conf.mcp_servers:
-        if not server_config.enabled:
-            logger.debug(f"MCP server {server_config.id} 已禁用，跳过")
-            continue
+    try:
+        # 1. 初始化 server_manager（只保存配置）
+        mcp_server_manager.initialize(conf.mcp_servers)
         
-        try:
-            mcp_server_manager.add_server(server_config)
-            success = await mcp_server_manager.start_server(server_config.id)
-            if success:
-                logger.info(f"MCP server {server_config.id} 启动成功")
-            else:
-                logger.warning(f"MCP server {server_config.id} 启动失败")
-        except asyncio.CancelledError:
-            # 任务被取消（如超时），记录警告但不阻塞启动
-            logger.warning(f"MCP server {server_config.id} 连接被取消（可能超时或服务器不可达）")
-        except Exception as e:
-            logger.exception(f"初始化 MCP server {server_config.id} 失败: {e}")
+        # 2. 创建并初始化 session_manager
+        from .mcp import init_mcp_session_manager
+        init_mcp_session_manager()
+        
+        # 3. 预连接所有启用的 server（确保首次激活无延迟）
+        logger.info("正在预连接所有 MCP servers...")
+        connect_tasks = []
+        for server_config in conf.mcp_servers:
+            if server_config.enabled:
+                task = _connect_server_with_timeout(server_config)
+                connect_tasks.append((server_config.id, task))
+        
+        # 并行连接，设置超时
+        connected_count = 0
+        failed_servers = []
+        for server_id, task in connect_tasks:
+            try:
+                success = await asyncio.wait_for(task, timeout=30)
+                if success:
+                    connected_count += 1
+                    logger.info(f"MCP server '{server_id}' 预连接成功")
+                else:
+                    failed_servers.append(server_id)
+                    logger.warning(f"MCP server '{server_id}' 预连接失败")
+            except asyncio.TimeoutError:
+                failed_servers.append(server_id)
+                logger.warning(f"MCP server '{server_id}' 预连接超时")
+            except Exception as e:
+                failed_servers.append(server_id)
+                logger.exception(f"MCP server '{server_id}' 预连接异常: {e}")
+        
+        logger.info(f"MCP 系统初始化完成：{connected_count}/{len(connect_tasks)} 个 server 已连接")
+        if failed_servers:
+            logger.warning(f"连接失败的 servers: {', '.join(failed_servers)}（将在激活时重试）")
+        
+    except Exception as e:
+        logger.exception(f"初始化 MCP 系统失败: {e}")
+
+
+async def _connect_server_with_timeout(server_config):
+    """连接单个 MCP server（带错误处理）"""
+    try:
+        from .mcp import mcp_server_manager
+        return await mcp_server_manager.ensure_connected(server_config.id)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return False
 
 
 # SKILL 系统初始化函数
