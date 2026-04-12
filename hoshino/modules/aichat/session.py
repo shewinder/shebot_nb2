@@ -662,7 +662,7 @@ AI回复：🎨 已生成：<ai_image_1>
         if "temperature" in payload:
             log_payload["temperature"] = payload["temperature"]
         if "tools" in payload:
-            log_payload["tools"] = [t.get("function", {}).get("name") for t in payload["tools"]]
+            log_payload["tools_count"] = len(payload["tools"])
         if "tool_choice" in payload:
             log_payload["tool_choice"] = payload["tool_choice"]
         
