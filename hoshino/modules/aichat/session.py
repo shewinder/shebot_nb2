@@ -15,7 +15,7 @@ from hoshino.util import aiohttpx, log_json, truncate_log
 from hoshino import Message, MessageSegment
 from hoshino.sres import Res
 
-from .mcp import mcp_session_manager, mcp_tool_bridge
+from .mcp import mcp_tool_bridge, get_mcp_session_manager
 from .md_render import render_text_if_markdown
 
 conf = Config.get_instance('aichat')
@@ -480,7 +480,8 @@ AI回复：🎨 已生成：<ai_image_1>
                 logger.debug("[MCP] MCP server 摘要已注入")
             
             # 2. 记录已激活的 MCP server
-            active_mcp_servers = mcp_session_manager.get_active_servers(self.session_id)
+            mcp_sm = get_mcp_session_manager()
+            active_mcp_servers = mcp_sm.get_active_servers(self.session_id) if mcp_sm else []
             logger.info(f"[MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
         
         # 组装消息列表
@@ -948,9 +949,10 @@ class SessionManager:
                 pass
             
             # 清理 MCP 激活状态
-            if mcp_session_manager is not None:
+            mcp_sm = get_mcp_session_manager()
+            if mcp_sm is not None:
                 try:
-                    mcp_session_manager.clear_session(session_id)
+                    mcp_sm.clear_session(session_id)
                 except Exception:
                     pass
             

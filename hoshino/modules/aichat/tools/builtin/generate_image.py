@@ -493,6 +493,7 @@ async def _call_edit_api(
                 form.add_field('image', image_bytes, filename=f'image_{i}.png', content_type='image/png')
             
             form.add_field('prompt', prompt)
+            form.add_field('model', model)
             form.add_field('n', '1')
             form.add_field('size', target_size)
             

@@ -1,3 +1,5 @@
+from typing import Optional
+
 """MCP (Model Context Protocol) 支持模块
 
 为 aichat 提供 MCP 协议支持，允许连接外部 MCP servers 扩展 AI 能力。
@@ -66,6 +68,14 @@ def init_mcp_session_manager() -> MCPSessionManager:
         mcp_tool_bridge.set_session_manager(mcp_session_manager)
     return mcp_session_manager
 
+def get_mcp_session_manager() -> Optional[MCPSessionManager]:
+    """获取全局 MCP 会话管理器实例
+    
+    Returns:
+        MCPSessionManager 实例，如果未初始化则返回 None
+    """
+    return mcp_session_manager
+
 
 __all__ = [
     # 配置
@@ -79,6 +89,7 @@ __all__ = [
     "MCPSessionManager",
     "mcp_session_manager",
     "init_mcp_session_manager",
+    "get_mcp_session_manager",
     # 工具桥接
     "MCPToolBridge",
     "mcp_tool_bridge",
