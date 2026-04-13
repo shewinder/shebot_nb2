@@ -42,7 +42,6 @@ async def get_available_tools(session: Optional[Any] = None) -> List[Dict[str, A
     try:
         conf = Config.get_instance('aichat')
         if conf.enable_mcp:
-            # 延迟导入 MCP 模块以避免初始化问题
             from ..mcp import mcp_session_manager, mcp_tool_bridge
             
             if mcp_session_manager is None:

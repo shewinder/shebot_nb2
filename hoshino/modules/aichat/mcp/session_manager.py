@@ -86,7 +86,7 @@ class MCPSessionManager:
         if len(state.active_servers) >= self.MAX_SERVERS_PER_SESSION:
             return False, f"单个会话最多激活 {self.MAX_SERVERS_PER_SESSION} 个 MCP server"
         
-        # 延迟连接：确保 server 已连接
+        # 确保 server 已连接
         if not await self.server_manager.ensure_connected(server_id):
             return False, f"MCP server '{server_id}' 连接失败"
         

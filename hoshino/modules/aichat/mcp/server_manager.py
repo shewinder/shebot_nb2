@@ -63,7 +63,7 @@ class MCPServerManager:
         for config in configs:
             if config.enabled:
                 self._configs[config.id] = config
-                # 注意：这里不创建 client，延迟到 ensure_connected 时
+                # 注意：这里不创建 client，按需连接
         
         self._initialized = True
         logger.info(f"MCPServerManager 初始化完成，共 {len(self._configs)} 个配置")
@@ -99,7 +99,7 @@ class MCPServerManager:
         return result
     
     async def ensure_connected(self, server_id: str) -> bool:
-        """确保指定 server 已连接（延迟连接）
+        """确保指定 server 已连接
         
         如果 client 不存在，会创建并连接。
         如果 client 已存在但未连接，会尝试连接。

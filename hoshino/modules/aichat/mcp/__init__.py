@@ -50,7 +50,6 @@ from .session_manager import MCPSessionManager
 # 工具桥接
 from .tool_bridge import MCPToolBridge, mcp_tool_bridge
 
-# 全局 session_manager 实例（延迟初始化）
 mcp_session_manager: MCPSessionManager = None  # type: ignore
 
 def init_mcp_session_manager() -> MCPSessionManager:

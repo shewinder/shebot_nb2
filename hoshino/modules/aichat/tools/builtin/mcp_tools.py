@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 ## 激活流程
 1. 检查 MCP server 是否存在且已启用
-2. 连接到 MCP server（延迟连接）
+2. 连接到 MCP server
 3. 将 server 标记为激活状态
 4. 该 server 的工具在当前会话中可用
 

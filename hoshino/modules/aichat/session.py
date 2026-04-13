@@ -9,12 +9,14 @@ from loguru import logger
 
 from .config import Config
 from .skills import skill_manager
-from .tools import get_tool_function
+from .tools import get_tool_function, get_available_tools
 from .tools.registry import get_injectable_params
 from hoshino.util import aiohttpx, log_json, truncate_log
+from hoshino import Message, MessageSegment
+from hoshino.sres import Res
 
-if TYPE_CHECKING:
-    from hoshino import Message, MessageSegment
+from .mcp import mcp_session_manager, mcp_tool_bridge
+from .md_render import render_text_if_markdown
 
 conf = Config.get_instance('aichat')
 
@@ -131,8 +133,6 @@ class Session:
         Returns:
             MessageSegment.image 或 None（如果标识符无效）
         """
-        from hoshino import MessageSegment
-        
         image_data = self.resolve_image_identifier(identifier)
         if not image_data:
             return None
@@ -144,7 +144,6 @@ class Session:
                 img_bytes = base64.b64decode(base64_data)
                 return MessageSegment.image(file=img_bytes)
             elif image_data.startswith(("http://", "https://")):
-                from hoshino.sres import Res
                 return await Res.image_from_url(image_data)
         except Exception:
             # 图片解析失败，返回 None 让调用方处理
@@ -178,9 +177,6 @@ class Session:
         Returns:
             Message 列表（未启用 Markdown 时长度为1，启用时可能多个）
         """
-        # 函数内导入避免循环导入（session 是底层模块）
-        from hoshino import Message, MessageSegment
-        
         IMAGE_PATTERN = re.compile(r'<(user_image_\d+|ai_image_\d+)>')
         identifiers = IMAGE_PATTERN.findall(content)
         clean_text = IMAGE_PATTERN.sub('', content).strip()
@@ -217,7 +213,6 @@ class Session:
             text_msg = None
             if len(clean_text) >= markdown_min_length:
                 try:
-                    from .md_render import render_text_if_markdown
                     img_bytes = await render_text_if_markdown(clean_text, min_length=markdown_min_length)
                     if img_bytes:
                         text_msg = MessageSegment.image(file=img_bytes)
@@ -478,8 +473,6 @@ AI回复：🎨 已生成：<ai_image_1>
         
         # MCP 内容注入
         if conf.enable_mcp:
-            from .mcp import mcp_session_manager, mcp_tool_bridge
-            
             # 1. 注入 MCP server 摘要（用于 AI 选择）
             mcp_summary = mcp_tool_bridge.get_metadata_summary()
             if mcp_summary:
@@ -545,7 +538,6 @@ AI回复：🎨 已生成：<ai_image_1>
         # 2. 内部自动获取 tools（传入 session 以支持 MCP 渐进式加载）
         tools = None
         if api_config.get("supports_tools", False):
-            from .tools import get_available_tools
             tools = await get_available_tools(session=self)
         
         # 3. 构建上下文（注入 session、bot、event）
@@ -596,8 +588,6 @@ AI回复：🎨 已生成：<ai_image_1>
         Returns:
             Dict[str, Any]: 包含 content, error, tool_results, usage 等字段的结果
         """
-        from .tools import get_available_tools
-        
         tools = await get_available_tools() if api_config.get("supports_tools", False) else None
         
         # 创建一个临时 Session 来复用其 _chat_with_api 方法
@@ -847,7 +837,6 @@ AI回复：🎨 已生成：<ai_image_1>
             
             # 每轮重新获取工具列表，支持 MCP 渐进式加载（激活后可立即使用）
             if round_num > 0 and api_config.get("supports_tools", False):
-                from .tools import get_available_tools
                 tools = await get_available_tools(session=self)
                 logger.debug(f"[MCP] 第 {round_num + 1} 轮重新获取工具，共 {len(tools) if tools else 0} 个")
             
@@ -951,6 +940,20 @@ class SessionManager:
                 del self.choice_mode_users[session_id]
             if session_id in self.choice_guideline_users:
                 del self.choice_guideline_users[session_id]
+            
+            # 清理 SKILL 激活状态
+            try:
+                skill_manager.clear_session(session_id)
+            except Exception:
+                pass
+            
+            # 清理 MCP 激活状态
+            if mcp_session_manager is not None:
+                try:
+                    mcp_session_manager.clear_session(session_id)
+                except Exception:
+                    pass
+            
             return True
         return False
     

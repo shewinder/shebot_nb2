@@ -44,7 +44,7 @@ class MCPToolBridge:
         self._tool_cache: Dict[str, Dict[str, Any]] = {}  # {tool_key: tool_info}
     
     def set_session_manager(self, session_manager: Any) -> None:
-        """设置会话管理器（用于延迟绑定）
+        """设置会话管理器
         
         Args:
             session_manager: MCP 会话管理器实例
