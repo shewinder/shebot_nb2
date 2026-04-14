@@ -146,6 +146,26 @@ def _convert_to_png(image_bytes: bytes) -> bytes:
         return image_bytes
 
 
+async def _upload_media_to_atlascloud(api_base: str, api_key: str, image_bytes: bytes) -> Optional[str]:
+    """上传图片到 AtlasCloud 并返回临时 URL"""
+    url = f"{api_base}/model/uploadMedia"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with ClientSession() as http_session:
+            form = FormData()
+            form.add_field('file', image_bytes, filename='image.png', content_type='image/png')
+            async with http_session.post(url, headers=headers, data=form) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    logger.error(f"AtlasCloud 上传失败: {resp.status}, {error_text}")
+                    return None
+                result = await resp.json()
+                return result.get("url") or result.get("data", {}).get("download_url")
+    except Exception as e:
+        logger.exception(f"AtlasCloud 上传异常: {e}")
+        return None
+
+
 @tool_registry.register(
     name="generate_image",
     description="""生成或编辑图片。
@@ -330,6 +350,17 @@ async def _call_generate_api(
             }],
             "generationConfig": generation_config
         }
+    elif api_format == "atlascloud":
+        url = f"{api_base}/model/generateImage"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "enable_sync_mode": True
+        }
     else:
         url = f"{api_base}/images/generations"
         headers = {
@@ -368,6 +399,11 @@ async def _call_generate_api(
                     data = part["inlineData"].get("data", "")
                     if data:
                         urls.append(f"data:{mime_type};base64,{data}")
+    elif api_format == "atlascloud":
+        outputs = result.get("data", {}).get("outputs", [])
+        if outputs:
+            return {"success": True, "urls": [outputs[0]]}
+        return {"success": False, "error": "AtlasCloud API 未返回图片 outputs"}
     else:
         for item in result.get("data", []):
             if isinstance(item, dict):
@@ -462,6 +498,50 @@ async def _call_edit_api(
                         urls.append(f"data:{mime_type};base64,{data}")
         
         return {"success": True, "urls": urls}
+    elif api_format == "atlascloud":
+        images_payload = []
+        for i, image_url in enumerate(image_urls):
+            if image_url.startswith('data:'):
+                image_bytes = await _get_image_bytes(image_url)
+                if not image_bytes:
+                    return {"success": False, "error": f"无法读取第 {i+1} 张图片数据"}
+                image_bytes = _convert_to_png(image_bytes)
+                temp_url = await _upload_media_to_atlascloud(api_base, api_key, image_bytes)
+                if not temp_url:
+                    return {"success": False, "error": f"AtlasCloud 上传第 {i+1} 张图片失败"}
+                images_payload.append(temp_url)
+            else:
+                images_payload.append(image_url)
+
+        url = f"{api_base}/model/generateImage"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "images": images_payload,
+            "enable_sync_mode": True
+        }
+
+        logger.info(f"调用 AtlasCloud 编辑 API: {url}, model: {model}, images: {len(images_payload)}")
+        resp = await aiohttpx.post(url, headers=headers, json=payload)
+
+        if not resp.ok:
+            error_text = str(resp.text)
+            logger.error(f"API 调用失败: {getattr(resp, 'status_code', 'unknown')}, {error_text}")
+            return {"success": False, "error": f"HTTP {getattr(resp, 'status_code', 'unknown')}: {str(error_text)[:200]}"}
+
+        result = resp.json if hasattr(resp, 'json') else resp.json()
+        logger.info(f"AtlasCloud 编辑 API 响应: {log_json(result)}")
+        if not result:
+            return {"success": False, "error": "API 返回空结果"}
+
+        outputs = result.get("data", {}).get("outputs", [])
+        if outputs:
+            return {"success": True, "urls": [outputs[0]]}
+        return {"success": False, "error": "AtlasCloud API 未返回图片 outputs"}
     else:
         # OpenAI 格式支持多图（最多10张）
         url = f"{api_base}/images/edits"

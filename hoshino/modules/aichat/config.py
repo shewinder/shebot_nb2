@@ -37,7 +37,7 @@ class ApiEntry(BaseModel):
 class ImageModelEntry(BaseModel):
     """图像模型配置"""
     model: str = "gemini-3-pro-image-preview"                     # 模型名称
-    api_format: str = "gemini"      # API格式: openai, gemini
+    api_format: str = "gemini"      # API格式: openai, gemini, atlascloud
     capabilities: List[str] = ["generate", "edit", "multi_edit"]    # 能力列表: generate, edit, multi_edit
 
 
