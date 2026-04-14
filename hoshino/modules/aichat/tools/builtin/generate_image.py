@@ -2,6 +2,7 @@
 AI 工具：图片生成与编辑
 根据文本描述生成图片或编辑已有图片
 """
+import asyncio
 import base64
 import io
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -164,6 +165,40 @@ async def _upload_media_to_atlascloud(api_base: str, api_key: str, image_bytes: 
     except Exception as e:
         logger.exception(f"AtlasCloud 上传异常: {e}")
         return None
+
+
+async def _poll_atlascloud_prediction(api_base: str, api_key: str, prediction_id: str) -> Dict[str, Any]:
+    """轮询 AtlasCloud 预测任务结果"""
+    poll_url = f"{api_base}/model/prediction/{prediction_id}"
+    timeout = 180
+    interval = 2
+    elapsed = 0
+    urls: List[str] = []
+
+    while elapsed < timeout:
+        poll_resp = await aiohttpx.get(poll_url, headers={"Authorization": f"Bearer {api_key}"})
+        if not poll_resp.ok:
+            error_text = str(poll_resp.text)
+            logger.error(f"AtlasCloud 轮询失败: {getattr(poll_resp, 'status_code', 'unknown')}, {error_text}")
+            return {"success": False, "error": f"轮询失败 HTTP {getattr(poll_resp, 'status_code', 'unknown')}: {str(error_text)[:200]}"}
+
+        poll_result = poll_resp.json if hasattr(poll_resp, 'json') else poll_resp.json()
+        status = poll_result.get("data", {}).get("status")
+        logger.info(f"AtlasCloud 任务状态: {status} ({elapsed}s)")
+
+        if status == "completed":
+            outputs = poll_result.get("data", {}).get("outputs", [])
+            if outputs:
+                urls.append(outputs[0])
+            return {"success": True, "urls": urls}
+        elif status == "failed":
+            error_msg = poll_result.get("data", {}).get("error", "未知错误")
+            return {"success": False, "error": f"AtlasCloud 生成失败: {error_msg}"}
+
+        await asyncio.sleep(interval)
+        elapsed += interval
+
+    return {"success": False, "error": "AtlasCloud 生成超时"}
 
 
 @tool_registry.register(
@@ -358,8 +393,7 @@ async def _call_generate_api(
         }
         payload = {
             "model": model,
-            "prompt": prompt,
-            "enable_sync_mode": True
+            "prompt": prompt
         }
     else:
         url = f"{api_base}/images/generations"
@@ -400,10 +434,10 @@ async def _call_generate_api(
                     if data:
                         urls.append(f"data:{mime_type};base64,{data}")
     elif api_format == "atlascloud":
-        outputs = result.get("data", {}).get("outputs", [])
-        if outputs:
-            return {"success": True, "urls": [outputs[0]]}
-        return {"success": False, "error": "AtlasCloud API 未返回图片 outputs"}
+        prediction_id = result.get("data", {}).get("id")
+        if not prediction_id:
+            return {"success": False, "error": "AtlasCloud API 未返回 prediction id"}
+        return await _poll_atlascloud_prediction(api_base, api_key, prediction_id)
     else:
         for item in result.get("data", []):
             if isinstance(item, dict):
@@ -518,12 +552,19 @@ async def _call_edit_api(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "images": images_payload,
-            "enable_sync_mode": True
-        }
+        # AtlasCloud 不同模型字段不同：单图编辑用 image，多图融合用 images
+        if len(images_payload) == 1:
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "image": images_payload[0],
+            }
+        else:
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "images": images_payload,
+            }
 
         logger.info(f"调用 AtlasCloud 编辑 API: {url}, model: {model}, images: {len(images_payload)}")
         resp = await aiohttpx.post(url, headers=headers, json=payload)
@@ -538,10 +579,10 @@ async def _call_edit_api(
         if not result:
             return {"success": False, "error": "API 返回空结果"}
 
-        outputs = result.get("data", {}).get("outputs", [])
-        if outputs:
-            return {"success": True, "urls": [outputs[0]]}
-        return {"success": False, "error": "AtlasCloud API 未返回图片 outputs"}
+        prediction_id = result.get("data", {}).get("id")
+        if not prediction_id:
+            return {"success": False, "error": "AtlasCloud API 未返回 prediction id"}
+        return await _poll_atlascloud_prediction(api_base, api_key, prediction_id)
     else:
         # OpenAI 格式支持多图（最多10张）
         url = f"{api_base}/images/edits"
