@@ -1085,19 +1085,6 @@ class SkillInfo(BaseModel):
     enabled: bool
 
 
-class InstalledSkillInfo(BaseModel):
-    """已安装 SKILL 信息"""
-    name: str
-    description: str
-    allowed_tools: List[str]
-    user_invocable: bool
-    disable_model_invocation: bool
-    source: str
-    version: str
-    enabled: bool
-    path: str
-
-
 class SkillConfig(BaseModel):
     """SKILL 配置"""
     enable_skills: bool
@@ -1135,77 +1122,6 @@ async def get_skills():
         logger.exception(f"获取 SKILL 列表失败: {e}")
         return {"status": 500, "data": f"获取失败: {str(e)}"}
 
-
-@router.get("/skills/installed")
-async def get_installed_skills():
-    """获取所有已安装的 SKILL（包括禁用的）"""
-    try:
-        # 确保 skill_manager 已初始化
-        if not skill_manager._initialized:
-            skill_manager.user_paths = conf.skill_user_paths
-            skill_manager.initialize()
-        
-        installed = skill_manager.list_installed_skills()
-        result = [
-            InstalledSkillInfo(
-                name=skill.metadata.name,
-                description=skill.metadata.description,
-                allowed_tools=skill.metadata.allowed_tools,
-                user_invocable=skill.metadata.user_invocable,
-                disable_model_invocation=skill.metadata.disable_model_invocation,
-                source=skill.metadata.source,
-                version=skill.metadata.version,
-                enabled=skill.metadata.enabled,
-                path=str(path)
-            )
-            for skill, path in installed
-        ]
-        return {"status": 200, "data": result}
-    except Exception as e:
-        logger.exception(f"获取已安装 SKILL 列表失败: {e}")
-        return {"status": 500, "data": f"获取失败: {str(e)}"}
-
-
-@router.post("/skills/{skill_name}/enable")
-async def enable_skill(skill_name: str):
-    """启用指定 SKILL"""
-    try:
-        success, msg = skill_manager.enable_skill(skill_name)
-        if success:
-            return {"status": 200, "data": msg}
-        else:
-            return {"status": 400, "data": msg}
-    except Exception as e:
-        logger.exception(f"启用 SKILL 失败: {e}")
-        return {"status": 500, "data": f"启用失败: {str(e)}"}
-
-
-@router.post("/skills/{skill_name}/disable")
-async def disable_skill(skill_name: str):
-    """禁用指定 SKILL"""
-    try:
-        success, msg = skill_manager.disable_skill(skill_name)
-        if success:
-            return {"status": 200, "data": msg}
-        else:
-            return {"status": 400, "data": msg}
-    except Exception as e:
-        logger.exception(f"禁用 SKILL 失败: {e}")
-        return {"status": 500, "data": f"禁用失败: {str(e)}"}
-
-
-@router.delete("/skills/{skill_name}")
-async def delete_skill(skill_name: str):
-    """删除指定 SKILL"""
-    try:
-        success, msg = skill_manager.delete_skill(skill_name)
-        if success:
-            return {"status": 200, "data": msg}
-        else:
-            return {"status": 400, "data": msg}
-    except Exception as e:
-        logger.exception(f"删除 SKILL 失败: {e}")
-        return {"status": 500, "data": f"删除失败: {str(e)}"}
 
 
 @router.get("/config/skills")

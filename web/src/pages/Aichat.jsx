@@ -47,9 +47,7 @@ import {
   ArrowDownOutlined,
   BugOutlined,
   CodeOutlined,
-  ToolOutlined,
-  PlayCircleOutlined,
-  StopOutlined
+  ToolOutlined
 } from '@ant-design/icons'
 import * as aichatApi from '../api'
 
@@ -137,7 +135,6 @@ function Aichat() {
 
   // SKILL 管理相关
   const [skills, setSkills] = useState([])
-  const [installedSkills, setInstalledSkills] = useState([])
   const [skillsLoading, setSkillsLoading] = useState(false)
   const [skillsConfig, setSkillsConfig] = useState({ enable_skills: false, skill_user_paths: [] })
 
@@ -686,7 +683,7 @@ function Aichat() {
         setSkillsConfig(res)
         // 如果 SKILL 系统启用，同时获取 SKILL 列表
         if (res.enable_skills) {
-          await Promise.all([fetchSkills(), fetchInstalledSkills()])
+          await fetchSkills()
         }
       }
     } catch (error) {
@@ -707,49 +704,6 @@ function Aichat() {
     }
   }
 
-  const fetchInstalledSkills = async () => {
-    try {
-      const res = await aichatApi.getInstalledSkills()
-      // 响应拦截器已解包，res 直接是数组
-      setInstalledSkills(res || [])
-    } catch (error) {
-      // 静默处理
-    }
-  }
-
-  const handleEnableSkill = async (skillName) => {
-    try {
-      const result = await aichatApi.enableSkill(skillName)
-      message.success(result.data || '启用成功')
-      await fetchInstalledSkills()
-      await fetchSkills()
-    } catch (error) {
-      message.error('启用失败: ' + error.message)
-    }
-  }
-
-  const handleDisableSkill = async (skillName) => {
-    try {
-      const result = await aichatApi.disableSkill(skillName)
-      message.success(result.data || '禁用成功')
-      await fetchInstalledSkills()
-      await fetchSkills()
-    } catch (error) {
-      message.error('禁用失败: ' + error.message)
-    }
-  }
-
-  const handleDeleteSkill = async (skillName) => {
-    try {
-      const result = await aichatApi.deleteSkill(skillName)
-      message.success(result.data || '删除成功')
-      await fetchInstalledSkills()
-      await fetchSkills()
-    } catch (error) {
-      message.error('删除失败: ' + error.message)
-    }
-  }
-
   const handleUpdateSkillsConfig = async (values) => {
     try {
       const result = await aichatApi.updateSkillsConfig(values)
@@ -757,7 +711,7 @@ function Aichat() {
       setSkillsConfig(values)
       // 如果启用了 SKILL 系统，刷新列表
       if (values.enable_skills) {
-        await Promise.all([fetchSkills(), fetchInstalledSkills()])
+        await fetchSkills()
       }
     } catch (error) {
       message.error('配置更新失败: ' + error.message)
@@ -1756,7 +1710,7 @@ function Aichat() {
             title="SKILL 系统配置"
             extra={
               <Space>
-                <Button icon={<ReloadOutlined />} onClick={() => { fetchSkills(); fetchInstalledSkills(); }} loading={skillsLoading}>
+                <Button icon={<ReloadOutlined />} onClick={fetchSkills} loading={skillsLoading}>
                   刷新
                 </Button>
               </Space>
@@ -1792,73 +1746,6 @@ function Aichat() {
                       />
                     ) : (
                       <Text type="secondary">未配置用户 SKILL 路径</Text>
-                    )}
-                  </Card>
-                  
-                  <Card size="small" title="已安装 SKILL 管理">
-                    {installedSkills.length > 0 ? (
-                      <List
-                        size="small"
-                        bordered
-                        dataSource={installedSkills}
-                        renderItem={skill => (
-                          <List.Item
-                            actions={[
-                              skill.enabled ? (
-                                <Button
-                                  type="link"
-                                  icon={<StopOutlined />}
-                                  onClick={() => handleDisableSkill(skill.name)}
-                                >
-                                  禁用
-                                </Button>
-                              ) : (
-                                <Button
-                                  type="link"
-                                  icon={<PlayCircleOutlined />}
-                                  onClick={() => handleEnableSkill(skill.name)}
-                                >
-                                  启用
-                                </Button>
-                              ),
-                              <Popconfirm
-                                title="确定要删除这个 SKILL 吗？"
-                                description="删除后将无法恢复，需要重新安装。"
-                                onConfirm={() => handleDeleteSkill(skill.name)}
-                                okText="确定"
-                                cancelText="取消"
-                              >
-                                <Button type="link" danger icon={<DeleteOutlined />}>
-                                  删除
-                                </Button>
-                              </Popconfirm>
-                            ]}
-                          >
-                            <List.Item.Meta
-                              title={
-                                <Space>
-                                  <span>{skill.name}</span>
-                                  {skill.enabled ? (
-                                    <Tag color="green">已启用</Tag>
-                                  ) : (
-                                    <Tag color="red">已禁用</Tag>
-                                  )}
-                                </Space>
-                              }
-                              description={
-                                <Space direction="vertical" size={0}>
-                                  <Text type="secondary">{skill.description}</Text>
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    路径: {skill.path}
-                                  </Text>
-                                </Space>
-                              }
-                            />
-                          </List.Item>
-                        )}
-                      />
-                    ) : (
-                      <Empty description="未安装任何用户 SKILL" />
                     )}
                   </Card>
                 </>

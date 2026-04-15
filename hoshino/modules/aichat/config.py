@@ -109,9 +109,6 @@ class Config(BaseConfig):
     # 文档: https://help.aliyun.com/zh/document_detail/2883041.html
     iqs_api_key: str = ""  # 阿里云 IQS API Key，用于网页搜索
 
-    # ClawHub 配置
-    clawhub_token: str = ""            # ClawHub API Token，用于搜索和安装 skill
-
     # SKILL 系统配置
     enable_skills: bool = True         # SKILL 系统总开关
     # 用户自定义 SKILL 搜索路径（这些路径的 skill 不会被 git 跟踪）

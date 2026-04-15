@@ -16,7 +16,7 @@ class SkillMetadata:
     allowed_tools: List[str] = field(default_factory=list)  # 允许的工具
     user_invocable: bool = True        # 用户是否可手动触发
     disable_model_invocation: bool = False  # 是否禁止 AI 自动触发
-    source: str = "local"              # 来源标识 (local/clawhub/url)
+    source: str = "local"              # 来源标识 (local/url)
     version: str = ""                  # 版本号
     enabled: bool = True               # 是否启用
     

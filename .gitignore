@@ -6,7 +6,6 @@ __pycache__/
 # Repository-customized
 .idea
 .vscode
-.clawhub
 *.bak
 .env.*
 !.env.prod.example
