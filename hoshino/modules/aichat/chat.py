@@ -157,7 +157,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
     group_id = getattr(event, 'group_id', None)
     
     in_continuous_mode = session_manager.is_continuous_mode(user_id, group_id)
-    choice_mode_enabled, choice_guideline = session_manager.get_choice_mode(user_id, group_id)
     last_choices = session_manager.get_last_choices(user_id, group_id)
     
     if msg.startswith('#'):
@@ -167,7 +166,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
     else:
         return
     
-    if choice_mode_enabled and last_choices:
+    if last_choices:
         if msg in ['1', '2', '3']:
             choice_num = int(msg)
             if choice_num in last_choices:
@@ -278,16 +277,13 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     display_response = response
     
-    if choice_mode_enabled and in_continuous_mode:
-        content, choices = parse_choices_from_response(response)
-        if choices:
-            session_manager.set_last_choices(user_id, group_id, choices)
-            display_response = content + format_choices_for_display(choices)
-            session.add_message("assistant", content)
-        else:
-            session_manager.set_last_choices(user_id, group_id, {})
-            session.add_message("assistant", response)
+    content, choices = parse_choices_from_response(response)
+    if choices:
+        session_manager.set_last_choices(user_id, group_id, choices)
+        display_response = content + format_choices_for_display(choices)
+        session.add_message("assistant", content)
     else:
+        session_manager.set_last_choices(user_id, group_id, {})
         session.add_message("assistant", response)
     
     try:

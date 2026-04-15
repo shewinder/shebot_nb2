@@ -953,7 +953,7 @@ async def get_sessions():
                 user_images=len(session._user_images),
                 ai_images=len(session._ai_images),
                 continuous_mode=session.continuous_mode,
-                choice_mode=session.choice_mode_enabled,
+                choice_mode=False,
                 last_active=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.last_active)),
                 is_expired=session.is_expired()
             ))
@@ -1021,8 +1021,8 @@ async def get_session_detail(session_id: str):
                 "user_images": list(session._user_images.keys()),
                 "ai_images": list(session._ai_images.keys()),
                 "continuous_mode": session.continuous_mode,
-                "choice_mode": session.choice_mode_enabled,
-                "choice_guideline": session.choice_guideline,
+                "choice_mode": False,
+                "choice_guideline": "",
                 "last_choices": session.last_choices,
                 "last_active": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.last_active)),
                 "is_expired": session.is_expired(),

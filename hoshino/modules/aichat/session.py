@@ -20,18 +20,6 @@ from .md_render import render_text_if_markdown
 
 conf = Config.get_instance('aichat')
 
-# 选项生成提示词模板
-CHOICE_MODE_PROMPT_TEMPLATE = """[选项生成模式]
-请在你的回复末尾，使用以下格式为用户提供3个接下来的行动选项，格外注意[CHOICES]标签是成对出现的：
-[CHOICES]
-1. 选项1内容
-2. 选项2内容
-3. 选项3内容
-[/CHOICES]
-{guideline_section}
-[/选项生成模式]"""
-
-
 @dataclass
 class ChatResult:
     """聊天结果数据类"""
@@ -49,8 +37,6 @@ class Session:
         self.messages: List[Dict[str, Any]] = []
         self.last_active = time.time()
         self.continuous_mode = False
-        self.choice_mode_enabled = False
-        self.choice_guideline: Optional[str] = None
         self.last_choices: Dict[int, str] = {}
         self._user_images: Dict[str, str] = {}
         self._ai_images: Dict[str, str] = {}
@@ -417,8 +403,7 @@ AI回复：🎨 已生成：<ai_image_1>
     async def _build_messages_for_chat(self, event: Optional[Any] = None) -> None:
         """构建用于 API 调用的消息列表，直接更新 self.messages
         
-        使用内部保存的 persona, choice_mode_enabled, choice_guideline
-        以及 event 构建环境信息
+        使用内部保存的 persona 以及 event 构建环境信息
         
         Args:
             event: 消息事件（可选，用于构建环境信息）
@@ -428,12 +413,6 @@ AI回复：🎨 已生成：<ai_image_1>
         
         # 构建系统消息内容（使用内部保存的 persona）
         system_content = self.persona or ""
-        
-        # 选项生成模式提示（使用内部的 choice_mode_enabled 和 choice_guideline）
-        if self.choice_mode_enabled:
-            guideline_section = f"\n选项生成指导标准：{self.choice_guideline}\n请根据以上指导标准生成合适的选项。" if self.choice_guideline else ""
-            choice_prompt = CHOICE_MODE_PROMPT_TEMPLATE.format(guideline_section=guideline_section)
-            system_content = f"{system_content}\n\n{choice_prompt}" if system_content else choice_prompt
         
         # 环境信息（从 event 构建，包含当前日期时间）
         env_info = self._build_env_info(event)
@@ -904,8 +883,6 @@ class SessionManager:
     def __init__(self):
         self.sessions: Dict[str, Session] = {}
         self.continuous_users: Dict[str, bool] = {}
-        self.choice_mode_users: Dict[str, bool] = {}
-        self.choice_guideline_users: Dict[str, Optional[str]] = {}
     
     def get_session_id(self, user_id: int, group_id: Optional[int] = None) -> str:
         if group_id:
@@ -925,9 +902,6 @@ class SessionManager:
         session = Session(session_id, persona)
         if self.continuous_users.get(session_id, False):
             session.continuous_mode = True
-        if self.choice_mode_users.get(session_id, False):
-            session.choice_mode_enabled = True
-            session.choice_guideline = self.choice_guideline_users.get(session_id, None)
         self.sessions[session_id] = session
         return session
     
@@ -937,10 +911,6 @@ class SessionManager:
             del self.sessions[session_id]
             if session_id in self.continuous_users:
                 del self.continuous_users[session_id]
-            if session_id in self.choice_mode_users:
-                del self.choice_mode_users[session_id]
-            if session_id in self.choice_guideline_users:
-                del self.choice_guideline_users[session_id]
             
             # 清理 SKILL 激活状态
             try:
@@ -979,39 +949,6 @@ class SessionManager:
                 if session_id in self.continuous_users:
                     del self.continuous_users[session_id]
         return self.continuous_users.get(session_id, False)
-    
-    def set_choice_mode(self, user_id: int, group_id: Optional[int] = None, enabled: bool = True, guideline: Optional[str] = None) -> bool:
-        session_id = self.get_session_id(user_id, group_id)
-        self.choice_mode_users[session_id] = enabled
-        if enabled and guideline:
-            self.choice_guideline_users[session_id] = guideline
-        elif not enabled:
-            if session_id in self.choice_guideline_users:
-                del self.choice_guideline_users[session_id]
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                session.choice_mode_enabled = enabled
-                session.choice_guideline = guideline if enabled else None
-                if not enabled:
-                    session.last_choices = {}
-                return True
-        return False
-    
-    def get_choice_mode(self, user_id: int, group_id: Optional[int] = None) -> Tuple[bool, Optional[str]]:
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session.choice_mode_enabled, session.choice_guideline
-            else:
-                if session_id in self.choice_mode_users:
-                    del self.choice_mode_users[session_id]
-                if session_id in self.choice_guideline_users:
-                    del self.choice_guideline_users[session_id]
-        enabled = self.choice_mode_users.get(session_id, False)
-        guideline = self.choice_guideline_users.get(session_id, None)
-        return enabled, guideline
     
     def set_last_choices(self, user_id: int, group_id: Optional[int] = None, choices: Dict[int, str] = None) -> bool:
         session_id = self.get_session_id(user_id, group_id)
