@@ -21,7 +21,9 @@ import {
   Switch,
   InputNumber,
   Upload,
-  Table
+  Table,
+  Row,
+  Col
 } from 'antd'
 import {
   SaveOutlined,
@@ -122,12 +124,9 @@ function Aichat() {
   const [switchingModel, setSwitchingModel] = useState(false)
   const [loadingModels, setLoadingModels] = useState(false)
 
-  // 图像模型管理相关
-  const [imageModels, setImageModels] = useState([])
-  const [imageModelModalVisible, setImageModelModalVisible] = useState(false)
-  const [imageModelModalMode, setImageModelModalMode] = useState('add') // 'add' 或 'edit'
-  const [editingImageModelIndex, setEditingImageModelIndex] = useState(null)
-  const [imageModelForm] = Form.useForm()
+  // 图像 API 配置相关
+  const [imageApisForm] = Form.useForm()
+  const [imageApisLoading, setImageApisLoading] = useState(false)
 
   // Session 调试相关
   const [sessions, setSessions] = useState([])
@@ -156,7 +155,7 @@ function Aichat() {
         fetchSuperusers(),
         fetchGroups(),
         fetchGlobalPresets(),
-        fetchImageModels(),
+        fetchImageApis(),
         fetchSkillsConfig()
       ])
     } catch (error) {
@@ -604,90 +603,30 @@ function Aichat() {
     }
   }
 
-  // ===== 图像模型管理相关函数 =====
-  const fetchImageModels = async () => {
+  // ===== 图像 API 配置相关函数 =====
+  const fetchImageApis = async () => {
+    setImageApisLoading(true)
     try {
-      const data = await aichatApi.getImageModels()
-      setImageModels(data || [])
-    } catch (error) {
-      // 静默处理，不显示错误
-    }
-  }
-
-  const openAddImageModelModal = () => {
-    setImageModelModalMode('add')
-    setEditingImageModelIndex(null)
-    imageModelForm.resetFields()
-    imageModelForm.setFieldsValue({
-      api_format: 'openai',
-      capabilities: ['generate']
-    })
-    setImageModelModalVisible(true)
-  }
-
-  const openEditImageModelModal = (record) => {
-    setImageModelModalMode('edit')
-    setEditingImageModelIndex(record.index)
-    imageModelForm.resetFields()
-    imageModelForm.setFieldsValue({
-      model: record.model,
-      api_format: record.api_format,
-      capabilities: record.capabilities
-    })
-    setImageModelModalVisible(true)
-  }
-
-  const handleImageModelSubmit = async (values) => {
-    try {
-      if (imageModelModalMode === 'add') {
-        const result = await aichatApi.addImageModel(values)
-        message.success(result.data || '添加成功')
-      } else {
-        const result = await aichatApi.updateImageModel(editingImageModelIndex, values)
-        message.success(result.data || '更新成功')
+      const data = await aichatApi.getImageApis()
+      if (data) {
+        imageApisForm.setFieldsValue({
+          generate_api: data.generate_api,
+          edit_api: data.edit_api
+        })
       }
-      setImageModelModalVisible(false)
-      await fetchImageModels()
     } catch (error) {
-      message.error(imageModelModalMode === 'add' ? '添加失败: ' : '更新失败: ' + error.message)
+      // 静默处理
+    } finally {
+      setImageApisLoading(false)
     }
   }
 
-  const handleDeleteImageModel = async (index) => {
+  const handleImageApisSubmit = async (values) => {
     try {
-      const result = await aichatApi.deleteImageModel(index)
-      message.success(result.data || '删除成功')
-      await fetchImageModels()
+      const result = await aichatApi.updateImageApis(values)
+      message.success(result.data || '保存成功')
     } catch (error) {
-      message.error('删除失败: ' + error.message)
-    }
-  }
-
-  const handleMoveImageModel = async (index, direction) => {
-    if (direction === 'up' && index === 0) return
-    if (direction === 'down' && index === imageModels.length - 1) return
-
-    const newModels = [...imageModels]
-    const targetIndex = direction === 'up' ? index - 1 : index + 1
-    
-    // 交换位置
-    const temp = newModels[index]
-    newModels[index] = newModels[targetIndex]
-    newModels[targetIndex] = temp
-
-    // 更新索引
-    newModels.forEach((m, i) => m.index = i)
-
-    try {
-      // 构建提交数据（去掉index字段）
-      const submitModels = newModels.map(({ model, api_format, capabilities }) => ({
-        model, api_format, capabilities
-      }))
-      const result = await aichatApi.reorderImageModels(submitModels)
-      message.success(result.data || '排序更新成功')
-      await fetchImageModels()
-    } catch (error) {
-      message.error('排序更新失败: ' + error.message)
+      message.error('保存失败: ' + error.message)
     }
   }
 
@@ -1592,107 +1531,114 @@ function Aichat() {
         </TabPane>
 
         <TabPane
-          tab={<span><PictureOutlined /> 图像模型管理</span>}
-          key="image-models"
+          tab={<span><PictureOutlined /> 图像 API 配置</span>}
+          key="image-apis"
         >
-          <Card
-            title="图像生成模型配置"
-            extra={
+          <Spin spinning={imageApisLoading}>
+            <Form
+              form={imageApisForm}
+              layout="vertical"
+              onFinish={handleImageApisSubmit}
+              autoComplete="off"
+            >
+              <Row gutter={24}>
+                <Col xs={24} lg={12}>
+                  <Card title="🎨 图像生成 API" style={{ marginBottom: 16 }}>
+                    <Form.Item
+                      name={['generate_api', 'api']}
+                      label="API 标识"
+                      rules={[{ required: true, message: '请输入API标识' }]}
+                    >
+                      <Input placeholder="例如：gemini-gen" />
+                    </Form.Item>
+                    <Form.Item
+                      name={['generate_api', 'api_base']}
+                      label="API Base URL"
+                      rules={[{ required: true, message: '请输入API Base URL' }]}
+                    >
+                      <Input placeholder="例如：https://generativelanguage.googleapis.com/v1beta" />
+                    </Form.Item>
+                    <Form.Item
+                      name={['generate_api', 'api_key']}
+                      label="API Key"
+                      rules={[{ required: true, message: '请输入API Key' }]}
+                    >
+                      <Input.Password placeholder="输入API Key" />
+                    </Form.Item>
+                    <Form.Item
+                      name={['generate_api', 'model']}
+                      label="模型名称"
+                      rules={[{ required: true, message: '请输入模型名称' }]}
+                    >
+                      <Input placeholder="例如：gemini-3-pro-image-preview" />
+                    </Form.Item>
+                    <Form.Item
+                      name={['generate_api', 'api_format']}
+                      label="API 格式"
+                      rules={[{ required: true, message: '请选择API格式' }]}
+                    >
+                      <Select placeholder="选择API格式">
+                        <Option value="openai">OpenAI (openai)</Option>
+                        <Option value="gemini">Gemini (gemini)</Option>
+                        <Option value="atlascloud">AtlasCloud (atlascloud)</Option>
+                      </Select>
+                    </Form.Item>
+                  </Card>
+                </Col>
+                <Col xs={24} lg={12}>
+                  <Card title="🖌️ 图像编辑 API" style={{ marginBottom: 16 }}>
+                    <Form.Item
+                      name={['edit_api', 'api']}
+                      label="API 标识"
+                      rules={[{ required: true, message: '请输入API标识' }]}
+                    >
+                      <Input placeholder="例如：openai-edit" />
+                    </Form.Item>
+                    <Form.Item
+                      name={['edit_api', 'api_base']}
+                      label="API Base URL"
+                      rules={[{ required: true, message: '请输入API Base URL' }]}
+                    >
+                      <Input placeholder="例如：https://api.openai.com/v1" />
+                    </Form.Item>
+                    <Form.Item
+                      name={['edit_api', 'api_key']}
+                      label="API Key"
+                      rules={[{ required: true, message: '请输入API Key' }]}
+                    >
+                      <Input.Password placeholder="输入API Key" />
+                    </Form.Item>
+                    <Form.Item
+                      name={['edit_api', 'model']}
+                      label="模型名称"
+                      rules={[{ required: true, message: '请输入模型名称' }]}
+                    >
+                      <Input placeholder="例如：gpt-image-1" />
+                    </Form.Item>
+                    <Form.Item
+                      name={['edit_api', 'api_format']}
+                      label="API 格式"
+                      rules={[{ required: true, message: '请选择API格式' }]}
+                    >
+                      <Select placeholder="选择API格式">
+                        <Option value="openai">OpenAI (openai)</Option>
+                        <Option value="gemini">Gemini (gemini)</Option>
+                        <Option value="atlascloud">AtlasCloud (atlascloud)</Option>
+                      </Select>
+                    </Form.Item>
+                  </Card>
+                </Col>
+              </Row>
               <Space>
-                <Button icon={<PlusOutlined />} type="primary" onClick={openAddImageModelModal}>
-                  添加模型
+                <Button type="primary" htmlType="submit" icon={<SaveOutlined />}>
+                  保存配置
                 </Button>
-                <Button icon={<ReloadOutlined />} onClick={fetchImageModels}>
+                <Button icon={<ReloadOutlined />} onClick={fetchImageApis}>
                   刷新
                 </Button>
               </Space>
-            }
-          >
-            <Alert
-              message="模型选择优先级说明"
-              description={
-                <div>
-                  <p>系统按列表顺序选择第一个满足需求的模型：</p>
-                  <ul style={{ margin: 0, paddingLeft: 20 }}>
-                    <li><strong>generate</strong>：根据文本描述生成新图片</li>
-                    <li><strong>edit</strong>：编辑单张图片（如改变风格、添加元素）</li>
-                    <li><strong>multi_edit</strong>：融合多张图片（如让人物穿衣服、替换背景）</li>
-                  </ul>
-                  <p style={{ marginTop: 8, marginBottom: 0 }}>列表越靠前的模型优先级越高。可通过上下箭头调整顺序。</p>
-                </div>
-              }
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-
-            {imageModels.length > 0 ? (
-              <List
-                bordered
-                dataSource={imageModels}
-                renderItem={(item, index) => (
-                  <List.Item
-                    actions={[
-                      <Button
-                        type="text"
-                        icon={<ArrowUpOutlined />}
-                        disabled={index === 0}
-                        onClick={() => handleMoveImageModel(index, 'up')}
-                        title="上移"
-                      />,
-                      <Button
-                        type="text"
-                        icon={<ArrowDownOutlined />}
-                        disabled={index === imageModels.length - 1}
-                        onClick={() => handleMoveImageModel(index, 'down')}
-                        title="下移"
-                      />,
-                      <Button
-                        type="link"
-                        icon={<EditOutlined />}
-                        onClick={() => openEditImageModelModal(item)}
-                      >
-                        编辑
-                      </Button>,
-                      <Popconfirm
-                        title="确定要删除这个图像模型吗？"
-                        onConfirm={() => handleDeleteImageModel(item.index)}
-                        okText="确定"
-                        cancelText="取消"
-                      >
-                        <Button type="link" danger icon={<DeleteOutlined />}>
-                          删除
-                        </Button>
-                      </Popconfirm>
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={
-                        <Space>
-                          <Tag color="blue">优先级 {index + 1}</Tag>
-                          <span>{item.model}</span>
-                        </Space>
-                      }
-                      description={
-                        <Space direction="vertical" size={0} style={{ fontSize: 12 }}>
-                          <span>API格式: <Tag>{item.api_format}</Tag></span>
-                          <span>
-                            支持能力: {item.capabilities?.map(cap => (
-                              <Tag key={cap} color="green" size="small">
-                                {cap === 'generate' ? '生成' : cap === 'edit' ? '编辑' : '多图融合'}
-                              </Tag>
-                            ))}
-                          </span>
-                        </Space>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
-            ) : (
-              <Empty description="暂无图像模型配置，点击「添加模型」创建" />
-            )}
-          </Card>
+            </Form>
+          </Spin>
         </TabPane>
 
         <TabPane
@@ -2369,52 +2315,7 @@ function Aichat() {
         </Form>
       </Modal>
 
-      {/* 添加/编辑图像模型弹窗 */}
-      <Modal
-        title={imageModelModalMode === 'add' ? '添加图像模型' : '编辑图像模型'}
-        open={imageModelModalVisible}
-        onCancel={() => setImageModelModalVisible(false)}
-        onOk={() => imageModelForm.submit()}
-        width={600}
-      >
-        <Form
-          form={imageModelForm}
-          layout="vertical"
-          onFinish={handleImageModelSubmit}
-        >
-          <Form.Item
-            name="model"
-            label="模型名称"
-            rules={[{ required: true, message: '请输入模型名称' }]}
-            extra="具体的图像模型名称，如：gpt-image-1, gemini-3-pro-image-preview"
-          >
-            <Input placeholder="例如：gpt-image-1" />
-          </Form.Item>
-          <Form.Item
-            name="api_format"
-            label="API 格式"
-            rules={[{ required: true, message: '请选择API格式' }]}
-            extra="openai 格式兼容 OpenAI DALL-E API；gemini 格式兼容 Google Gemini API"
-          >
-            <Select placeholder="选择API格式">
-              <Option value="openai">OpenAI (openai)</Option>
-              <Option value="gemini">Gemini (gemini)</Option>
-            </Select>
-          </Form.Item>
-          <Form.Item
-            name="capabilities"
-            label="支持能力"
-            rules={[{ required: true, message: '请至少选择一项能力' }]}
-            extra="选择该模型支持的功能，可多选"
-          >
-            <Select mode="multiple" placeholder="选择支持的能力">
-              <Option value="generate">生成 (generate) - 根据文本描述生成新图片</Option>
-              <Option value="edit">编辑 (edit) - 编辑单张图片</Option>
-              <Option value="multi_edit">多图融合 (multi_edit) - 融合多张图片</Option>
-            </Select>
-          </Form.Item>
-        </Form>
-      </Modal>
+
     </div>
   )
 }

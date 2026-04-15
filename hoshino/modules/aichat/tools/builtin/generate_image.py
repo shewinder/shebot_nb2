@@ -18,47 +18,18 @@ from PIL import Image
 from hoshino.util import aiohttpx, truncate_log, log_json
 
 from ..registry import tool_registry, ok, fail
-from ...config import Config, ApiEntry, ImageModelEntry
+from ...config import Config, ImageApiEntry
 
 # 加载配置
 conf = Config.get_instance('aichat')
 
 
-def _get_api_config_by_model(model_name: str) -> Optional[ApiEntry]:
-    """
-    根据模型名称查找 API 配置
-    
-    1. 首先精确匹配 model 字段
-    2. 如果没找到，使用当前选中的 API 的 base/key，但 model 保持为传入值
-    
-    Args:
-        model_name: 模型名称
-    
-    Returns:
-        ApiEntry 或 None
-    """
-    if not model_name:
-        return None
-    
-    # 1. 精确匹配 model 字段
-    for api in conf.get_apis():
-        if api.model == model_name:
-            return api
-    
-    # 2. 没找到，使用当前 API 的 base/key，但替换 model
-    current_api_name = conf.get_current_api()
-    current_api = conf.get_api_by_name(current_api_name)
-    if current_api:
-        logger.info(f"未找到模型 {model_name} 的配置，使用当前 API ({current_api.api}) 的 base/key，但模型保持为 {model_name}")
-        # 创建新的配置，保持 model 为传入的模型名
-        return ApiEntry(
-            api=current_api.api,
-            api_key=current_api.api_key,
-            api_base=current_api.api_base,
-            model=model_name,  # 使用传入的模型名，而非当前 API 的 model
-        )
-    
-    return None
+def _select_image_api(image_count: int) -> Optional[ImageApiEntry]:
+    """根据图片数量选择对应的图片 API 配置"""
+    if image_count == 0:
+        return conf.image_generate_api
+    else:
+        return conf.image_edit_api
 
 
 async def _download_image(image_url: str) -> Optional[bytes]:
@@ -74,22 +45,7 @@ async def _download_image(image_url: str) -> Optional[bytes]:
         return None
 
 
-def _select_image_model(image_count: int) -> Optional[ImageModelEntry]:
-    """根据图片数量选择第一个匹配的模型"""
-    required = "multi_edit" if image_count > 1 else ("edit" if image_count == 1 else "generate")
-    
-    for model in conf.image_models:
-        if required in model.capabilities:
-            return model
-    
-    # 降级：multi_edit -> edit
-    if required == "multi_edit":
-        for model in conf.image_models:
-            if "edit" in model.capabilities:
-                logger.warning("未找到支持 multi_edit 的模型，降级使用单图 edit")
-                return model
-    
-    return None
+
 
 
 
@@ -255,27 +211,19 @@ async def generate_image(
         if image_count > 0 and not session:
             return fail("无法解析图片标识符：无可用 Session")
         
-        model_entry = _select_image_model(image_count)
-        if not model_entry:
-            error_msg = "未找到可用的图片生成模型"
+        api_entry = _select_image_api(image_count)
+        if not api_entry:
+            error_msg = "未找到可用的图片 API 配置"
             logger.error(error_msg)
             return fail(error_msg)
         
-        target_model = model_entry.model
-        api_format = model_entry.api_format
-        
-        api_config = _get_api_config_by_model(target_model)
-        
-        if not api_config:
-            error_msg = f"未找到模型 {target_model} 的 API 配置"
-            logger.error(error_msg)
-            return fail(error_msg)
-        
-        api_key = api_config.api_key
-        api_base = api_config.api_base.rstrip('/')
+        api_key = api_entry.api_key
+        api_base = api_entry.api_base.rstrip('/')
+        target_model = api_entry.model
+        api_format = api_entry.api_format
         
         if not api_key:
-            error_msg = f"模型 {target_model} 的 API Key 未配置"
+            error_msg = f"API '{api_entry.api}' 的 API Key 未配置"
             logger.error(error_msg)
             return fail(error_msg)
         

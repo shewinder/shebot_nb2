@@ -743,12 +743,15 @@ async def current_model(bot: Bot, event: Event):
         f"💬 对话模型：{model_name}",
     ]
     
-    if conf.image_models:
-        image_models_info = []
-        for m in conf.image_models:
-            caps = ", ".join(m.capabilities)
-            image_models_info.append(f"{m.model} ({caps})")
-        lines.append(f"🎨 图像模型：{'; '.join(image_models_info)}")
+    gen_api = conf.image_generate_api
+    edit_api = conf.image_edit_api
+    if gen_api.api and edit_api.api:
+        lines.append(f"🎨 图像生成：{gen_api.model} ({gen_api.api})")
+        lines.append(f"🖌️ 图像编辑：{edit_api.model} ({edit_api.api})")
+    elif gen_api.api:
+        lines.append(f"🎨 图像生成：{gen_api.model} ({gen_api.api})")
+    elif edit_api.api:
+        lines.append(f"🖌️ 图像编辑：{edit_api.model} ({edit_api.api})")
     
     await current_model_cmd.finish("\n".join(lines))
 

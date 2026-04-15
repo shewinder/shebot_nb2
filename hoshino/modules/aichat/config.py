@@ -34,11 +34,14 @@ class ApiEntry(BaseModel):
     temperature: Optional[float] = None  # None 表示不传给 API，使用模型默认值
 
 
-class ImageModelEntry(BaseModel):
-    """图像模型配置"""
-    model: str = "gemini-3-pro-image-preview"                     # 模型名称
-    api_format: str = "gemini"      # API格式: openai, gemini, atlascloud
-    capabilities: List[str] = ["generate", "edit", "multi_edit"]    # 能力列表: generate, edit, multi_edit
+class ImageApiEntry(BaseModel):
+    """图像 API 配置（生成/编辑独立配置）"""
+    api: str = ""                   # 标识名，如 "gemini-gen", "openai-edit"
+    api_base: str = ""
+    api_key: str = ""
+    model: str = ""
+    api_format: str = "openai"      # openai | gemini | atlascloud
+    capabilities: List[str] = ["generate", "edit", "multi_edit"]
 
 
 @configuration('aichat')
@@ -68,10 +71,23 @@ class Config(BaseConfig):
     enable_markdown_render: bool = False
     markdown_min_length: int = 100
 
-    # 图片生成模型配置列表（按优先级排序）
-    image_models: List[ImageModelEntry] = [
-        ImageModelEntry()
-    ]
+    # 图片生成 API 配置
+    image_generate_api: ImageApiEntry = ImageApiEntry(
+        api="gemini-image",
+        api_base="https://generativelanguage.googleapis.com/v1beta",
+        api_key="",
+        model="gemini-3-pro-image-preview",
+        api_format="gemini"
+    )
+
+    # 图片编辑 API 配置
+    image_edit_api: ImageApiEntry = ImageApiEntry(
+        api="gemini-image",
+        api_base="https://generativelanguage.googleapis.com/v1beta",
+        api_key="",
+        model="gemini-3-pro-image-preview",
+        api_format="gemini"
+    )
 
     # MCP 配置
     enable_mcp: bool = True            # MCP 总开关

@@ -182,20 +182,11 @@ export const importCharacterSingle = (user_id, file, as_global = false) => {
 }
 
 // ===== 图像模型管理 API =====
-// 获取图像模型列表
-export const getImageModels = () => request.get('/aichat/image-models')
+// 获取图像 API 配置
+export const getImageApis = () => request.get('/aichat/image-apis')
 
-// 添加图像模型
-export const addImageModel = (data) => request.post('/aichat/image-models', data)
-
-// 更新图像模型
-export const updateImageModel = (index, data) => request.post(`/aichat/image-models/${index}`, data)
-
-// 删除图像模型
-export const deleteImageModel = (index) => request.delete(`/aichat/image-models/${index}`)
-
-// 重新排序图像模型
-export const reorderImageModels = (models) => request.post('/aichat/image-models/reorder', { image_models: models })
+// 更新图像 API 配置
+export const updateImageApis = (data) => request.post('/aichat/image-apis', data)
 
 
 // ===== Session 调试 API =====
