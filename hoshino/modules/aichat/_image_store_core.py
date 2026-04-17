@@ -5,6 +5,7 @@ Session 图像存储核心层（纯工具模块，不依赖 hoshino）
 """
 import base64
 import json
+import os
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -67,7 +68,7 @@ class ImageStoreCore:
             └── ai_image_1.jpg
     """
 
-    BASE_DIR: Path = Path("data/aichat/images")
+    BASE_DIR: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve() / "data" / "aichat" / "images"
 
     def __init__(self, session_id: str):
         self.session_id = session_id
@@ -198,6 +199,13 @@ class ImageStoreCore:
                 return ImageEntry.from_dict(self._meta[clean_id])
             except Exception:
                 pass
+        # 内存未命中：可能由其他进程/实例写入，重新加载 .meta.json
+        self._meta = self._load_meta()
+        if clean_id in self._meta:
+            try:
+                return ImageEntry.from_dict(self._meta[clean_id])
+            except Exception:
+                pass
         return None
 
     def get_data_url(self, identifier: str) -> Optional[str]:
@@ -230,7 +238,8 @@ class ImageStoreCore:
         return None
 
     def list_all(self) -> List[ImageEntry]:
-        """列出所有图像"""
+        """列出所有图像（自动刷新 .meta.json）"""
+        self._meta = self._load_meta()
         results = []
         for data in self._meta.values():
             try:
@@ -260,3 +269,19 @@ class ImageStoreCore:
             except Exception:
                 pass
         self._save_meta()
+
+    def clear(self) -> None:
+        """清空当前会话所有图像（Session 新建时调用）"""
+        for entry in self.list_all():
+            try:
+                if entry.file_path.exists():
+                    entry.file_path.unlink()
+            except Exception:
+                pass
+        self._meta.clear()
+        try:
+            if self._meta_file.exists():
+                self._meta_file.unlink()
+        except Exception:
+            pass
+        logger.info(f"[ImageStoreCore] 清空会话 {self.session_id} 图像缓存")

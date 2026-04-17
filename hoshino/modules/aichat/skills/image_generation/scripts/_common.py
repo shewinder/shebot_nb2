@@ -91,22 +91,20 @@ def base64_to_image(data_url: str) -> bytes:
 
 # ---------- HTTP 工具 ----------
 
-def _get_http_client():
-    """获取 HTTP 客户端，优先 httpx，其次 requests，最后 urllib"""
-    try:
-        import httpx
-        return "httpx", httpx
-    except ImportError:
-        pass
-    try:
-        import requests
-        return "requests", requests
-    except ImportError:
-        pass
-    return "urllib", None
+import httpx
 
 
-_HTTP_BACKEND, _HTTP_MODULE = _get_http_client()
+def _parse_response(resp: httpx.Response) -> Dict[str, Any]:
+    """解析 httpx 响应。JSON/文本放 text/json，二进制放 content。"""
+    content_type = resp.headers.get("Content-Type", "")
+    if "application/json" in content_type or content_type.startswith("text/"):
+        try:
+            j = resp.json()
+        except Exception:
+            j = None
+        return {"status": resp.status_code, "text": resp.text, "json": j}
+    else:
+        return {"status": resp.status_code, "content": resp.content}
 
 
 def http_post(url: str,
@@ -117,40 +115,14 @@ def http_post(url: str,
               timeout: int = 180) -> Dict[str, Any]:
     """同步 POST 请求"""
     try:
-        if _HTTP_BACKEND == "httpx":
-            with _HTTP_MODULE.Client(timeout=timeout) as client:
-                if files:
-                    resp = client.post(url, headers=headers, data=data, files=files)
-                elif json_data is not None:
-                    resp = client.post(url, headers=headers, json=json_data)
-                else:
-                    resp = client.post(url, headers=headers, data=data)
-                return _parse_response(resp)
-        elif _HTTP_BACKEND == "requests":
+        with httpx.Client(timeout=timeout) as client:
             if files:
-                resp = _HTTP_MODULE.post(url, headers=headers, data=data, files=files, timeout=timeout)
+                resp = client.post(url, headers=headers, data=data, files=files)
             elif json_data is not None:
-                resp = _HTTP_MODULE.post(url, headers=headers, json=json_data, timeout=timeout)
+                resp = client.post(url, headers=headers, json=json_data)
             else:
-                resp = _HTTP_MODULE.post(url, headers=headers, data=data, timeout=timeout)
-            return _parse_response_requests(resp)
-        else:
-            import urllib.request
-            req = urllib.request.Request(url, method="POST")
-            if headers:
-                for k, v in headers.items():
-                    req.add_header(k, v)
-            if json_data:
-                body = json.dumps(json_data).encode("utf-8")
-                req.add_header("Content-Type", "application/json")
-            elif data:
-                body = data if isinstance(data, bytes) else str(data).encode("utf-8")
-            else:
-                body = b""
-            with urllib.request.urlopen(req, data=body, timeout=timeout) as resp:
-                text = resp.read().decode("utf-8")
-                return {"status": resp.status, "text": text,
-                        "json": json.loads(text) if text else None}
+                resp = client.post(url, headers=headers, data=data)
+            return _parse_response(resp)
     except Exception as e:
         return {"error": str(e)}
 
@@ -160,43 +132,11 @@ def http_get(url: str,
              timeout: int = 180) -> Dict[str, Any]:
     """同步 GET 请求"""
     try:
-        if _HTTP_BACKEND == "httpx":
-            with _HTTP_MODULE.Client(timeout=timeout) as client:
-                resp = client.get(url, headers=headers)
-                return _parse_response(resp)
-        elif _HTTP_BACKEND == "requests":
-            resp = _HTTP_MODULE.get(url, headers=headers, timeout=timeout)
-            return _parse_response_requests(resp)
-        else:
-            import urllib.request
-            req = urllib.request.Request(url, method="GET")
-            if headers:
-                for k, v in headers.items():
-                    req.add_header(k, v)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                text = resp.read().decode("utf-8")
-                return {"status": resp.status, "text": text,
-                        "json": json.loads(text) if text else None}
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(url, headers=headers)
+            return _parse_response(resp)
     except Exception as e:
         return {"error": str(e)}
-
-
-def _parse_response(resp) -> Dict[str, Any]:
-    """解析 httpx 响应"""
-    try:
-        j = resp.json()
-    except Exception:
-        j = None
-    return {"status": resp.status_code, "text": resp.text, "json": j}
-
-
-def _parse_response_requests(resp) -> Dict[str, Any]:
-    """解析 requests 响应"""
-    try:
-        j = resp.json()
-    except Exception:
-        j = None
-    return {"status": resp.status_code, "text": resp.text, "json": j}
 
 
 # ---------- 通用输出 ----------

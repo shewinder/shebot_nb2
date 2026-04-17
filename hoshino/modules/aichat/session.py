@@ -1,4 +1,5 @@
 """Session 管理模块"""
+import base64
 import json
 import re
 import time
@@ -15,6 +16,7 @@ from .tools.registry import get_injectable_params
 from hoshino.util import aiohttpx, log_json, truncate_log
 from hoshino import Message, MessageSegment
 from hoshino.sres import Res
+
 
 from .mcp import mcp_tool_bridge, get_mcp_session_manager
 from .md_render import render_text_if_markdown
@@ -40,6 +42,7 @@ class Session:
         self.continuous_mode = False
         self.last_choices: Dict[int, str] = {}
         self._image_store = ImageStore(session_id)
+        self._image_store.clear()  # 新建 Session 时清空旧图像缓存
         # SKILL 系统：已激活的 SKILL 名称集合
         self.active_skills: Set[str] = set()
         # 当前正在执行的 SKILL（用于工具权限检查）
@@ -86,38 +89,12 @@ class Session:
         return self._image_store.get_data_url(identifier)
     
     async def get_image_segment(self, identifier: str) -> Optional["MessageSegment"]:
-        """根据标识符获取图片 MessageSegment
-        
-        这是一个便捷方法，用于复用图片发送逻辑。
-        
-        Args:
-            identifier: 图片标识符，如 "<ai_image_1>" 或 "ai_image_1"
-        
-        Returns:
-            MessageSegment.image 或 None（如果标识符无效）
-        """
+        """根据标识符获取图片 MessageSegment"""
         entry = self._image_store.get(identifier)
         if not entry or not entry.file_path.exists():
-            # 回退：尝试从 data_url 解析
-            image_data = self._image_store.get_data_url(identifier)
-            if not image_data:
-                return None
-            try:
-                if image_data.startswith("data:image"):
-                    import base64
-                    base64_data = image_data.split(",", 1)[1]
-                    img_bytes = base64.b64decode(base64_data)
-                    return MessageSegment.image(file=img_bytes)
-                elif image_data.startswith(("http://", "https://")):
-                    return await Res.image_from_url(image_data)
-            except Exception:
-                pass
             return None
-        
         try:
-            with open(entry.file_path, "rb") as f:
-                img_bytes = f.read()
-            return MessageSegment.image(file=img_bytes)
+            return Res.image(entry.file_path)
         except Exception:
             return None
     

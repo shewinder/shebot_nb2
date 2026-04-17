@@ -105,3 +105,6 @@ class ImageStore:
 
     def cleanup(self, max_images: int = 20) -> None:
         self._core.cleanup(max_images)
+
+    def clear(self) -> None:
+        self._core.clear()

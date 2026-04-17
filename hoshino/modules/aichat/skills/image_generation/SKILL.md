@@ -32,9 +32,6 @@ disable-model_invocation: false
 |------|---------|------------|------|------|
 | z_image_turbo | comfyui.py | **中文** | qwen CLIP 中文极强，8步采样快 | generate |
 | bytedance/seedream-v4/edit | atlascloud.py | 中文 | 字节跳动 Seedream，质量高，提示词遵循好 | generate, edit |
-| gemini-3-pro-image-preview | gemini.py | 英文 | 速度快，提示词遵循好 | generate, edit, multi_edit |
-
-> 注：未来新增模型时，需在上方表格中补充该模型的调优策略。
 
 ## 工作流程
 

@@ -140,6 +140,12 @@ grep -r "sv.logger" hoshino/modules/ | head -10
 grep -r "Service(" hoshino/modules/ | head -10
 ```
 
+**⚠️ 极度重要：不要自己造轮子**
+
+本项目已有大量封装，**必须先 grep 看现有代码怎么做**，而不是从头实现：
+
+**血的教训**：发图功能折腾了 3 轮（bytes → file:// → base64://），最后发现其他插件都在用 `Res.image()`，一行代码搞定。**先 grep，再动手。**
+
 **常见陷阱：**
 - ❌ `from nonebot import on_prefix` - 本项目可能无此接口
 - ❌ `log.new_logger()` - 本项目使用 `sv.logger`

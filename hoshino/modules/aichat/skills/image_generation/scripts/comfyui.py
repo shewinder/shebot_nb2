@@ -228,16 +228,7 @@ def call_comfyui_generate(prompt: str,
                         content = img_resp.get("content")
                         if content:
                             return {"success": True, "data": content}
-                        # httpx/requests 可能把二进制放在 text（损坏），
-                        # 但 _common 的 http_get 返回的是文本解析结果。
-                        # 对于 ComfyUI /view 接口，返回的是二进制图片，
-                        # 需要用 urllib 或特殊处理。
-                        # 这里改用直接 urllib 下载二进制
-                        import urllib.request
-                        req = urllib.request.Request(view_url)
-                        with urllib.request.urlopen(req, timeout=60) as response:
-                            img_data = response.read()
-                            return {"success": True, "data": img_data}
+                        return {"success": False, "error": "ComfyUI /view 未返回图片数据"}
 
     return {"success": False, "error": "ComfyUI 生成超时"}
 
