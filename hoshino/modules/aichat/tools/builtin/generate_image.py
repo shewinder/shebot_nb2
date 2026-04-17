@@ -4,8 +4,11 @@ AI 工具：图片生成与编辑
 """
 import asyncio
 import base64
+import copy
 import io
+import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from ...session import Session
@@ -22,6 +25,151 @@ from ...config import Config, ImageApiEntry
 
 # 加载配置
 conf = Config.get_instance('aichat')
+
+# 内置 ComfyUI 工作流
+# prompt 中的占位符 {{prompt}} 会在调用时替换为用户的实际描述
+_COMFYUI_WORKFLOWS: Dict[str, Dict[str, Any]] = {
+    "z_image_turbo": {
+        "9": {
+            "inputs": {
+                "filename_prefix": "z-image-turbo",
+                "images": [
+                    "57:8",
+                    0
+                ]
+            },
+            "class_type": "SaveImage",
+            "_meta": {
+                "title": "保存图像"
+            }
+        },
+        "57:30": {
+            "inputs": {
+                "clip_name": "qwen_3_4b.safetensors",
+                "type": "lumina2",
+                "device": "default"
+            },
+            "class_type": "CLIPLoader",
+            "_meta": {
+                "title": "加载CLIP"
+            }
+        },
+        "57:29": {
+            "inputs": {
+                "vae_name": "ae.safetensors"
+            },
+            "class_type": "VAELoader",
+            "_meta": {
+                "title": "加载VAE"
+            }
+        },
+        "57:33": {
+            "inputs": {
+                "conditioning": [
+                    "57:27",
+                    0
+                ]
+            },
+            "class_type": "ConditioningZeroOut",
+            "_meta": {
+                "title": "条件零化"
+            }
+        },
+        "57:8": {
+            "inputs": {
+                "samples": [
+                    "57:3",
+                    0
+                ],
+                "vae": [
+                    "57:29",
+                    0
+                ]
+            },
+            "class_type": "VAEDecode",
+            "_meta": {
+                "title": "VAE解码"
+            }
+        },
+        "57:28": {
+            "inputs": {
+                "unet_name": "z_image_turbo_bf16.safetensors",
+                "weight_dtype": "default"
+            },
+            "class_type": "UNETLoader",
+            "_meta": {
+                "title": "UNet加载器"
+            }
+        },
+        "57:27": {
+            "inputs": {
+                "text": "{{prompt}}",
+                "clip": [
+                    "57:30",
+                    0
+                ]
+            },
+            "class_type": "CLIPTextEncode",
+            "_meta": {
+                "title": "CLIP文本编码"
+            }
+        },
+        "57:13": {
+            "inputs": {
+                "width": 1024,
+                "height": 1536,
+                "batch_size": 1
+            },
+            "class_type": "EmptySD3LatentImage",
+            "_meta": {
+                "title": "空Latent图像（SD3）"
+            }
+        },
+        "57:11": {
+            "inputs": {
+                "shift": 3,
+                "model": [
+                    "57:28",
+                    0
+                ]
+            },
+            "class_type": "ModelSamplingAuraFlow",
+            "_meta": {
+                "title": "采样算法（AuraFlow）"
+            }
+        },
+        "57:3": {
+            "inputs": {
+                "seed": 889694652031182,
+                "steps": 8,
+                "cfg": 1,
+                "sampler_name": "res_multistep",
+                "scheduler": "simple",
+                "denoise": 1,
+                "model": [
+                    "57:11",
+                    0
+                ],
+                "positive": [
+                    "57:27",
+                    0
+                ],
+                "negative": [
+                    "57:33",
+                    0
+                ],
+                "latent_image": [
+                    "57:13",
+                    0
+                ]
+            },
+            "class_type": "KSampler",
+            "_meta": {
+                "title": "K采样器"
+            }
+        }
+    }
+}
 
 
 def _select_image_api(image_count: int) -> Optional[ImageApiEntry]:
@@ -222,11 +370,6 @@ async def generate_image(
         target_model = api_entry.model
         api_format = api_entry.api_format
         
-        if not api_key:
-            error_msg = f"API '{api_entry.api}' 的 API Key 未配置"
-            logger.error(error_msg)
-            return fail(error_msg)
-        
         # 根据图片数量和 API 格式调用不同接口
         if image_count == 0:
             result = await _call_generate_api(
@@ -294,6 +437,95 @@ async def generate_image(
         return fail(f"图片生成失败: {str(e)}", error=str(e))
 
 
+def _replace_prompt_in_workflow(obj: Any, prompt: str) -> None:
+    """递归替换工作流中的 {{prompt}} 占位符"""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str) and v == "{{prompt}}":
+                obj[k] = prompt
+            else:
+                _replace_prompt_in_workflow(v, prompt)
+    elif isinstance(obj, list):
+        for item in obj:
+            _replace_prompt_in_workflow(item, prompt)
+
+
+async def _call_comfyui_generate(
+    api_base: str,
+    model: str,
+    prompt: str,
+) -> Dict[str, Any]:
+    """调用本地 ComfyUI 生成图片"""
+    workflow = _COMFYUI_WORKFLOWS.get(model)
+    if not workflow:
+        return {"success": False, "error": f"未找到 ComfyUI 工作流: {model}"}
+
+    wf = copy.deepcopy(workflow)
+    _replace_prompt_in_workflow(wf, prompt)
+
+    base = api_base.rstrip('/')
+    client_id = str(uuid.uuid4())
+    url = f"{base}/prompt"
+    payload = {"prompt": wf, "client_id": client_id}
+
+    logger.info(f"调用 ComfyUI 生成 API: {url}, workflow: {model}")
+    resp = await aiohttpx.post(url, json=payload)
+    if not resp.ok:
+        error_text = truncate_log(resp.text) if hasattr(resp, 'text') else str(resp)
+        logger.error(f"ComfyUI 提交失败: {getattr(resp, 'status_code', 'unknown')}, {error_text}")
+        return {"success": False, "error": f"ComfyUI 提交失败 HTTP {getattr(resp, 'status_code', 'unknown')}: {str(error_text)[:200]}"}
+
+    result = resp.json if hasattr(resp, 'json') else resp.json()
+    prompt_id = result.get("prompt_id")
+    if not prompt_id:
+        logger.error(f"ComfyUI 未返回 prompt_id: {log_json(result)}")
+        return {"success": False, "error": "ComfyUI 未返回 prompt_id"}
+
+    # 轮询结果
+    history_url = f"{base}/history/{prompt_id}"
+    timeout = 180
+    interval = 2
+    elapsed = 0
+
+    while elapsed < timeout:
+        await asyncio.sleep(interval)
+        elapsed += interval
+
+        hist_resp = await aiohttpx.get(history_url)
+        if not hist_resp.ok:
+            logger.warning(f"ComfyUI 轮询失败: {getattr(hist_resp, 'status_code', 'unknown')}")
+            continue
+
+        hist = hist_resp.json if hasattr(hist_resp, 'json') else hist_resp.json()
+        if not isinstance(hist, dict):
+            continue
+
+        entry = hist.get(prompt_id, {})
+        outputs = entry.get("outputs", {})
+        image_urls: List[str] = []
+
+        for node_id, node_output in outputs.items():
+            images = node_output.get("images", [])
+            for img_info in images:
+                filename = img_info.get("filename")
+                subfolder = img_info.get("subfolder", "")
+                img_type = img_info.get("type", "output")
+                if filename:
+                    view_url = f"{base}/view?filename={quote(filename)}&subfolder={quote(subfolder)}&type={quote(img_type)}"
+                    img_resp = await aiohttpx.get(view_url)
+                    if img_resp.ok:
+                        b64_data = base64.b64encode(img_resp.content).decode('utf-8')
+                        image_urls.append(f"data:image/png;base64,{b64_data}")
+                        logger.info(f"ComfyUI 图片下载成功: {filename}")
+                    else:
+                        logger.warning(f"ComfyUI 图片下载失败: {filename}, HTTP {getattr(img_resp, 'status_code', 'unknown')}")
+
+        if image_urls:
+            return {"success": True, "urls": image_urls}
+
+    return {"success": False, "error": "ComfyUI 生成超时"}
+
+
 async def _call_generate_api(
     api_base: str,
     api_key: str,
@@ -303,6 +535,8 @@ async def _call_generate_api(
     aspect_ratio: str = None,
     size: str = None,
 ) -> Dict[str, Any]:
+    if api_format == "comfyui":
+        return await _call_comfyui_generate(api_base, model, prompt)
     if api_format == "gemini":
         base = api_base.rstrip('/')
         if '/v1' in base and not base.endswith('/v1beta'):
@@ -407,6 +641,8 @@ async def _call_edit_api(
     aspect_ratio: str = None,
     size: str = None,
 ) -> Dict[str, Any]:
+    if api_format == "comfyui":
+        return {"success": False, "error": "ComfyUI 编辑模式尚未配置"}
     if api_format == "gemini":
         base = api_base.rstrip('/')
         if '/v1' in base and not base.endswith('/v1beta'):

@@ -40,7 +40,7 @@ class ImageApiEntry(BaseModel):
     api_base: str = ""
     api_key: str = ""
     model: str = ""
-    api_format: str = "openai"      # openai | gemini | atlascloud
+    api_format: str = "openai"      # openai | gemini | atlascloud | comfyui
     capabilities: List[str] = ["generate", "edit", "multi_edit"]
 
 
