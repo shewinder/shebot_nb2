@@ -173,7 +173,10 @@ def main():
         output_error("未找到 AtlasCloud API 密钥，请设置 ATLAS_API_KEY 环境变量")
         return
 
-    model = args.model or "bytedance/seedream-v4/edit"
+    model = args.model
+    if not model:
+        output_error("--model 参数必填")
+        return
 
     image_paths = []
     if args.images:

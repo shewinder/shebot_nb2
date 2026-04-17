@@ -123,8 +123,11 @@ _WORKFLOWS = {
 
 
 def get_workflow(model_name: str) -> dict:
-    """获取指定模型的工作流，找不到则返回 z_image_turbo 作为默认"""
-    return _WORKFLOWS.get(model_name, _WORKFLOWS["z_image_turbo"])
+    """获取指定模型的工作流"""
+    wf = _WORKFLOWS.get(model_name)
+    if not wf:
+        raise RuntimeError(f"未找到工作流: {model_name}")
+    return wf
 
 
 # ---------- 尺寸映射 ----------
@@ -171,7 +174,8 @@ def call_comfyui_generate(prompt: str,
                           aspect_ratio: str = "", model_name: str = "") -> dict:
     """调用 ComfyUI 生成图片"""
     base = COMFYUI_BASE_URL.rstrip("/")
-    model_name = model_name or "z_image_turbo"
+    if not model_name:
+        return {"success": False, "error": "--model 参数必填"}
 
     wf = copy.deepcopy(get_workflow(model_name))
     _replace_prompt(wf, prompt)
@@ -248,6 +252,10 @@ def _parse_args():
 def main():
     args = _parse_args()
 
+    if not args.model:
+        output_error("--model 参数必填")
+        return
+
     # ComfyUI 当前不支持编辑（工作流未配置编辑模式）
     if args.images:
         output_error("ComfyUI 当前不支持图像编辑，请使用 gemini.py 或 openai.py")
@@ -269,7 +277,7 @@ def main():
         True,
         identifier=stored["identifier"],
         path=stored["path"],
-        model=args.model or "z_image_turbo",
+        model=args.model,
     )
 
 

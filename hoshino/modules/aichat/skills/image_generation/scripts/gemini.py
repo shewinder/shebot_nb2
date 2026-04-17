@@ -137,7 +137,10 @@ def main():
         output_error("未找到 Gemini API 密钥，请设置 GEMINI_API_KEY 环境变量")
         return
 
-    model = args.model or "gemini-3-pro-image-preview"
+    model = args.model
+    if not model:
+        output_error("--model 参数必填")
+        return
 
     # 解析待编辑图片
     image_paths = []

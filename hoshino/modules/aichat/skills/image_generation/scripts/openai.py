@@ -159,7 +159,10 @@ def main():
         output_error("未找到 OpenAI API 密钥，请设置 OPENAI_API_KEY 环境变量")
         return
 
-    model = args.model or "dall-e-3"
+    model = args.model
+    if not model:
+        output_error("--model 参数必填")
+        return
 
     image_paths = []
     if args.images:
