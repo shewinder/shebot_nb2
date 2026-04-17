@@ -4,6 +4,7 @@ Date: 2026-04-02
 Description: 通用脚本执行工具
 """
 import asyncio
+import json
 import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -170,6 +171,25 @@ async def execute_script(
     env["PROJECT_ROOT"] = str(Path("").resolve())  # 项目根目录（bot启动目录）
     env["SKILL_NAME"] = skill_name
     env["SKILL_DIR"] = str(skill.directory)
+    
+    # 调试：打印关键环境变量
+    logger.info(f"[execute_script] 当前进程 GEMINI_API_KEY: {os.environ.get('GEMINI_API_KEY', '(未设置)')[:15]}...")
+    logger.info(f"[execute_script] 当前进程 ATLAS_API_KEY: {os.environ.get('ATLAS_API_KEY', '(未设置)')[:15]}...")
+    logger.info(f"[execute_script] 当前进程 OPENAI_API_KEY: {os.environ.get('OPENAI_API_KEY', '(未设置)')[:15]}...")
+    
+    # 注入 SESSION_ID（供 Skill 脚本操作 ImageStore）
+    if session:
+        env["SESSION_ID"] = session.session_id
+    
+    # 注入当前会话的图片路径映射（供 Skill 脚本直接访问图像文件）
+    if session:
+        image_map = {}
+        for entry in session.list_images():
+            if entry.file_path.exists():
+                image_map[entry.identifier] = str(entry.file_path)
+        if image_map:
+            env["SKILL_IMAGES"] = json.dumps(image_map, ensure_ascii=False)
+            logger.debug(f"[execute_script] 注入 SKILL_IMAGES: {list(image_map.keys())}")
     
     # 执行脚本
     try:

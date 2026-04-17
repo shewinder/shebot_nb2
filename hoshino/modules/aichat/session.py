@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, TYPE_
 from loguru import logger
 
 from .config import Config
+from ._image_store import ImageStore, ImageEntry
 from .skills import skill_manager
 from .tools import get_tool_function, get_available_tools
 from .tools.registry import get_injectable_params
@@ -38,8 +39,7 @@ class Session:
         self.last_active = time.time()
         self.continuous_mode = False
         self.last_choices: Dict[int, str] = {}
-        self._user_images: Dict[str, str] = {}
-        self._ai_images: Dict[str, str] = {}
+        self._image_store = ImageStore(session_id)
         # SKILL 系统：已激活的 SKILL 名称集合
         self.active_skills: Set[str] = set()
         # 当前正在执行的 SKILL（用于工具权限检查）
@@ -72,41 +72,18 @@ class Session:
         
         self.last_active = time.time()
     
-    def store_user_image(self, image_data: str) -> str:
-        identifier = f"<user_image_{len(self._user_images) + 1}>"
-        self._user_images[identifier] = image_data
+    async def store_user_image(self, image_data: str) -> str:
+        entry = await self._image_store.store(image_data, "user")
         self.last_active = time.time()
-        
-        if len(self._user_images) > 20:
-            oldest = list(self._user_images.keys())[0]
-            del self._user_images[oldest]
-        
-        return identifier
+        return entry.identifier
     
-    def store_ai_image(self, image_data: str) -> str:
-        identifier = f"<ai_image_{len(self._ai_images) + 1}>"
-        self._ai_images[identifier] = image_data
+    async def store_ai_image(self, image_data: str) -> str:
+        entry = await self._image_store.store(image_data, "ai")
         self.last_active = time.time()
-        
-        if len(self._ai_images) > 20:
-            oldest = list(self._ai_images.keys())[0]
-            del self._ai_images[oldest]
-        
-        return identifier
+        return entry.identifier
     
     def resolve_image_identifier(self, identifier: str) -> Optional[str]:
-        # 兼容带尖括号和不带尖括号的格式
-        # AI 有时会传入 "user_image_1" 而不是 "<user_image_1>"
-        if not identifier.startswith('<'):
-            identifier = f"<{identifier}>"
-        
-        if identifier in self._user_images:
-            return self._user_images[identifier]
-        
-        if identifier in self._ai_images:
-            return self._ai_images[identifier]
-        
-        return None
+        return self._image_store.get_data_url(identifier)
     
     async def get_image_segment(self, identifier: str) -> Optional["MessageSegment"]:
         """根据标识符获取图片 MessageSegment
@@ -119,23 +96,34 @@ class Session:
         Returns:
             MessageSegment.image 或 None（如果标识符无效）
         """
-        image_data = self.resolve_image_identifier(identifier)
-        if not image_data:
+        entry = self._image_store.get(identifier)
+        if not entry or not entry.file_path.exists():
+            # 回退：尝试从 data_url 解析
+            image_data = self._image_store.get_data_url(identifier)
+            if not image_data:
+                return None
+            try:
+                if image_data.startswith("data:image"):
+                    import base64
+                    base64_data = image_data.split(",", 1)[1]
+                    img_bytes = base64.b64decode(base64_data)
+                    return MessageSegment.image(file=img_bytes)
+                elif image_data.startswith(("http://", "https://")):
+                    return await Res.image_from_url(image_data)
+            except Exception:
+                pass
             return None
         
         try:
-            if image_data.startswith("data:image"):
-                import base64
-                base64_data = image_data.split(",", 1)[1]
-                img_bytes = base64.b64decode(base64_data)
-                return MessageSegment.image(file=img_bytes)
-            elif image_data.startswith(("http://", "https://")):
-                return await Res.image_from_url(image_data)
+            with open(entry.file_path, "rb") as f:
+                img_bytes = f.read()
+            return MessageSegment.image(file=img_bytes)
         except Exception:
-            # 图片解析失败，返回 None 让调用方处理
-            pass
-        
-        return None
+            return None
+    
+    def list_images(self) -> List[ImageEntry]:
+        """列出当前会话所有图像（供 Skill 脚本使用）"""
+        return self._image_store.list_all()
     
     async def build_message(
         self,
@@ -276,8 +264,8 @@ AI回复：🎨 已生成：<ai_image_1>
     
     def build_image_list_prompt(self) -> str:
         """构建可用图片列表提示（动态内容，附加到用户消息）"""
-        has_images = self._user_images or self._ai_images
-        if not has_images:
+        images = self._image_store.list_all()
+        if not images:
             return ""
         
         lines = [
@@ -286,10 +274,9 @@ AI回复：🎨 已生成：<ai_image_1>
             "【当前可用图片】",
         ]
         
-        if self._user_images:
-            lines.append("用户图片：" + ", ".join(self._user_images.keys()))
-        if self._ai_images:
-            lines.append("AI图片：" + ", ".join(self._ai_images.keys()))
+        for img in images:
+            meta = f"{img.width}x{img.height}" if img.width and img.height else "未知尺寸"
+            lines.append(f"{img.identifier} ({img.source}, {img.format}, {meta})")
         
         lines.extend([
             "=" * 40,
@@ -868,6 +855,16 @@ AI回复：🎨 已生成：<ai_image_1>
                 current_messages.append(tool_result)
                 # 同步到 session 消息历史
                 self.messages.append(tool_result)
+                # 打印完整 stdout/stderr 以便调试脚本问题
+                try:
+                    parsed_content = json.loads(tool_result['content'])
+                    metadata = parsed_content.get('metadata', {})
+                    if metadata:
+                        logger.info(f"工具调用 stdout:\n{metadata.get('stdout', '')}")
+                        if metadata.get('stderr'):
+                            logger.info(f"工具调用 stderr:\n{metadata['stderr']}")
+                except Exception:
+                    pass
                 logger.info(f"工具调用结果: {truncate_log(tool_result['content'])}")
         
         logger.warning(f"达到最大工具调用轮数限制: {max_tool_rounds}")

@@ -1,0 +1,9 @@
+{
+  "name": "image_generation",
+  "description": "AI 图像生成与编辑，支持文生图、图生图、风格转换。通过独立脚本调用各服务商 API",
+  "allowed_tools": [
+    "execute_script"
+  ],
+  "user_invocable": true,
+  "disable_model_invocation": false
+}

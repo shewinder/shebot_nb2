@@ -194,7 +194,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
         for img_url in image_urls:
             base64_image = await download_image_to_base64(img_url)
             if base64_image:
-                identifier = session.store_user_image(base64_image)
+                identifier = await session.store_user_image(base64_image)
                 logger.info(f"存储用户图片: {identifier} (模型不支持多模态，可通过工具使用)")
             else:
                 logger.warning(f"图片处理失败，跳过: {img_url}")
@@ -211,7 +211,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
         for img_url in image_urls:
             base64_image = await download_image_to_base64(img_url)
             if base64_image:
-                identifier = session.store_user_image(base64_image)
+                identifier = await session.store_user_image(base64_image)
                 content_parts.append({
                     "type": "image_url",
                     "image_url": {

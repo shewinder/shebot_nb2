@@ -14,7 +14,7 @@ from hoshino import Bot
 from hoshino.config import get_plugin_config_by_name
 from hoshino.modules.aichat import api_manager, persona_manager, conf, session_manager
 from hoshino.modules.aichat.skills import skill_manager
-from hoshino.modules.aichat.config import ApiEntry, ImageApiEntry
+from hoshino.modules.aichat.config import ApiEntry
 from hoshino.modules.aichat.character_import import parse_character_png, CharacterCard
 import json
 
@@ -805,95 +805,6 @@ async def import_character_single(
     finally:
         await file.close()
 
-
-# ========== 图像 API 管理 API ==========
-
-class ImageApiInfo(BaseModel):
-    """图像 API 信息"""
-    api: str
-    api_base: str
-    api_key: str
-    model: str
-    api_format: str
-
-
-class ImageApisUpdate(BaseModel):
-    """更新图像 API 配置请求"""
-    generate_api: ImageApiInfo
-    edit_api: ImageApiInfo
-
-
-def _validate_api_info(info: ImageApiInfo) -> Optional[str]:
-    """验证单个 API 配置，返回错误信息或 None"""
-    if info.api_format not in ["openai", "gemini", "atlascloud"]:
-        return "API格式必须是 openai、gemini 或 atlascloud"
-    return None
-
-
-@router.get("/image-apis")
-async def get_image_apis():
-    """获取图像 API 配置"""
-    try:
-        gen = conf.image_generate_api
-        edit = conf.image_edit_api
-        return {
-            "status": 200,
-            "data": {
-                "generate_api": {
-                    "api": gen.api,
-                    "api_base": gen.api_base,
-                    "api_key": gen.api_key,
-                    "model": gen.model,
-                    "api_format": gen.api_format,
-                },
-                "edit_api": {
-                    "api": edit.api,
-                    "api_base": edit.api_base,
-                    "api_key": edit.api_key,
-                    "model": edit.model,
-                    "api_format": edit.api_format,
-                }
-            }
-        }
-    except Exception as e:
-        logger.exception(f"获取图像 API 配置失败: {e}")
-        return {"status": 500, "data": f"获取失败: {str(e)}"}
-
-
-@router.post("/image-apis")
-async def update_image_apis(update: ImageApisUpdate):
-    """更新图像 API 配置"""
-    try:
-        err = _validate_api_info(update.generate_api)
-        if err:
-            return {"status": 400, "data": f"生成 API: {err}"}
-        
-        err = _validate_api_info(update.edit_api)
-        if err:
-            return {"status": 400, "data": f"编辑 API: {err}"}
-        
-        conf.image_generate_api = ImageApiEntry(
-            api=update.generate_api.api,
-            api_base=update.generate_api.api_base,
-            api_key=update.generate_api.api_key,
-            model=update.generate_api.model,
-            api_format=update.generate_api.api_format,
-        )
-        conf.image_edit_api = ImageApiEntry(
-            api=update.edit_api.api,
-            api_base=update.edit_api.api_base,
-            api_key=update.edit_api.api_key,
-            model=update.edit_api.model,
-            api_format=update.edit_api.api_format,
-        )
-        
-        from hoshino.config import save_plugin_config
-        save_plugin_config("aichat", conf)
-        
-        return {"status": 200, "data": "图像 API 配置更新成功"}
-    except Exception as e:
-        logger.exception(f"更新图像 API 配置失败: {e}")
-        return {"status": 500, "data": f"更新失败: {str(e)}"}
 
 
 # ========== Session 调试 API ==========

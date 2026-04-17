@@ -10,8 +10,11 @@ import nonebot
 import os
 from typing import Dict, Set
 
+from dotenv import load_dotenv
 from nonebot.adapters.onebot.v11 import Adapter
 
+# 显式加载 .env.prod，确保环境变量进入 os.environ（供 Skill 脚本继承）
+load_dotenv('.env.prod')
 
 nonebot.init()
 moduledir = 'hoshino/modules/'

@@ -34,16 +34,6 @@ class ApiEntry(BaseModel):
     temperature: Optional[float] = None  # None 表示不传给 API，使用模型默认值
 
 
-class ImageApiEntry(BaseModel):
-    """图像 API 配置（生成/编辑独立配置）"""
-    api: str = ""                   # 标识名，如 "gemini-gen", "openai-edit"
-    api_base: str = ""
-    api_key: str = ""
-    model: str = ""
-    api_format: str = "openai"      # openai | gemini | atlascloud | comfyui
-    capabilities: List[str] = ["generate", "edit", "multi_edit"]
-
-
 @configuration('aichat')
 class Config(BaseConfig):
     """AI Chat插件配置"""
@@ -70,24 +60,6 @@ class Config(BaseConfig):
     # Markdown 渲染配置
     enable_markdown_render: bool = False
     markdown_min_length: int = 100
-
-    # 图片生成 API 配置
-    image_generate_api: ImageApiEntry = ImageApiEntry(
-        api="gemini-image",
-        api_base="https://generativelanguage.googleapis.com/v1beta",
-        api_key="",
-        model="gemini-3-pro-image-preview",
-        api_format="gemini"
-    )
-
-    # 图片编辑 API 配置
-    image_edit_api: ImageApiEntry = ImageApiEntry(
-        api="gemini-image",
-        api_base="https://generativelanguage.googleapis.com/v1beta",
-        api_key="",
-        model="gemini-3-pro-image-preview",
-        api_format="gemini"
-    )
 
     # MCP 配置
     enable_mcp: bool = True            # MCP 总开关
