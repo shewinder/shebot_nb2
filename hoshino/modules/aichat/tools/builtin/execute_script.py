@@ -172,11 +172,6 @@ async def execute_script(
     env["SKILL_NAME"] = skill_name
     env["SKILL_DIR"] = str(skill.directory)
     
-    # 调试：打印关键环境变量
-    logger.info(f"[execute_script] 当前进程 GEMINI_API_KEY: {os.environ.get('GEMINI_API_KEY', '(未设置)')[:15]}...")
-    logger.info(f"[execute_script] 当前进程 ATLAS_API_KEY: {os.environ.get('ATLAS_API_KEY', '(未设置)')[:15]}...")
-    logger.info(f"[execute_script] 当前进程 OPENAI_API_KEY: {os.environ.get('OPENAI_API_KEY', '(未设置)')[:15]}...")
-    
     # 注入 SESSION_ID（供 Skill 脚本操作 ImageStore）
     if session:
         env["SESSION_ID"] = session.session_id
