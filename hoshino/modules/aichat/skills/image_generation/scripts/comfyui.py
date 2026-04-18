@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-ComfyUI 通用图像生成脚本
+Author: SheBot
+Date: 2026-04-17
+Description: ComfyUI 通用图像生成脚本
+Github: https://github.com/
 
-支持通过 --model 参数加载不同的内置工作流，便于灵活扩展：
-- z_image_turbo: Lumina2 + AuraFlow + qwen CLIP，中文理解强
-- 未来可扩展更多模型/工作流（含 LoRA 等）
-
-特点：
-- 保留中文提示词（qwen CLIP 模型下）
-- 支持自定义工作流参数
-- 可通过配置文件扩展新工作流
+约定：
+- 工作流 JSON 放在 skill 目录的 reference/ 下，文件名 = 模型名 + .json
+- Prompt 占位符: {{prompt}}
+- 图片占位符: {{input_image}} / {{input_image_1}} / {{input_image_2}} ...
+- 能力判断交给 AI，脚本不做拦截，ComfyUI 报错直接透传
 """
 import copy
-import json
 import os
 import sys
 import time
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -27,160 +27,82 @@ from _common import (
     store_image, read_image_file, http_post, http_get,
     output_result, output_error
 )
+from comfyui_workflow_loader import (
+    load_workflow,
+    apply_prompt, apply_input_images, apply_size,
+    list_available_models,
+)
 
 
-# ---------- 工作流注册表 ----------
-# 每个工作流是一个完整的 ComfyUI API 格式工作流 JSON
-# prompt 中需包含 {{prompt}} 占位符，调用时会被替换
-_WORKFLOWS = {
-    "z_image_turbo": {
-    "9": {
-        "inputs": {
-            "filename_prefix": "z-image-turbo",
-            "images": ["57:8", 0]
-        },
-        "class_type": "SaveImage",
-        "_meta": {"title": "保存图像"}
-    },
-    "57:30": {
-        "inputs": {
-            "clip_name": "qwen_3_4b.safetensors",
-            "type": "lumina2",
-            "device": "default"
-        },
-        "class_type": "CLIPLoader",
-        "_meta": {"title": "加载CLIP"}
-    },
-    "57:29": {
-        "inputs": {"vae_name": "ae.safetensors"},
-        "class_type": "VAELoader",
-        "_meta": {"title": "加载VAE"}
-    },
-    "57:33": {
-        "inputs": {"conditioning": ["57:27", 0]},
-        "class_type": "ConditioningZeroOut",
-        "_meta": {"title": "条件零化"}
-    },
-    "57:8": {
-        "inputs": {
-            "samples": ["57:3", 0],
-            "vae": ["57:29", 0]
-        },
-        "class_type": "VAEDecode",
-        "_meta": {"title": "VAE解码"}
-    },
-    "57:28": {
-        "inputs": {
-            "unet_name": "z_image_turbo_bf16.safetensors",
-            "weight_dtype": "default"
-        },
-        "class_type": "UNETLoader",
-        "_meta": {"title": "UNet加载器"}
-    },
-    "57:27": {
-        "inputs": {
-            "text": "{{prompt}}",
-            "clip": ["57:30", 0]
-        },
-        "class_type": "CLIPTextEncode",
-        "_meta": {"title": "CLIP文本编码"}
-    },
-    "57:13": {
-        "inputs": {
-            "width": 1024,
-            "height": 1536,
-            "batch_size": 1
-        },
-        "class_type": "EmptySD3LatentImage",
-        "_meta": {"title": "空Latent图像（SD3）"}
-    },
-    "57:11": {
-        "inputs": {
-            "shift": 3,
-            "model": ["57:28", 0]
-        },
-        "class_type": "ModelSamplingAuraFlow",
-        "_meta": {"title": "采样算法（AuraFlow）"}
-    },
-    "57:3": {
-        "inputs": {
-            "seed": 889694652031182,
-            "steps": 8,
-            "cfg": 1,
-            "sampler_name": "res_multistep",
-            "scheduler": "simple",
-            "denoise": 1,
-            "model": ["57:11", 0],
-            "positive": ["57:27", 0],
-            "negative": ["57:33", 0],
-            "latent_image": ["57:13", 0]
-        },
-        "class_type": "KSampler",
-        "_meta": {"title": "K采样器"}
-    }
-}
-}
-
-
-def get_workflow(model_name: str) -> dict:
-    """获取指定模型的工作流"""
-    wf = _WORKFLOWS.get(model_name)
-    if not wf:
-        raise RuntimeError(f"未找到工作流: {model_name}")
-    return wf
-
-
-# ---------- 尺寸映射 ----------
-_SIZE_MAP = {
-    "": {"width": 1024, "height": 1536},
-    "1:1": {"width": 1024, "height": 1024},
-    "4:3": {"width": 1280, "height": 960},
-    "3:4": {"width": 960, "height": 1280},
-    "16:9": {"width": 1536, "height": 864},
-    "9:16": {"width": 864, "height": 1536},
-    "2:3": {"width": 1024, "height": 1536},
-    "3:2": {"width": 1536, "height": 1024},
-}
-
-
-def _replace_prompt(obj, prompt: str) -> None:
-    """递归替换工作流中的 {{prompt}} 占位符"""
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if isinstance(v, str) and v == "{{prompt}}":
-                obj[k] = prompt
-            else:
-                _replace_prompt(v, prompt)
-    elif isinstance(obj, list):
-        for item in obj:
-            _replace_prompt(item, prompt)
-
-
-def _apply_size(workflow: dict, aspect_ratio: str) -> None:
-    """根据宽高比调整 EmptySD3LatentImage 尺寸"""
-    size = _SIZE_MAP.get(aspect_ratio, _SIZE_MAP[""])
-    for node in workflow.values():
-        if isinstance(node, dict) and node.get("class_type") == "EmptySD3LatentImage":
-            node["inputs"]["width"] = size["width"]
-            node["inputs"]["height"] = size["height"]
-            break
-
-
-# ComfyUI API 基础地址（环境变量或默认本地地址）
 COMFYUI_BASE_URL = os.environ.get("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
 
 
+def upload_image_to_comfyui(image_path: str) -> str:
+    """上传本地图片到 ComfyUI 服务器，返回文件名"""
+    base = COMFYUI_BASE_URL.rstrip("/")
+    url = f"{base}/upload/image"
+
+    data = read_image_file(image_path)
+    files = {"image": (Path(image_path).name, data, "image/png")}
+
+    result = http_post(url, files=files)
+    if "error" in result:
+        raise RuntimeError(f"上传图片到 ComfyUI 失败: {result['error']}")
+    if result.get("status", 0) not in (200,):
+        raise RuntimeError(
+            f"ComfyUI 上传图片失败 HTTP {result.get('status')}: "
+            f"{result.get('text', '')[:200]}"
+        )
+
+    resp = result.get("json", {})
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"ComfyUI 上传返回格式异常: {resp}")
+
+    filename = resp.get("name")
+    if not filename:
+        raise RuntimeError(f"ComfyUI 上传未返回文件名: {resp}")
+    return filename
+
+
 def call_comfyui_generate(prompt: str,
-                          aspect_ratio: str = "", model_name: str = "") -> dict:
-    """调用 ComfyUI 生成图片"""
+                          aspect_ratio: str = "",
+                          model_name: str = "",
+                          image_paths: Optional[List[str]] = None) -> Dict[str, Any]:
+    """调用 ComfyUI 生成图片
+
+    Args:
+        prompt: 图像描述
+        aspect_ratio: 宽高比
+        model_name: 工作流模型名（对应 reference/ 下的 .json 文件名）
+        image_paths: 本地图片路径列表
+
+    Returns:
+        {"success": True, "data": bytes} 或 {"success": False, "error": str}
+    """
     base = COMFYUI_BASE_URL.rstrip("/")
     if not model_name:
         return {"success": False, "error": "--model 参数必填"}
 
-    wf = copy.deepcopy(get_workflow(model_name))
-    _replace_prompt(wf, prompt)
-    _apply_size(wf, aspect_ratio)
+    wf = copy.deepcopy(load_workflow(model_name))
 
+    # 替换 prompt
+    apply_prompt(wf, prompt)
+
+    # 处理图片上传并替换占位符
+    if image_paths:
+        uploaded_names: List[str] = []
+        for image_path in image_paths:
+            try:
+                uploaded_name = upload_image_to_comfyui(image_path)
+                uploaded_names.append(uploaded_name)
+            except Exception as e:
+                return {"success": False, "error": f"图片上传失败 ({image_path}): {e}"}
+        apply_input_images(wf, uploaded_names)
+
+    # 调整尺寸
+    apply_size(wf, aspect_ratio)
+
+    # 提交任务
     url = f"{base}/prompt"
     payload = {"prompt": wf, "client_id": "image_generation_skill"}
 
@@ -188,7 +110,10 @@ def call_comfyui_generate(prompt: str,
     if "error" in result:
         return {"success": False, "error": result["error"]}
     if result.get("status", 0) not in (200,):
-        return {"success": False, "error": f"HTTP {result.get('status')}: {result.get('text', '')[:200]}"}
+        return {
+            "success": False,
+            "error": f"HTTP {result.get('status')}: {result.get('text', '')[:200]}"
+        }
 
     resp = result.get("json", {})
     prompt_id = resp.get("prompt_id")
@@ -237,31 +162,45 @@ def call_comfyui_generate(prompt: str,
     return {"success": False, "error": "ComfyUI 生成超时"}
 
 
-def _parse_args():
-    """ComfyUI 专用参数解析（继承通用参数 + --model）"""
+def _parse_args() -> argparse.Namespace:
+    """参数解析"""
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", required=True, help="图像描述")
     parser.add_argument("--images", default="", help="待编辑图片标识符，逗号分隔")
     parser.add_argument("--aspect-ratio", default="", help="宽高比")
     parser.add_argument("--size", default="", help="分辨率")
     parser.add_argument("--api", default="", help="指定 API 配置名称")
-    parser.add_argument("--model", default="", help="ComfyUI 工作流模型名（如 z_image_turbo）")
+    parser.add_argument("--model", default="", help="ComfyUI 工作流模型名（对应 reference/ 下的 .json 文件名）")
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     args = _parse_args()
 
     if not args.model:
         output_error("--model 参数必填")
         return
 
-    # ComfyUI 当前不支持编辑（工作流未配置编辑模式）
+    # 解析图片标识符为本地路径
+    image_paths: List[str] = []
     if args.images:
-        output_error("ComfyUI 当前不支持图像编辑，请使用 gemini.py 或 openai.py")
-        return
+        for ident in args.images.split(","):
+            ident = ident.strip()
+            if not ident:
+                continue
+            path = resolve_image_file(ident)
+            if path:
+                image_paths.append(path)
+            else:
+                output_error(f"未找到图片标识符: {ident}")
+                return
 
-    result = call_comfyui_generate(args.prompt, aspect_ratio=args.aspect_ratio, model_name=args.model)
+    result = call_comfyui_generate(
+        args.prompt,
+        aspect_ratio=args.aspect_ratio,
+        model_name=args.model,
+        image_paths=image_paths if image_paths else None
+    )
 
     if not result.get("success"):
         output_error(result.get("error", "未知错误"))
