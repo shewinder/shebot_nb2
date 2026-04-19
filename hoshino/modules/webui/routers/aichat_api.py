@@ -934,7 +934,7 @@ async def get_session_detail(session_id: str):
                 "continuous_mode": session.continuous_mode,
                 "choice_mode": False,
                 "choice_guideline": "",
-                "last_choices": session.last_choices,
+                "last_choices": session.get_last_choices(),
                 "last_active": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.last_active)),
                 "is_expired": session.is_expired(),
                 "persona": persona

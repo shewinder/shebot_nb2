@@ -2,8 +2,7 @@
 import base64
 import json
 import os
-import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 
 from hoshino import Bot, Event
@@ -15,58 +14,9 @@ from .api import api_manager
 from .config import Config
 from .md_render import strip_thinking_tags
 from .persona import persona_manager
-from .session import session_manager, ChatResult, Session
+from .session import session_manager, ChatResult, Session, parse_choices_from_response, format_choices_for_display
 
 conf = Config.get_instance('aichat')
-
-
-# 选项标记的正则表达式
-CHOICES_PATTERN = re.compile(r'\[CHOICES\](.*?)\[/CHOICES\]', re.DOTALL)
-CHOICE_ITEM_PATTERN = re.compile(r'^(\d+)\.\s*(.+)$', re.MULTILINE)
-
-
-def parse_choices_from_response(response: str) -> Tuple[str, Dict[int, str]]:
-    choices_dict = {}
-    
-    match = CHOICES_PATTERN.search(response)
-    if not match:
-        return response.strip(), choices_dict
-    
-    choices_text = match.group(1).strip()
-    
-    for line in choices_text.split('\n'):
-        line = line.strip()
-        if not line:
-            continue
-        
-        choice_match = CHOICE_ITEM_PATTERN.match(line)
-        if choice_match:
-            num = int(choice_match.group(1))
-            content = choice_match.group(2).strip()
-            if num in [1, 2, 3]:
-                choices_dict[num] = content
-    
-    content = CHOICES_PATTERN.sub('', response).strip()
-    
-    return content, choices_dict
-
-
-def format_choices_for_display(choices: Dict[int, str]) -> str:
-    if not choices:
-        return ""
-    
-    emoji_map = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣"}
-    
-    lines = [
-        "\n",
-        "📝 请选择接下来的行动：",
-    ]
-    
-    for num in [1, 2, 3]:
-        if num in choices:
-            lines.append(f"{emoji_map[num]} {choices[num]}")
-    
-    return "\n".join(lines)
 
 
 async def download_image_to_base64(image_url: str) -> Optional[str]:
@@ -279,12 +229,10 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     content, choices = parse_choices_from_response(response)
     if choices:
-        session_manager.set_last_choices(user_id, group_id, choices)
         display_response = content + format_choices_for_display(choices)
-        session.add_message("assistant", content)
     else:
-        session_manager.set_last_choices(user_id, group_id, {})
-        session.add_message("assistant", response)
+        display_response = response
+    session.add_message("assistant", response)
     
     try:
         if not display_response:

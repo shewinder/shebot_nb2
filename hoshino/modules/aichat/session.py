@@ -23,6 +23,54 @@ from .md_render import render_text_if_markdown
 
 conf = Config.get_instance('aichat')
 
+# 选项标记的正则表达式
+CHOICES_PATTERN = re.compile(r'\[CHOICES\](.*?)\[/CHOICES\]', re.DOTALL)
+CHOICE_ITEM_PATTERN = re.compile(r'^(\d+)\.\s*(.+)$', re.MULTILINE)
+
+
+def parse_choices_from_response(response: str) -> Tuple[str, Dict[int, str]]:
+    choices_dict = {}
+    
+    match = CHOICES_PATTERN.search(response)
+    if not match:
+        return response.strip(), choices_dict
+    
+    choices_text = match.group(1).strip()
+    
+    for line in choices_text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        
+        choice_match = CHOICE_ITEM_PATTERN.match(line)
+        if choice_match:
+            num = int(choice_match.group(1))
+            content = choice_match.group(2).strip()
+            if num in [1, 2, 3]:
+                choices_dict[num] = content
+    
+    content = CHOICES_PATTERN.sub('', response).strip()
+    
+    return content, choices_dict
+
+
+def format_choices_for_display(choices: Dict[int, str]) -> str:
+    if not choices:
+        return ""
+    
+    emoji_map = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣"}
+    
+    lines = [
+        "\n",
+        "📝 请选择接下来的行动：",
+    ]
+    
+    for num in [1, 2, 3]:
+        if num in choices:
+            lines.append(f"{emoji_map[num]} {choices[num]}")
+    
+    return "\n".join(lines)
+
 @dataclass
 class ChatResult:
     """聊天结果数据类"""
@@ -40,7 +88,6 @@ class Session:
         self.messages: List[Dict[str, Any]] = []
         self.last_active = time.time()
         self.continuous_mode = False
-        self.last_choices: Dict[int, str] = {}
         self._image_store = ImageStore(session_id)
         self._image_store.clear()  # 新建 Session 时清空旧图像缓存
         # SKILL 系统：已激活的 SKILL 名称集合
@@ -269,6 +316,16 @@ AI回复：🎨 已生成：<ai_image_1>
         if conf.session_timeout <= 0:
             return False
         return time.time() - self.last_active > conf.session_timeout
+    
+    def get_last_choices(self) -> Dict[int, str]:
+        """动态从消息历史最后一条 assistant 消息中解析选项"""
+        for msg in reversed(self.messages):
+            if msg.get("role") == "assistant":
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    _, choices = parse_choices_from_response(content)
+                    return choices
+        return {}
     
     # ========== SKILL 系统方法 ==========
     
@@ -924,22 +981,12 @@ class SessionManager:
                     del self.continuous_users[session_id]
         return self.continuous_users.get(session_id, False)
     
-    def set_last_choices(self, user_id: int, group_id: Optional[int] = None, choices: Dict[int, str] = None) -> bool:
-        session_id = self.get_session_id(user_id, group_id)
-        
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                session.last_choices = choices or {}
-                return True
-        return False
-    
     def get_last_choices(self, user_id: int, group_id: Optional[int] = None) -> Dict[int, str]:
         session_id = self.get_session_id(user_id, group_id)
         if session_id in self.sessions:
             session = self.sessions[session_id]
             if not session.is_expired():
-                return session.last_choices
+                return session.get_last_choices()
             else:
                 del self.sessions[session_id]
                 if session_id in self.continuous_users:
