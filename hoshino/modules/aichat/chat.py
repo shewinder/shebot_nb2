@@ -108,7 +108,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
     group_id = getattr(event, 'group_id', None)
     
     in_continuous_mode = session_manager.is_continuous_mode(user_id, group_id)
-    last_choices = session_manager.get_last_choices(user_id, group_id)
     
     if msg.startswith('#'):
         user_input = msg[1:].strip()
@@ -121,14 +120,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
         user_input = msg
     else:
         return
-    
-    if last_choices:
-        if msg in ['1', '2', '3']:
-            choice_num = int(msg)
-            if choice_num in last_choices:
-                # 将数字替换为选项内容
-                user_input = last_choices[choice_num]
-                logger.info(f"用户选择选项 {choice_num}: {user_input}")
 
     api_config = api_manager.get_api_config()
     if not api_config or not api_config.get("api_key"):
@@ -145,6 +136,16 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     persona = persona_manager.get_persona(user_id, group_id)
     session = session_manager.get_session(user_id, group_id, persona)
+    
+    # 解析最近一轮对话中的选项
+    last_choices = session.get_last_choices()
+    if last_choices:
+        if msg in ['1', '2', '3']:
+            choice_num = int(msg)
+            if choice_num in last_choices:
+                # 将数字替换为选项内容
+                user_input = last_choices[choice_num]
+                logger.info(f"用户选择选项 {choice_num}: {user_input}")
     
     if image_urls and not supports_multimodal:
         for img_url in image_urls:
@@ -230,15 +231,16 @@ async def handle_ai_chat(bot: Bot, event: Event):
         return
     
     response = api_result.content or ""
-    
-    display_response = response
+    session.add_message("assistant", response)
     
     content, choices = parse_choices_from_response(response)
+    if not choices:
+        choices = session.get_last_choices()
+    
     if choices:
         display_response = content + format_choices_for_display(choices)
     else:
-        display_response = response
-    session.add_message("assistant", response)
+        display_response = content
     
     try:
         if not display_response:

@@ -318,13 +318,20 @@ AI回复：🎨 已生成：<ai_image_1>
         return time.time() - self.last_active > conf.session_timeout
     
     def get_last_choices(self) -> Dict[int, str]:
-        """动态从消息历史最后一条 assistant 消息中解析选项"""
-        for msg in reversed(self.messages):
-            if msg.get("role") == "assistant":
-                content = msg.get("content", "")
-                if isinstance(content, str):
-                    _, choices = parse_choices_from_response(content)
-                    return choices
+        """动态从消息历史中解析选项（以最后一条 user 消息为界，避免找回旧选项）"""
+        last_user_idx = -1
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].get("role") == "user":
+                last_user_idx = i
+                break
+        if last_user_idx >= 0:
+            for msg in reversed(self.messages[last_user_idx:]):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        _, choices = parse_choices_from_response(content)
+                        if choices:
+                            return choices
         return {}
     
     # ========== SKILL 系统方法 ==========
