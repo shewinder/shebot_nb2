@@ -24,17 +24,18 @@ disable-model_invocation: false
 - ComfyUI 暂不支持（如图像编辑）
 - ComfyUI 不可用或报错
 
+**二次元/动漫场景优先使用 WAI-illustrious。** 该模型为 SDXL 动漫专用，角色还原度和二次元质量显著优于通用模型。但 **不支持写实/真人场景**，当用户要求写实照片、真人肖像等时，不用 WAI-illustrious
+
 ## 可用模型
 
 | 模型 | 协议脚本 | Prompt 语言 | 特点 | 能力 | 内容审查 |
 |------|---------|------------|------|------|----------|
-| z_image_turbo | comfyui.py | **中文** | Lumina2 + AuraFlow + qwen CLIP，8步采样快 | 文生图 | 完全无审核 |
-| qwen_image_edit_single | comfyui.py | **中文** | Qwen Image Edit 2509，单图编辑（局部重绘/改图），4步LoRA | 单图编辑 | 完全无审核 |
-| qwen_image_edit | comfyui.py | **中文** | Qwen Image Edit 2509，多图编辑/人物替换/融合，4步LoRA | 多图编辑 | 完全无审核 |
-| bytedance/seedream-v4/edit | atlascloud.py | 中文 | 字节跳动 Seedream，质量高，提示词遵循好 | 文生图, 编辑 | 几乎无审核 |
-| gemini-3.1-flash-image-preview | gemini.py | **英文** | Google Gemini，速度快，理解力强 | 文生图, 编辑 | 审核严格 |
-
-> **ComfyUI 工作流说明**：工作流 JSON 放在 `reference/` 目录下，文件名 = 模型名 + `.json`。新增工作流只需放入 JSON 文件并更新上表，零代码改动。
+| WAI-illustrious | comfyui.py | **英文** | 动漫/二次元专用，角色还原度高，原生 1024x1024 | 文生图 | 完全无审核 |
+| z_image_turbo | comfyui.py | **中文** | 通用创意图，中文理解好，速度快，适合插画/概念设计 | 文生图 | 完全无审核 |
+| qwen_image_edit_single | comfyui.py | **中文** | 单图编辑，支持局部重绘、改图、换装、去背景 | 单图编辑 | 完全无审核 |
+| qwen_image_edit | comfyui.py | **中文** | 多图编辑，支持人物替换、融合、风格迁移 | 多图编辑 | 完全无审核 |
+| bytedance/seedream-v4/edit | atlascloud.py | 中文 | 通用高质量生图，提示词遵循好，写实和动漫均可 | 文生图, 编辑 | 几乎无审核 |
+| gemini-3.1-flash-image-preview | gemini.py | **英文** | 通用生图，理解力强，支持复杂构图描述 | 文生图, 编辑 | 审核严格 |
 
 ## 工作流程
 
@@ -86,6 +87,31 @@ AI 调优后: "A cute orange tabby cat sleeping under a cherry blossom tree,
 AI 调优后: "高清细节，精美画质，一只可爱的橘猫在樱花树下睡觉，
             粉色花瓣飘落，温暖阳光透过树枝，治愈系画风"
 ```
+
+---
+
+### WAI-illustrious
+
+**Prompt 语言**：**英文**
+
+**调优方法**：
+1. 将用户描述翻译/转换为英文标签式 prompt（SDXL CLIP 对英文标签理解最佳）
+2. 补充英文质量词：`masterpiece, best quality, highly detailed`
+3. 根据内容补充风格词：`anime style, vibrant colors, cel shading`
+4. 角色图追加角色名标签（如 `hatsune miku, vocaloid`）以提升还原度
+5. **不要保留中文**
+
+**调优示例**：
+```
+用户: "画一个穿水手服的蓝发女孩在樱花树下"
+AI 调优后: "1girl, solo, blue hair, blue eyes, school uniform, cherry blossoms,
+            smile, looking at viewer, soft lighting, anime style, vibrant colors,
+            masterpiece, best quality, highly detailed"
+```
+
+**注意事项**：
+- 该模型为**动漫/二次元专用**，写实/真人/照片类 prompt 效果差，应切换至其他模型
+- 原生分辨率 1024x1024，二次元角色推荐 2:3 或 1:1 比例
 
 ---
 
