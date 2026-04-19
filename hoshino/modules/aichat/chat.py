@@ -15,6 +15,7 @@ from .config import Config
 from .md_render import strip_thinking_tags
 from .persona import persona_manager
 from .session import session_manager, ChatResult, Session, parse_choices_from_response, format_choices_for_display
+from .shortcuts import shortcuts_manager
 
 conf = Config.get_instance('aichat')
 
@@ -111,6 +112,11 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     if msg.startswith('#'):
         user_input = msg[1:].strip()
+        # 检查快捷指令
+        shortcut = shortcuts_manager.get_shortcut(user_input)
+        if shortcut:
+            user_input = shortcut.prompt
+            logger.info(f"触发快捷指令「{shortcut.name}」")
     elif in_continuous_mode:
         user_input = msg
     else:
