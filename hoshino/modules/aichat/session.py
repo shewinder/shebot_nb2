@@ -993,37 +993,28 @@ class SessionManager:
                     del self.continuous_users[session_id]
         return {}
     
-    def rollback_messages(self, user_id: int, group_id: Optional[int] = None, count: int = 1) -> int:
+    def rollback_messages(self, user_id: int, group_id: Optional[int] = None, count: int = 1) -> Tuple[int, int]:
         session_id = self.get_session_id(user_id, group_id)
         if session_id not in self.sessions:
-            return 0
+            return 0, 0
         session = self.sessions[session_id]
         if not session.messages:
-            return 0
-        system_msg = None
-        start_idx = 0
-        if session.messages and session.messages[0].get("role") == "system":
-            system_msg = session.messages[0]
-            start_idx = 1
-        messages_to_delete = count * 2
-        other_messages = session.messages[start_idx:]
+            return 0, 0
         
-        # 如果消息数不足，只删除存在的
-        if len(other_messages) <= messages_to_delete:
-            deleted = len(other_messages)
-            other_messages = []
-        else:
-            deleted = messages_to_delete
-            other_messages = other_messages[:-messages_to_delete]
-        
-        # 重新组合
-        if system_msg:
-            session.messages = [system_msg] + other_messages
-        else:
-            session.messages = other_messages
+        popped = 0
+        rounds = 0
+        while session.messages and rounds < count:
+            # 保护 system 消息：如果只剩一条且是 system，停止
+            if len(session.messages) == 1 and session.messages[0].get("role") == "system":
+                break
+            msg = session.messages[-1]
+            if msg.get("role") == "user":
+                rounds += 1
+            session.messages.pop()
+            popped += 1
         
         session.last_active = time.time()
-        return deleted
+        return popped, rounds
     
     # ========== SKILL 系统管理方法 ==========
     

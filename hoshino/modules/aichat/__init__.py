@@ -260,16 +260,14 @@ async def rollback_session(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
-    deleted = session_manager.rollback_messages(user_id, group_id, count)
+    deleted, actual_rounds = session_manager.rollback_messages(user_id, group_id, count)
     
     if deleted == 0:
         await rollback_cmd.finish("没有可回溯的对话记录")
-    elif deleted < count * 2:
-        # 只删除了部分（消息不够）
-        actual_pairs = deleted // 2
-        await rollback_cmd.finish(f"已回溯 {actual_pairs} 条对话（共删除 {deleted} 条消息，历史记录不足）")
+    elif actual_rounds < count:
+        await rollback_cmd.finish(f"已回溯 {actual_rounds} 条对话（共删除 {deleted} 条消息，历史记录不足）")
     else:
-        await rollback_cmd.finish(f"已回溯 {count} 条对话（共删除 {deleted} 条消息）")
+        await rollback_cmd.finish(f"已回溯 {actual_rounds} 条对话（共删除 {deleted} 条消息）")
 
 
 set_persona_cmd = sv.on_command('设置人格', aliases=('设置AI人格',), only_group=False)

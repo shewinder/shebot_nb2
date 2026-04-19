@@ -196,6 +196,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
         message_content = user_input
 
     session.add_message("user", message_content)
+    pre_chat_length = len(session.messages)
     
     async def on_content(content: str):
         if content and content.strip():
@@ -218,9 +219,8 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     if api_result.error and not api_result.content:
         await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result.error}")
-        # 回滚到用户消息之前的状态（移除用户消息及工具调用过程中添加的消息）
-        while session.messages and session.messages[-1].get("role") in ("user", "assistant", "tool"):
-            session.messages.pop()
+        # 回滚到本轮 chat 之前的状态
+        session.messages = session.messages[:pre_chat_length - 1]
         return
     
     response = api_result.content or ""
