@@ -1,13 +1,14 @@
 from dataclasses import dataclass
 from random import choices
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import aiohttp
+from hoshino import userdata_dir
 from hoshino.log import logger
 
 from .._model import Illust, PixivIllust
 from .score import score_data
-from .ai_filter import ai_filter_images
+from .ai_filter import ai_filter_images, ai_filter_images_multi_user
 from .config import Config
 
 
@@ -24,6 +25,7 @@ class RankPic:
     author: str
     author_id: int
     urls: List[str]
+    title: str = ""
 
 def to_rankpic(illust: Illust):
     pic = PixivIllust(**illust.dict())
@@ -38,6 +40,7 @@ def to_rankpic(illust: Illust):
         pic.user.name,
         pic.user.id,
         pic.urls,
+        pic.title or "",
     )
 
 
@@ -155,17 +158,75 @@ async def filter_rank(pics: List[RankPic], target_count: int = 15) -> List[RankP
     return selected_pics
 
 
+async def read_group_preferences(group_id: int, bot) -> List[Tuple[str, bool]]:
+    """
+    读取群内有画像的成员画像列表
+
+    Args:
+        group_id: 群号
+        bot: Bot 实例，用于获取群成员列表
+
+    Returns:
+        List[Tuple[preference_text, is_superuser]]
+        超级用户排在前面
+    """
+    from hoshino import hsn_config
+
+    superusers = {str(su) for su in getattr(hsn_config, 'superusers', set())}
+
+    # 获取群成员列表
+    member_ids: set = set()
+    try:
+        members = await bot.get_group_member_list(group_id=group_id)
+        for m in members:
+            uid = m.get('user_id') or m.get('qq')
+            if uid is not None:
+                member_ids.add(str(uid))
+        logger.info(f"群 {group_id} 成员数: {len(member_ids)}")
+    except Exception as e:
+        logger.warning(f"获取群 {group_id} 成员列表失败: {e}")
+        return []
+
+    # 扫描画像目录，找出群成员中有画像的
+    pref_dir = userdata_dir.joinpath('aichat/preferences')
+    if not pref_dir.exists():
+        logger.info(f"画像目录不存在: {pref_dir}")
+        return []
+
+    result = []
+    for f in pref_dir.iterdir():
+        if not f.is_file() or f.suffix != '.md':
+            continue
+        user_id = f.stem
+        if user_id not in member_ids:
+            continue
+        try:
+            content = f.read_text(encoding='utf-8').strip()
+            if content:
+                is_su = user_id in superusers
+                result.append((content, is_su))
+        except Exception as e:
+            logger.warning(f"读取画像文件失败 {f}: {e}")
+
+    # 超级用户排前面
+    result.sort(key=lambda x: (not x[1], x[0][:20]))
+    logger.info(f"群 {group_id} 找到 {len(result)} 个有画像的成员（含超级用户 {sum(1 for _, s in result if s)} 个）")
+    return result
+
+
 async def filter_rank_ai(
     pics: List[RankPic],
-    user_id: str,
+    group_id: int,
+    bot=None,
     target_count: int = 15
 ) -> List[RankPic]:
     """
-    智能图片筛选：优先 AI 根据画像筛选，剩余用原逻辑补齐
+    智能图片筛选：优先 AI 根据群内所有用户画像筛选，剩余用原逻辑补齐
     
     Args:
         pics: 原始图片列表
-        user_id: 用户/群ID，用于读取画像
+        group_id: 群号，用于读取该群成员画像
+        bot: Bot 实例，获取群成员列表需要
         target_count: 目标返回数量（默认15张）
     
     Returns:
@@ -177,53 +238,58 @@ async def filter_rank_ai(
     
     # 基础过滤：排除已发送、计算评分
     candidates = list(filter(not_sent_in_3_days, pics))
+    after_dedup = len(candidates)
     for pic in candidates:
         pic.score = sum_score(pic)
     candidates = list(filter(lambda x: x.score >= 0, candidates))
+    after_score = len(candidates)
+    logger.info(
+        f"群 {group_id} 基础过滤: 原始 {len(pics)} 张 -> "
+        f"去重后 {after_dedup} 张 -> 评分过滤后 {after_score} 张"
+    )
     
     # 准备 AI 筛选所需数据
     images = [
         {
             "pid": p.pid,
-            "title": "",
+            "title": p.title,
             "author": p.author,
             "tags": p.tags
         }
         for p in candidates
     ]
     
-    # 尝试 AI 筛选
-    ai_count = min(conf.ai_select_count, target_count)
-    selected_pids = await ai_filter_images(
-        user_id=user_id,
-        images=images,
-        api_base=conf.ai_api_base,
-        api_key=conf.ai_api_key,
-        model=conf.ai_model,
-        select_count=ai_count
-    )
-    
     result = []
     remaining_candidates = candidates.copy()
     
-    # AI 筛选成功，优先加入结果
-    if selected_pids is not None and len(selected_pids) > 0:
-        pid_map = {p.pid: p for p in candidates}
-        for pid in selected_pids:
-            if pid in pid_map:
-                result.append(pid_map[pid])
-                # 从剩余候选中移除
-                remaining_candidates = [p for p in remaining_candidates if p.pid != pid]
-        logger.info(f"AI 筛选选中 {len(result)} 张")
+    # 尝试读取群内多用户画像并调用 AI 筛选
+    if bot is not None and conf.ai_api_key:
+        user_preferences = await read_group_preferences(group_id, bot)
+        if user_preferences:
+            ai_count = min(conf.ai_select_count, target_count)
+            selected_pids = await ai_filter_images_multi_user(
+                images=images,
+                user_preferences=user_preferences,
+                api_base=conf.ai_api_base,
+                api_key=conf.ai_api_key,
+                model=conf.ai_model,
+                select_count=ai_count,
+            )
+            if selected_pids:
+                pid_map = {p.pid: p for p in candidates}
+                for pid in selected_pids:
+                    if pid in pid_map:
+                        result.append(pid_map[pid])
+                        remaining_candidates = [p for p in remaining_candidates if p.pid != pid]
+                logger.info(f"群 {group_id} AI 多用户筛选选中 {len(result)} 张")
     
-    # 如果数量不足，用原逻辑补齐
+    # 如果 AI 未选中或数量不足，用原逻辑补齐
     current_count = len(result)
     if current_count < target_count and len(remaining_candidates) > 0:
         need_count = target_count - current_count
-        # 从剩余候选中加权随机选择
         additional = weighted_select(remaining_candidates, need_count)
         result.extend(additional)
-        logger.info(f"原逻辑补齐 {len(additional)} 张，共 {len(result)} 张")
+        logger.info(f"群 {group_id} 原逻辑补齐 {len(additional)} 张，共 {len(result)} 张")
     
     return result
 
