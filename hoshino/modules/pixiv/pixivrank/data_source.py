@@ -75,13 +75,6 @@ async def get_selected_images() -> List[int]:
     return []
 
 
-def sum_score(pic: RankPic) -> int:
-    """计算图片的综合评分"""
-    return sum(
-        score_data.tag_scores.get(tag, 0) for tag in pic.tags
-    ) + score_data.author_scores.get(str(pic.author_id), 0)
-
-
 def not_sent_in_3_days(pic: RankPic) -> bool:
     """检查图片是否在最近3天内发送过"""
     for i in score_data.last_three_days:
@@ -90,9 +83,9 @@ def not_sent_in_3_days(pic: RankPic) -> bool:
     return True
 
 
-def weighted_select(pics: List[RankPic], count: int) -> List[RankPic]:
+def random_select(pics: List[RankPic], count: int) -> List[RankPic]:
     """
-    加权随机选择指定数量的图片
+    等权重随机选择指定数量的图片
     
     Args:
         pics: 候选图片列表（会被修改，注意传入副本）
@@ -106,7 +99,7 @@ def weighted_select(pics: List[RankPic], count: int) -> List[RankPic]:
         try:
             if len(pics) == 0:
                 break
-            sidx = choices(range(len(pics)), weights=[x.score + 1 for x in pics], k=1)[0]
+            sidx = choices(range(len(pics)), weights=[1] * len(pics), k=1)[0]
             selected.append(pics.pop(sidx))
         except Exception:
             continue
@@ -114,7 +107,7 @@ def weighted_select(pics: List[RankPic], count: int) -> List[RankPic]:
 
 
 async def filter_rank(pics: List[RankPic], target_count: int = 15) -> List[RankPic]:
-    """原有的基础过滤逻辑（基于评分和历史记录）"""
+    """基础过滤逻辑：手动选择优先 + 去重 + 随机补齐"""
     # 获取手动选择的图片ID列表
     selected_pids = await get_selected_images()
     selected_pics = []
@@ -123,30 +116,21 @@ async def filter_rank(pics: List[RankPic], target_count: int = 15) -> List[RankP
     # 优先添加手动选择的图片
     for pid in selected_pids:
         if pid in pics_dict:
-            # 从排行榜中找到的图片
             pic = pics_dict[pid]
             if not_sent_in_3_days(pic):
-                pic.score = sum_score(pic)
-                if pic.score >= 0:
-                    selected_pics.append(pic)
-                    # 从pics中移除，避免重复选择
-                    pics = [p for p in pics if p.pid != pid]
+                selected_pics.append(pic)
+                pics = [p for p in pics if p.pid != pid]
         else:
             # 不在排行榜中，尝试通过API获取
             try:
                 pic = await get_rankpic(str(pid))
                 if pic and not_sent_in_3_days(pic):
-                    pic.score = sum_score(pic)
-                    if pic.score >= 0:
-                        selected_pics.append(pic)
+                    selected_pics.append(pic)
             except Exception:
                 pass
     
     # 如果未满 target_count 张，继续自动挑选流程
     pics = list(filter(not_sent_in_3_days, pics))
-    for pic in pics:
-        pic.score = sum_score(pic)
-    pics = list(filter(lambda x: x.score >= 0, pics))
     
     # 从pics中移除已经选择的图片（避免重复）
     selected_pids_set = {p.pid for p in selected_pics}
@@ -154,7 +138,7 @@ async def filter_rank(pics: List[RankPic], target_count: int = 15) -> List[RankP
     
     # 继续选择直到 target_count 张
     remaining = target_count - len(selected_pics)
-    selected_pics.extend(weighted_select(pics, remaining))
+    selected_pics.extend(random_select(pics, remaining))
     return selected_pics
 
 
@@ -236,17 +220,9 @@ async def filter_rank_ai(
     if not conf.ai_filter_enabled:
         return await filter_rank(pics, target_count)
     
-    # 基础过滤：排除已发送、计算评分
+    # 基础过滤：排除已发送
     candidates = list(filter(not_sent_in_3_days, pics))
-    after_dedup = len(candidates)
-    for pic in candidates:
-        pic.score = sum_score(pic)
-    candidates = list(filter(lambda x: x.score >= 0, candidates))
-    after_score = len(candidates)
-    logger.info(
-        f"群 {group_id} 基础过滤: 原始 {len(pics)} 张 -> "
-        f"去重后 {after_dedup} 张 -> 评分过滤后 {after_score} 张"
-    )
+    logger.info(f"群 {group_id} 基础过滤: 原始 {len(pics)} 张 -> 去重后 {len(candidates)} 张")
     
     # 准备 AI 筛选所需数据
     images = [
@@ -287,9 +263,9 @@ async def filter_rank_ai(
     current_count = len(result)
     if current_count < target_count and len(remaining_candidates) > 0:
         need_count = target_count - current_count
-        additional = weighted_select(remaining_candidates, need_count)
+        additional = random_select(remaining_candidates, need_count)
         result.extend(additional)
-        logger.info(f"群 {group_id} 原逻辑补齐 {len(additional)} 张，共 {len(result)} 张")
+        logger.info(f"群 {group_id} 随机补齐 {len(additional)} 张，共 {len(result)} 张")
     
     return result
 

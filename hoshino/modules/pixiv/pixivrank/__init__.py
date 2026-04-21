@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 import aiohttp
 from hoshino import (
     Bot,
+    Message,
     MessageSegment,
     Service,
     font_dir,
@@ -308,55 +309,19 @@ async def _(bot: Bot, event: GroupMessageEvent):
 scheduled_job("cron", hour=conf.hour, minute=conf.minute, id="pixiv日榜数据更新")(update_rank)
 
 
-def add_tag_score(tag: str, score: int):
-    if tag in score_data.tag_scores:
-        score_data.tag_scores[tag] += score
-    else:
-        score_data.tag_scores[tag] = score
-    save_score_data()
-
-
-def add_author_score(author_id: str, score: int):
-    if author_id in score_data.author_scores:
-        score_data.author_scores[author_id] += score
-    else:
-        score_data.author_scores[author_id] = score
-    save_score_data()
-
-
-def favor(pic: RankPic):
-    for tag in pic.tags:
-        add_tag_score(tag, 1)
-    add_author_score(str(pic.author_id), 1)
-
-
-def dislike(pic: RankPic):
-    for tag in pic.tags:
-        add_tag_score(tag, -1)
-    add_author_score(str(pic.author_id), -1)
-
-
 async def resolve_rankpic_from_arg(arg: str, group_id: int = None) -> Tuple[Optional[RankPic], Optional[str]]:
     """
     解析参数为 RankPic 对象
     
-    支持三种格式：
-    1. 纯数字 PID: "123456"
-    2. 日榜索引: "pr1", "pr2", ... (从该群榜单获取)
-    3. R18日榜索引: "prr1", "prr2", ... (从该群R18榜单获取)
+    支持两种格式：
+    1. 日榜索引: "pr1", "pr2", ... (从该群榜单获取)
+    2. R18日榜索引: "prr1", "prr2", ... (从该群R18榜单获取)
     
     返回: (RankPic对象, 错误消息)
     如果成功，返回 (RankPic, None)
     如果失败，返回 (None, 错误消息)
     """
     arg = arg.strip()
-    
-    # 检查是否为纯数字 PID
-    if arg.isdigit():
-        rank_pic = await get_rankpic(arg)
-        if rank_pic is None:
-            return None, "无法获取该Pixiv ID的作品信息"
-        return rank_pic, None
     
     # 检查是否为 pr<n> 格式
     pr_match = re.match(r'^pr(\d+)$', arg, re.IGNORECASE)
@@ -380,6 +345,7 @@ async def resolve_rankpic_from_arg(arg: str, group_id: int = None) -> Tuple[Opti
                 return None, f"索引超出今日日榜范围（当前共{len(rank_list)}个作品）"
             
             idx = n - 1
+            logger.info(f"[resolve] pr{n} -> PID:{rank_list[idx].pid}")
             return rank_list[idx], None
         except (ValueError, IndexError):
             return None, "索引格式错误"
@@ -406,12 +372,14 @@ async def resolve_rankpic_from_arg(arg: str, group_id: int = None) -> Tuple[Opti
                 return None, f"索引超出今日R18日榜范围（当前共{len(rank_list)}个作品）"
             
             idx = n - 1
+            logger.info(f"[resolve] prr{n} -> PID:{rank_list[idx].pid}")
             return rank_list[idx], None
         except (ValueError, IndexError):
             return None, "索引格式错误"
     
     # 都不匹配
-    return None, "参数错误：请使用 Pixiv ID 或 pr<n>/prr<n>"
+    logger.warning(f"[resolve] 参数不匹配: {arg}")
+    return None, "参数错误：请使用 pr<n> 或 prr<n>"
 
 
 fav = sucmd("favor", handlers=[_strip_cmd])
@@ -420,14 +388,38 @@ fav = sucmd("favor", handlers=[_strip_cmd])
 @fav.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
     arg = str(event.get_message()).strip()
+    sv.logger.info(f"[favor] 收到参数: {arg}, user={event.user_id}, group={event.group_id}")
+    
     rank_pic, error_msg = await resolve_rankpic_from_arg(arg, event.group_id)
     
     if rank_pic is None:
-        await bot.send(event, error_msg or "请输入正确的Pixiv ID或日榜索引")
+        sv.logger.warning(f"[favor] 解析失败: {error_msg}")
+        await bot.send(event, error_msg or "请输入 pr<n> 或 prr<n>")
         return
     
-    favor(rank_pic)
-    await bot.send(event, f"更新tag {rank_pic.tags}\n更新作者 {rank_pic.author}")
+    sv.logger.info(f"[favor] 解析成功: PID={rank_pic.pid}, url={rank_pic.url}")
+    
+    # 通过 handle_msg 触发 aichat 的 image_preference skill 分析图片并更新画像
+    img_url = rank_pic.url.replace("i.pximg.net", "pixiv.shewinder.win")
+    sv.logger.info(f"[favor] 准备发送图片: {img_url}")
+    
+    try:
+        tags_str = ", ".join(rank_pic.tags[:10])
+        text = f"#图片点评\n标题:{rank_pic.title}\n作者:{rank_pic.author}\n标签:{tags_str}\n\n我喜欢这张图"
+        sv.logger.info(f"[favor] 文本内容: {text[:100]}")
+        
+        img_seg = MessageSegment.image(img_url)
+        img_seg.data['url'] = img_url  # 确保 aichat 能提取到图片 URL
+        msg = Message([
+            MessageSegment.text(text),
+            img_seg
+        ])
+        sv.logger.info("[favor] 消息构造完成，调用 handle_msg")
+        await handle_msg(bot, event, msg)
+        sv.logger.info("[favor] handle_msg 调用完成")
+    except Exception as e:
+        sv.logger.exception(f"[favor] 异常: {e}")
+        await bot.send(event, f"处理失败: {e}")
 
 
 dis = sucmd("dislike", handlers=[_strip_cmd])
@@ -436,26 +428,34 @@ dis = sucmd("dislike", handlers=[_strip_cmd])
 @dis.handle()
 async def _(bot: Bot, event: GroupMessageEvent):
     arg = str(event.get_message()).strip()
+    sv.logger.info(f"[dislike] 收到参数: {arg}, user={event.user_id}, group={event.group_id}")
+    
     rank_pic, error_msg = await resolve_rankpic_from_arg(arg, event.group_id)
     
     if rank_pic is None:
-        await bot.send(event, error_msg or "请输入正确的Pixiv ID或日榜索引")
+        sv.logger.warning(f"[dislike] 解析失败: {error_msg}")
+        await bot.send(event, error_msg or "请输入 pr<n> 或 prr<n>")
         return
     
-    dislike(rank_pic)
-    await bot.send(event, f"更新tag {rank_pic.tags}\n更新作者 {rank_pic.author}")
-
-
-add_tag = sucmd("tag", only_to_me=False, handlers=[_strip_cmd])
-
-
-@add_tag.handle()
-async def _(bot: Bot, event: GroupMessageEvent):
+    sv.logger.info(f"[dislike] 解析成功: PID={rank_pic.pid}, url={rank_pic.url}")
+    
+    img_url = rank_pic.url.replace("i.pximg.net", "pixiv.shewinder.win")
+    sv.logger.info(f"[dislike] 准备发送图片: {img_url}")
+    
     try:
-        tag, score = str(event.message).split(" ")
-        int(score)
-    except:
-        tag = str(event.message)
-        score = 0  # 默认为0
-    add_tag_score(tag, int(score))
-    await bot.send(event, f"更新tag {tag}, score {score_data.tag_scores[tag]}")
+        tags_str = ", ".join(rank_pic.tags[:10])
+        text = f"#图片点评\n标题:{rank_pic.title}\n作者:{rank_pic.author}\n标签:{tags_str}\n\n我不喜欢这张图"
+        sv.logger.info(f"[dislike] 文本内容: {text[:100]}")
+        
+        img_seg = MessageSegment.image(img_url)
+        img_seg.data['url'] = img_url  # 确保 aichat 能提取到图片 URL
+        msg = Message([
+            MessageSegment.text(text),
+            img_seg
+        ])
+        sv.logger.info("[dislike] 消息构造完成，调用 handle_msg")
+        await handle_msg(bot, event, msg)
+        sv.logger.info("[dislike] handle_msg 调用完成")
+    except Exception as e:
+        sv.logger.exception(f"[dislike] 异常: {e}")
+        await bot.send(event, f"处理失败: {e}")
