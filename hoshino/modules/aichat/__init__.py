@@ -318,7 +318,7 @@ async def set_group_persona(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = event.group_id
     
-    saved_persona = persona_manager.get_saved_persona(user_id, None, input_text)
+    saved_persona = persona_manager.find_persona_by_name(user_id, group_id, input_text)
     
     if saved_persona:
         persona_text = saved_persona
@@ -346,7 +346,7 @@ async def set_global_persona(bot: Bot, event: Event):
     
     user_id = event.user_id
     
-    saved_persona = persona_manager.get_saved_persona(user_id, None, input_text)
+    saved_persona = persona_manager.find_persona_by_name(user_id, None, input_text)
     
     if saved_persona:
         persona_text = saved_persona
