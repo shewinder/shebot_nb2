@@ -107,7 +107,9 @@ async def handle_ai_chat(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
-    in_continuous_mode = session_manager.is_continuous_mode(user_id, group_id)
+    # 先检查是否有活跃 session（不创建）
+    session = session_manager.get_session(user_id, group_id)
+    in_continuous_mode = session.continuous_mode if session else False
     
     if msg.startswith('#'):
         user_input = msg[1:].strip()
@@ -135,7 +137,9 @@ async def handle_ai_chat(bot: Bot, event: Event):
     message_content: Union[str, List[Dict[str, Any]]]
     
     persona = persona_manager.get_persona(user_id, group_id)
-    session = session_manager.get_session(user_id, group_id, persona)
+    # 确定要对话，获取或创建 session
+    if not session:
+        session = session_manager.create_session(user_id, group_id, persona)
     
     # 解析最近一轮对话中的选项
     last_choices = session.get_last_choices()

@@ -114,38 +114,11 @@ async def activate_skill(
             error="Model invocation disabled for this skill"
         )
     
-    # 检查是否已激活
-    if skill_manager.is_skill_active(session.session_id, skill_name):
-        return ok(
-            f"SKILL '{skill_name}' 已经激活\n\n描述：{skill.metadata.description}",
-            metadata={
-                "skill_name": skill_name,
-                "already_active": True,
-                "description": skill.metadata.description,
-                "allowed_tools": skill.metadata.allowed_tools
-            }
-        )
-    
-    # 检查是否超过最大数量
-    active_count = len(skill_manager.get_active_skill_names(session.session_id))
-    if active_count >= conf.skill_max_per_session:
-        return fail(
-            f"当前会话已激活 {active_count} 个 SKILL，达到上限（{conf.skill_max_per_session}）。"
-            f"请先使用「#停用技能」释放空间。",
-            error="Max skills reached"
-        )
-    
     try:
-        # 激活 SKILL
-        success, message, content = skill_manager.activate_skill(
-            session.session_id, 
-            skill_name
-        )
+        # 激活 SKILL（Session 内部处理存在性、重复激活、上限检查）
+        success, message, content = session.activate_skill(skill_name)
         
         if success:
-            # 同时更新 session
-            session.activate_skill(skill_name)
-            
             result_lines = [
                 f"✅ {message}",
                 f"",
@@ -174,10 +147,10 @@ async def activate_skill(
                 "\n".join(result_lines),
                 metadata={
                     "skill_name": skill_name,
-                    "already_active": False,
+                    "already_active": "已经激活" in message,
                     "description": skill.metadata.description,
                     "allowed_tools": skill.metadata.allowed_tools,
-                    "active_skills_count": active_count + 1
+                    "active_skills_count": len(session.get_active_skills())
                 }
             )
         else:

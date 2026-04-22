@@ -184,17 +184,12 @@ class TaskManager:
             return
         
         try:
-            # 构建 session_id（复用 chat 的环境信息解析逻辑）
-            if task.group_id:
-                session_id = f"group_{task.group_id}_user_{task.user_id}"
-            else:
-                session_id = f"private_{task.user_id}"
-            
             # 获取 persona
             persona = persona_manager.get_persona(task.user_id, task.group_id)
             
-            # 创建临时 Session（复用 chat 的全部逻辑：system 构建、skill、图片规则）
-            temp_session = Session(session_id, persona=persona)
+            # 创建独立 Agent Session，使用唯一 ID 避免与用户 session 冲突
+            agent_session_id = f"agent_task_{task.id}_{uuid.uuid4().hex[:6]}"
+            temp_session = Session(agent_session_id, persona=persona)
             
             # 添加任务描述作为用户消息
             temp_session.add_message("user", task.raw_description)

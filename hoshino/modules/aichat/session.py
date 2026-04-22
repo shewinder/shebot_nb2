@@ -92,6 +92,7 @@ class Session:
         self._image_store.clear()  # 新建 Session 时清空旧图像缓存
         # SKILL 系统：已激活的 SKILL 名称集合
         self.active_skills: Set[str] = set()
+        self._skill_contents: Dict[str, str] = {}
         # 当前正在执行的 SKILL（用于工具权限检查）
         self.active_skill: Optional[str] = None
         # Token 使用量统计
@@ -103,8 +104,10 @@ class Session:
         if persona:
             self.messages.append({"role": "system", "content": persona})
     
-    def add_message(self, role: str, content: Union[str, List[Dict[str, Any]]]):
-        self.messages.append({"role": role, "content": content})
+    def _append_and_trim(self, message: Dict[str, Any]) -> None:
+        """统一的消息追加 + 裁剪入口"""
+        self.messages.append(message)
+        
         system_msg = None
         if self.messages and self.messages[0].get("role") == "system":
             system_msg = self.messages[0]
@@ -121,6 +124,14 @@ class Session:
             self.messages = other_messages
         
         self.last_active = time.time()
+
+    def add_message(self, role: str, content: Union[str, List[Dict[str, Any]]]):
+        """添加标准 user/assistant 消息"""
+        self._append_and_trim({"role": role, "content": content})
+
+    def add_raw_message(self, message: Dict[str, Any]) -> None:
+        """添加完整 API 格式消息（支持 tool_calls、tool 等）"""
+        self._append_and_trim(message)
     
     async def store_user_image(self, image_data: str) -> str:
         entry = await self._image_store.store(image_data, "user")
@@ -336,11 +347,28 @@ AI回复：🎨 已生成：<ai_image_1>
     
     # ========== SKILL 系统方法 ==========
     
-    def activate_skill(self, skill_name: str) -> bool:
-        """激活一个 SKILL"""
+    def activate_skill(self, skill_name: str) -> Tuple[bool, str, Optional[str]]:
+        """激活一个 SKILL
+        
+        Returns:
+            (success, message, content)
+        """
+        skill = skill_manager.get_skill(skill_name)
+        if not skill:
+            return False, f"SKILL '{skill_name}' 不存在", None
+        
+        if skill_name in self.active_skills:
+            return True, f"SKILL '{skill_name}' 已经激活", skill.content
+        
+        # 限制单个会话最多激活 SKILL
+        if len(self.active_skills) >= conf.skill_max_per_session:
+            return False, f"激活 '{skill_name}' 会导致循环依赖，已阻止", None
+        
         self.active_skills.add(skill_name)
+        self._skill_contents[skill_name] = skill.content
         self.last_active = time.time()
-        return True
+        logger.info(f"Session {self.session_id} 激活 SKILL: {skill_name}")
+        return True, f"SKILL '{skill_name}' 已激活", skill.content
     
     def deactivate_skill(self, skill_name: str) -> bool:
         """停用指定 SKILL"""
@@ -467,10 +495,10 @@ AI回复：🎨 已生成：<ai_image_1>
                 logger.debug(f"[SKILL] 可用 SKILL 列表已注入")
             
             # 获取已激活的 SKILL
-            active_skills = skill_manager.get_active_skill_names(self.session_id)
+            active_skills = self.active_skills
             logger.info(f"[SKILL] 当前会话已激活 SKILL: {active_skills if active_skills else '无'}")
             
-            skill_content = skill_manager.get_injected_content(self.session_id)
+            skill_content = skill_manager.get_injected_content(self.active_skills)
             if skill_content:
                 content_preview = skill_content[:500] + "..." if len(skill_content) > 500 else skill_content
                 logger.info(f"[SKILL] 注入内容预览:\n{content_preview}")
@@ -573,52 +601,6 @@ AI回复：🎨 已生成：<ai_image_1>
         
         return result
     
-    @classmethod
-    async def chat_with_messages(
-        cls,
-        messages: List[Dict[str, Any]],
-        api_config: Dict[str, Any],
-        max_tool_rounds: int = 10,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        使用指定消息列表进行对话（非会话模式）
-        
-        这是一个独立的类方法，用于非交互式场景（如定时任务）调用 AI API。
-        不维护会话状态，每次调用都是独立的。
-        
-        Args:
-            messages: 消息列表
-            api_config: API 配置
-            max_tool_rounds: 最大工具调用轮数
-            context: 可选的上下文信息
-        
-        Returns:
-            Dict[str, Any]: 包含 content, error, tool_results, usage 等字段的结果
-        """
-        tools = await get_available_tools() if api_config.get("supports_tools", False) else None
-        
-        # 创建一个临时 Session 来复用其 _chat_with_api 方法
-        temp_session = cls("temp_scheduled_task")
-        
-        # 将临时 session 放入 context，以便工具调用时可以注入
-        call_context = context.copy() if context else {}
-        call_context['session'] = temp_session
-        
-        result = await temp_session._chat_with_api(
-            messages=messages,
-            api_config=api_config,
-            tools=tools,
-            max_tool_rounds=max_tool_rounds,
-            context=call_context,
-        )
-        
-        return {
-            "content": result.content,
-            "error": result.error,
-            "tool_results": result.tool_results,
-            "usage": result.usage,
-        }
     
     async def _call_ai_api(
         self,
@@ -884,7 +866,7 @@ AI回复：🎨 已生成：<ai_image_1>
             assistant_message = result.get("raw_response", {}).get("choices", [{}])[0].get("message", {})
             current_messages.append(assistant_message)
             # 同步到 session 消息历史
-            self.messages.append(assistant_message)
+            self.add_raw_message(assistant_message)
             
             # 执行工具调用
             for tool_call in tool_calls:
@@ -895,7 +877,7 @@ AI回复：🎨 已生成：<ai_image_1>
                 })
                 current_messages.append(tool_result)
                 # 同步到 session 消息历史
-                self.messages.append(tool_result)
+                self.add_raw_message(tool_result)
                 # 打印完整 stdout/stderr 以便调试脚本问题
                 try:
                     parsed_content = json.loads(tool_result['content'])
@@ -920,155 +902,62 @@ AI回复：🎨 已生成：<ai_image_1>
 class SessionManager:
     def __init__(self):
         self.sessions: Dict[str, Session] = {}
-        self.continuous_users: Dict[str, bool] = {}
     
     def get_session_id(self, user_id: int, group_id: Optional[int] = None) -> str:
         if group_id:
             return f"group_{group_id}_user_{user_id}"
         return f"private_{user_id}"
     
-    def get_session(self, user_id: int, group_id: Optional[int] = None, persona: Optional[str] = None) -> Session:
+    def _remove_session(self, session_id: str) -> None:
+        """统一删除 session 入口，同时清理 MCP 状态"""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+        
+        mcp_sm = get_mcp_session_manager()
+        if mcp_sm is not None:
+            try:
+                mcp_sm.clear_session(session_id)
+            except Exception:
+                pass
+    
+    def get_session(self, user_id: int, group_id: Optional[int] = None) -> Optional[Session]:
+        """获取已存在且未过期的 session，不存在或过期返回 None"""
+        session_id = self.get_session_id(user_id, group_id)
+        session = self.sessions.get(session_id)
+        if not session:
+            return None
+        if session.is_expired():
+            self._remove_session(session_id)
+            return None
+        return session
+    
+    def create_session(self, user_id: int, group_id: Optional[int] = None,
+                       persona: Optional[str] = None) -> Session:
+        """显式创建新 session，如存在旧 session 先清理"""
         session_id = self.get_session_id(user_id, group_id)
         if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session
-            else:
-                del self.sessions[session_id]
-                if session_id in self.continuous_users:
-                    del self.continuous_users[session_id]
+            self._remove_session(session_id)
         session = Session(session_id, persona)
-        if self.continuous_users.get(session_id, False):
-            session.continuous_mode = True
         self.sessions[session_id] = session
         return session
+    
+    def get_or_create_session(self, user_id: int, group_id: Optional[int] = None,
+                              persona: Optional[str] = None) -> Session:
+        """获取已存在的 session，不存在则创建"""
+        session = self.get_session(user_id, group_id)
+        if not session:
+            session = self.create_session(user_id, group_id, persona)
+        return session
+    
+    def has_session(self, user_id: int, group_id: Optional[int] = None) -> bool:
+        """检查是否存在未过期的活跃 session"""
+        return self.get_session(user_id, group_id) is not None
     
     def clear_session(self, user_id: int, group_id: Optional[int] = None) -> bool:
         session_id = self.get_session_id(user_id, group_id)
         if session_id in self.sessions:
-            del self.sessions[session_id]
-            if session_id in self.continuous_users:
-                del self.continuous_users[session_id]
-            
-            # 清理 SKILL 激活状态
-            try:
-                skill_manager.clear_session(session_id)
-            except Exception:
-                pass
-            
-            # 清理 MCP 激活状态
-            mcp_sm = get_mcp_session_manager()
-            if mcp_sm is not None:
-                try:
-                    mcp_sm.clear_session(session_id)
-                except Exception:
-                    pass
-            
+            self._remove_session(session_id)
             return True
-        return False
-    
-    def set_continuous_mode(self, user_id: int, group_id: Optional[int] = None, enabled: bool = True) -> bool:
-        session_id = self.get_session_id(user_id, group_id)
-        self.continuous_users[session_id] = enabled
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                session.continuous_mode = enabled
-                return True
-        return False
-    
-    def is_continuous_mode(self, user_id: int, group_id: Optional[int] = None) -> bool:
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session.continuous_mode
-            else:
-                if session_id in self.continuous_users:
-                    del self.continuous_users[session_id]
-        return self.continuous_users.get(session_id, False)
-    
-    def get_last_choices(self, user_id: int, group_id: Optional[int] = None) -> Dict[int, str]:
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session.get_last_choices()
-            else:
-                del self.sessions[session_id]
-                if session_id in self.continuous_users:
-                    del self.continuous_users[session_id]
-        return {}
-    
-    def rollback_messages(self, user_id: int, group_id: Optional[int] = None, count: int = 1) -> Tuple[int, int]:
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id not in self.sessions:
-            return 0, 0
-        session = self.sessions[session_id]
-        if not session.messages:
-            return 0, 0
-        
-        popped = 0
-        rounds = 0
-        while session.messages and rounds < count:
-            # 保护 system 消息：如果只剩一条且是 system，停止
-            if len(session.messages) == 1 and session.messages[0].get("role") == "system":
-                break
-            msg = session.messages[-1]
-            if msg.get("role") == "user":
-                rounds += 1
-            session.messages.pop()
-            popped += 1
-        
-        session.last_active = time.time()
-        return popped, rounds
-    
-    # ========== SKILL 系统管理方法 ==========
-    
-    def activate_skill(self, user_id: int, group_id: Optional[int], skill_name: str) -> bool:
-        """为用户会话激活 SKILL"""
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session.activate_skill(skill_name)
-        return False
-    
-    def deactivate_skill(self, user_id: int, group_id: Optional[int], skill_name: str) -> bool:
-        """为用户会话停用 SKILL"""
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session.deactivate_skill(skill_name)
-        return False
-    
-    def deactivate_all_skills(self, user_id: int, group_id: Optional[int]) -> bool:
-        """停用用户会话的所有 SKILL"""
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                session.deactivate_all_skills()
-                return True
-        return False
-    
-    def get_active_skills(self, user_id: int, group_id: Optional[int]) -> Set[str]:
-        """获取用户会话的已激活 SKILL"""
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session.get_active_skills()
-        return set()
-    
-    def is_skill_active(self, user_id: int, group_id: Optional[int], skill_name: str) -> bool:
-        """检查 SKILL 是否已激活"""
-        session_id = self.get_session_id(user_id, group_id)
-        if session_id in self.sessions:
-            session = self.sessions[session_id]
-            if not session.is_expired():
-                return session.is_skill_active(skill_name)
         return False
 
 

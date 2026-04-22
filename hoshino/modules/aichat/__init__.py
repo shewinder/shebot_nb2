@@ -179,10 +179,9 @@ async def enter_chat_mode(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
-    session_manager.set_continuous_mode(user_id, group_id, True)
-    
     persona = persona_manager.get_persona(user_id, group_id)
-    session = session_manager.get_session(user_id, group_id, persona)
+    session = session_manager.get_or_create_session(user_id, group_id, persona)
+    session.continuous_mode = True
     
     msg = "已进入连续对话模式！\n现在可以直接发送消息，无需 # 前缀即可与AI对话。\n"
     msg += f"当前人格：{persona[:30]}..." if persona else "当前人格：默认"
@@ -198,14 +197,16 @@ async def exit_chat_mode(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
-    was_in_mode = session_manager.is_continuous_mode(user_id, group_id)
+    session = session_manager.get_session(user_id, group_id)
+    was_in_mode = session.continuous_mode if session else False
     
     if not was_in_mode:
         await exit_chat_mode_cmd.finish("你当前不在连续对话模式中，发送「进入对话模式」来开启")
         return
     
     # 退出连续对话模式
-    session_manager.set_continuous_mode(user_id, group_id, False)
+    if session:
+        session.continuous_mode = False
     await exit_chat_mode_cmd.finish("已退出连续对话模式。\n现在需要使用 # 前缀来触发AI对话。")
 
 
@@ -216,7 +217,8 @@ async def check_chat_mode(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
-    in_mode = session_manager.is_continuous_mode(user_id, group_id)
+    session = session_manager.get_session(user_id, group_id)
+    in_mode = session.continuous_mode if session else False
     
     if in_mode:
         await check_chat_mode_cmd.finish("当前处于「连续对话模式」，直接发送消息即可与AI对话\n发送「退出对话模式」退出此模式")
@@ -260,7 +262,12 @@ async def rollback_session(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
-    deleted, actual_rounds = session_manager.rollback_messages(user_id, group_id, count)
+    session = session_manager.get_session(user_id, group_id)
+    if not session:
+        await rollback_cmd.finish("没有可回溯的对话记录")
+        return
+    
+    deleted, actual_rounds = session.rollback_messages(count)
     
     if deleted == 0:
         await rollback_cmd.finish("没有可回溯的对话记录")
@@ -1090,9 +1097,13 @@ async def current_skills(bot: Bot, event: Event):
     
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
-    session_id = session_manager.get_session_id(user_id, group_id)
     
-    active_skills = skill_manager.get_active_skills(session_id)
+    session = session_manager.get_session(user_id, group_id)
+    if not session:
+        await current_skills_cmd.finish("当前没有激活的 SKILL\n\n使用「#技能列表」查看可用 SKILL")
+        return
+    
+    active_skills = session.get_active_skills()
     
     if not active_skills:
         await current_skills_cmd.finish("当前没有激活的 SKILL\n\n使用「#技能列表」查看可用 SKILL")
@@ -1119,8 +1130,7 @@ async def query_token(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
     
-    session_id = session_manager.get_session_id(user_id, group_id)
-    session = session_manager.sessions.get(session_id)
+    session = session_manager.get_session(user_id, group_id)
     
     if not session or session.total_tokens == 0:
         await query_token_cmd.finish("📊 当前会话暂无 token 使用记录\n\n提示：\n- 请先与 AI 进行对话\n- Token 统计在 session 过期后重置")
