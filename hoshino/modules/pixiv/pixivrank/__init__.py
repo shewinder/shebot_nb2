@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import datetime
+import os
 import re
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
@@ -23,6 +25,10 @@ from hoshino.util.sutil import anti_harmony, get_img_from_url, get_service_group
 from hoshino.util.handle_msg import handle_msg
 from PIL import Image, ImageFont, ImageDraw
 
+from hoshino.modules.aichat.session import Session
+from hoshino.modules.aichat.api import api_manager
+from hoshino.modules.aichat.persona import persona_manager
+
 from .config import Config
 from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic
 from .score import score_data, save_score_data, load_score_data
@@ -43,6 +49,94 @@ _raw_rank_r18: List[RankPic] = []
 # 各群筛选后的榜单
 _group_ranks: Dict[int, List[RankPic]] = {}
 _group_ranks_r18: Dict[int, List[RankPic]] = {}
+
+
+async def _download_image_to_base64(image_url: str) -> Optional[str]:
+    """下载图片并转为 base64 data URL"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url) as resp:
+                if resp.status != 200:
+                    return None
+                image_data = await resp.read()
+                if not image_data:
+                    return None
+                content_type = resp.content_type or ""
+                ext = "png"
+                if content_type.startswith("image/"):
+                    ext = content_type.split("/")[1].split(";")[0].strip()
+                    if ext == "jpeg":
+                        ext = "jpg"
+                else:
+                    if "." in image_url:
+                        url_part = image_url.split("?")[0]
+                        url_ext = os.path.splitext(url_part)[1].lower()
+                        if url_ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+                            ext = url_ext.lstrip(".")
+                base64_data = base64.b64encode(image_data).decode("utf-8")
+                return f"data:image/{ext};base64,{base64_data}"
+    except Exception:
+        return None
+
+
+async def _implicit_preference_update(
+    bot: Bot, event: GroupMessageEvent, pic: RankPic, is_r18: bool
+):
+    """后台任务：隐式调用 aichat 更新用户画像"""
+    try:
+        user_id = event.user_id
+        group_id = event.group_id
+
+        api_config = api_manager.get_api_config()
+        if not api_config or not api_config.get("api_key"):
+            return
+
+        # 创建独立 Session（不干扰用户的正常对话历史）
+        session_id = f"private_{user_id}_pixivrank"
+        persona = persona_manager.get_persona(user_id, group_id)
+        session = Session(session_id, persona)
+
+        # 激活 image_preference skill
+        session.activate_skill("image_preference")
+
+        # 下载图片为 base64
+        img_url = pic.url.replace("i.pximg.net", "pixiv.shewinder.win")
+        base64_image = await _download_image_to_base64(img_url)
+
+        # 构造消息
+        tags_str = ", ".join(pic.tags[:10])
+        text = (
+            f"#图片点评\n"
+            f"标题:{pic.title}\n"
+            f"作者:{pic.author}\n"
+            f"标签:{tags_str}\n\n"
+            f"用户通过{'prr' if is_r18 else 'pr'}主动查看了这张图，"
+            f"默认视为对该图的隐性喜欢并更新偏好。"
+            f"但如果该图的内容与用户现有画像中的核心偏好或回避内容明显冲突，"
+            f"则仅作为中性浏览记录处理，不要强化偏好。"
+        )
+
+        if base64_image and api_config.get("supports_multimodal", False):
+            message_content = [
+                {"type": "text", "text": text},
+                {"type": "image_url", "image_url": {"url": base64_image}},
+            ]
+            await session.store_user_image(base64_image)
+        else:
+            message_content = text + f"\n图片URL: {img_url}"
+
+        session.add_message("user", message_content)
+
+        # 执行对话，on_content=None 确保不发送中间内容
+        await session.chat(
+            api_config=api_config,
+            bot=bot,
+            event=event,
+            on_content=None,
+        )
+
+    except Exception:
+        pass
 
 
 def get_text_size(font, text):
@@ -221,6 +315,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     p = rank_list[idx]
 
     await handle_msg(bot, event, f"pid {p.pid}")
+    asyncio.create_task(_implicit_preference_update(bot, event, p, is_r18=False))
 
 
 detail_r18 = sv_r18.on_command("prr", handlers=[_strip_cmd])
@@ -254,6 +349,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     p = rank_list[idx]
 
     await handle_msg(bot, event, f"pid {p.pid}")
+    asyncio.create_task(_implicit_preference_update(bot, event, p, is_r18=True))
 
 
 @scheduled_job("cron", hour=conf.hour, minute=conf.minute + 1, id="pixiv日榜")
