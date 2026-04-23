@@ -376,6 +376,40 @@ async def handler(bot: Bot, event: Event):
 - 让 `FinishedException` 自然抛出
 - 如果必须捕获，显式排除 `FinishedException`
 
+### HTTP 客户端迁移决策
+
+**状态：渐进式迁移中（暂不实施全量替换）**
+
+本项目历史上混用 `aiohttp`、`requests`、`httpx` 三个 HTTP 客户端库，导致连接池碎片化、超时/代理配置不统一、维护成本高。
+
+**已决策的规范：**
+
+1. **新功能必须使用 `httpx`**
+   - 异步用 `httpx.AsyncClient`，同步用 `httpx.Client`
+   - 不要在新代码中引入 `aiohttp` 或 `requests`
+
+2. **修改涉及老文件时，顺手替换 `aiohttp` / `aiohttpx`**
+   - 如果本次任务修改的文件中使用了 `aiohttp.ClientSession`、`aiohttpx.get/post`、`requests.get/post` 等旧客户端，**应在修改时一并替换为 `httpx`**
+   - 提醒用户："该文件仍使用旧的 aiohttp/aiohttpx，顺手一起改成 httpx？"
+   - 等用户确认后再改，不要擅自扩大改动范围
+
+3. **暂不做全量迁移**
+   - 未涉及修改的文件保持原样，不主动改动
+   - 不新建统一的 `AsyncHTTPClient` 封装层，等迁移完成后再评估是否需要
+
+**关键接口差异备忘：**
+
+| 操作 | aiohttpx (旧) | httpx (新) |
+|---|---|---|
+| JSON 响应 | `resp.json` (属性) | `resp.json()` (方法) ⚠️ |
+| 读取文本 | `resp.text` (属性) | `resp.text` (属性) ✅ |
+| 读取 bytes | `resp.content` (属性) | `resp.content` (属性) ✅ |
+| 状态码 | `resp.status_code` | `resp.status_code` ✅ |
+| 禁用 SSL | `verify_ssl=False` | `verify=False` |
+| 代理 | 不支持透传 | `proxy="http://..."` |
+
+---
+
 ### Playwright 浏览器自动化
 
 ```python
