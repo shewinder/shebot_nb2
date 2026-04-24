@@ -235,7 +235,10 @@ async def handle_ai_chat(bot: Bot, event: Event):
         return
     
     response = api_result.content or ""
-    session.add_message("assistant", response)
+    assistant_msg = {"role": "assistant", "content": response}
+    if api_result.reasoning_content:
+        assistant_msg["reasoning_content"] = api_result.reasoning_content
+    session.add_raw_message(assistant_msg)
     
     content, choices = parse_choices_from_response(response)
     if not choices:
