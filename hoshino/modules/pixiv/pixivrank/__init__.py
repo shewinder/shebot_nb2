@@ -25,9 +25,9 @@ from hoshino.util.sutil import anti_harmony, get_img_from_url, get_service_group
 from hoshino.util.handle_msg import handle_msg
 from PIL import Image, ImageFont, ImageDraw
 
-from hoshino.modules.aichat.session import Session
-from hoshino.modules.aichat.api import api_manager
-from hoshino.modules.aichat.persona import persona_manager
+from hoshino.modules.aichat.aichat.session import Session
+from hoshino.modules.aichat.aichat.api import api_manager
+from hoshino.modules.aichat.aichat.persona import persona_manager
 
 from .config import Config
 from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic

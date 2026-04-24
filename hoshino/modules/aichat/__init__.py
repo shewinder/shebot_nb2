@@ -6,20 +6,20 @@ from hoshino import Bot, Event, Service
 from hoshino.permission import ADMIN, SUPERUSER
 from hoshino.typing import T_State
 
-from .api import api_manager
-from .chat import handle_ai_chat
-from .character_import import parse_character_png
-from .config import Config
-from .persona import persona_manager
-from .session import Session, SessionManager, session_manager
+from .aichat.api import api_manager
+from .aichat.chat import handle_ai_chat
+from .aichat.character_import import parse_character_png
+from .aichat.config import Config
+from .aichat.persona import persona_manager
+from .aichat.session import Session, SessionManager, session_manager
 from hoshino.util import aiohttpx, get_event_imageurl
 from hoshino.util.message_util import extract_images_from_reply
 
 # MCP 导入
-from .mcp import mcp_server_manager, mcp_tool_bridge
+from .aichat.mcp import mcp_server_manager, mcp_tool_bridge
 
 # SKILL 系统导入
-from .skills import skill_manager
+from .aichat.skills import skill_manager
 
 conf = Config.get_instance('aichat')
 

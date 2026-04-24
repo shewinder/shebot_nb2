@@ -12,10 +12,10 @@ from loguru import logger
 import nonebot
 from hoshino import Bot
 from hoshino.config import get_plugin_config_by_name
-from hoshino.modules.aichat import api_manager, persona_manager, conf, session_manager
-from hoshino.modules.aichat.skills import skill_manager
-from hoshino.modules.aichat.config import ApiEntry
-from hoshino.modules.aichat.character_import import parse_character_png, CharacterCard
+from hoshino.modules.aichat.aichat import api_manager, persona_manager, conf, session_manager
+from hoshino.modules.aichat.aichat.skills import skill_manager
+from hoshino.modules.aichat.aichat.config import ApiEntry
+from hoshino.modules.aichat.aichat.character_import import parse_character_png, CharacterCard
 import json
 
 # 从 NoneBot 配置获取超级用户
@@ -809,7 +809,7 @@ async def import_character_single(
 
 # ========== Session 调试 API ==========
 
-from hoshino.modules.aichat.session import Session
+from hoshino.modules.aichat.aichat.session import Session
 
 
 class SessionInfo(BaseModel):
