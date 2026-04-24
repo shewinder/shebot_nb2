@@ -16,21 +16,29 @@ conf = Config.get_instance('aichat')
 
 # ========== Prompt 模板 ==========
 
-SUMMARY_SYSTEM_PROMPT = """你是一个对话摘要助手。请用不超过50字的一句话总结以下对话的核心内容和未完成事项。
-如果有 Skill 激活或工具调用，请简要提及。
+SUMMARY_SYSTEM_PROMPT = """你是一个对话摘要助手。请用不超过50字的一句话总结以下对话的核心内容，重点关注：
+- 用户提出的要求、指令或未完成事项
+- 用户明确表达的不满或需要修正的行为
+- 关键决策或约定
+- 如有 Skill 激活或工具调用，请简要提及
+不要记录角色扮演剧情、情感描写或无关细节。
 只输出摘要内容，不要解释、不要加引号。"""
 
-FACT_EXTRACTION_SYSTEM_PROMPT = """请从以下对话中提取关于用户的事实（偏好、习惯、关键信息、长期有效的个人资料）。
+FACT_EXTRACTION_SYSTEM_PROMPT = """请从以下对话中提取关于用户的信息，包括两类：
+1. 用户的事实（偏好、习惯、关键信息、长期有效的个人资料）
+2. 用户对AI的行为约束、规则或期望（如"不要重复引用图片"、"回复要简洁"等）
+
 返回严格合法的 JSON 数组，格式示例：
 [{"key": "preferred_quality", "value": "4K REMUX", "confidence": 0.9}]
+[{"key": "image_identifier_rule", "value": "不要在同一条回复中重复引用同一个图片标识符", "confidence": 0.95}]
 
 规则：
 - key 使用英文 snake_case
-- value 使用自然语言描述
+- value 使用自然语言描述，清晰完整
 - confidence 取值 0.0~1.0，表示确信程度
 - 不要提取临时信息（如"现在几点"、"今天天气如何"）
-- 不要提取一次性的请求内容（如"帮我搜这个电影"），除非反映了用户偏好
-- 如果没有任何可提取的事实，返回空数组 []"""
+- 用户明确提出的规则和要求必须提取，即使只出现一次
+- 如果没有任何可提取的信息，返回空数组 []"""
 
 
 # ========== 消息格式化 ==========
@@ -91,7 +99,7 @@ def _format_messages_for_analysis(messages: List[Dict[str, Any]]) -> str:
 
 # ========== API 调用 ==========
 
-async def _call_memory_api(system_prompt: str, user_prompt: str, max_tokens: int = 512) -> str:
+async def _call_memory_api(system_prompt: str, user_prompt: str, max_tokens: Optional[int] = None) -> str:
     """调用 AI API 获取记忆相关输出"""
     api_config = api_manager.get_api_config()
     if not api_config or not api_config.get("api_key"):
@@ -99,19 +107,22 @@ async def _call_memory_api(system_prompt: str, user_prompt: str, max_tokens: int
         return ""
     
     url = f"{api_config['api_base'].rstrip('/')}/chat/completions"
+    model = api_config.get("model", "unknown")
     headers = {
         "Authorization": f"Bearer {api_config['api_key']}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": api_config["model"],
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.3,
-        "max_tokens": max_tokens,
     }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    
+    logger.debug(f"[_call_memory_api] 请求 model={model}, max_tokens={max_tokens}, user_prompt_len={len(user_prompt)}")
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -119,9 +130,12 @@ async def _call_memory_api(system_prompt: str, user_prompt: str, max_tokens: int
             resp.raise_for_status()
             data = resp.json()
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            finish_reason = data.get("choices", [{}])[0].get("finish_reason", "")
+            usage = data.get("usage", {})
+            logger.debug(f"[_call_memory_api] 响应 finish_reason={finish_reason}, usage={usage}, content_len={len(content) if content else 0}, content_preview={content[:100] if content else '(empty)'}")
             return content.strip()
     except Exception as e:
-        logger.warning(f"记忆系统 API 调用失败: {e}")
+        logger.warning(f"[_call_memory_api] 记忆系统 API 调用失败: {e}")
         return ""
 
 
@@ -148,7 +162,7 @@ async def generate_summary(
         return None
     
     user_prompt = f"请总结以下对话：\n\n{context}"
-    summary_text = await _call_memory_api(SUMMARY_SYSTEM_PROMPT, user_prompt, max_tokens=128)
+    summary_text = await _call_memory_api(SUMMARY_SYSTEM_PROMPT, user_prompt)
     
     if not summary_text:
         return None
@@ -181,7 +195,7 @@ async def extract_facts(
         return existing_facts
     
     user_prompt = f"请从以下对话中提取用户事实：\n\n{context}"
-    raw_response = await _call_memory_api(FACT_EXTRACTION_SYSTEM_PROMPT, user_prompt, max_tokens=512)
+    raw_response = await _call_memory_api(FACT_EXTRACTION_SYSTEM_PROMPT, user_prompt)
     
     if not raw_response:
         return existing_facts
@@ -271,13 +285,15 @@ async def extract_and_save_memory(
     active_skills: Set[str]
 ) -> None:
     """从 Session 中提取摘要和事实并保存"""
+    logger.debug(f"[extract_and_save_memory] 开始执行 user_id={user_id}, session_id={session_id}, messages_count={len(messages)}")
     message_count = len([m for m in messages if m.get("role") in ("user", "assistant")])
     if message_count < 2:
-        logger.debug(f"Session {session_id} 消息太少，跳过记忆提取")
+        logger.debug(f"[extract_and_save_memory] Session {session_id} 消息太少({message_count}条)，跳过记忆提取")
         return
     
     try:
         # 生成摘要
+        logger.debug(f"[extract_and_save_memory] 开始生成摘要 user_id={user_id}")
         summary = await generate_summary(session_id, messages, active_skills, message_count)
         if summary:
             summaries = load_summaries(user_id)
@@ -288,12 +304,15 @@ async def extract_and_save_memory(
             if len(summaries) > max_sum:
                 summaries = summaries[-max_sum:]
             save_summaries(user_id, summaries)
-            logger.info(f"已保存用户 {user_id} 的会话摘要: {summary.summary[:50]}")
+            logger.info(f"[extract_and_save_memory] 已保存用户 {user_id} 的会话摘要: {summary.summary[:50]}")
+        else:
+            logger.debug(f"[extract_and_save_memory] 摘要生成返回为空，未保存")
     except Exception as e:
-        logger.exception(f"生成摘要失败: {e}")
+        logger.exception(f"[extract_and_save_memory] 生成摘要失败: {e}")
     
     try:
         # 提取事实
+        logger.debug(f"[extract_and_save_memory] 开始提取事实 user_id={user_id}")
         existing_facts = load_facts(user_id)
         facts = await extract_facts(session_id, messages, existing_facts)
         if facts:
@@ -303,6 +322,9 @@ async def extract_and_save_memory(
             if len(facts) > max_fac:
                 facts = facts[-max_fac:]
             save_facts(user_id, facts)
-            logger.info(f"已保存用户 {user_id} 的事实: {len(facts)} 条")
+            logger.info(f"[extract_and_save_memory] 已保存用户 {user_id} 的事实: {len(facts)} 条")
+        else:
+            logger.debug(f"[extract_and_save_memory] 事实提取返回为空，未保存")
     except Exception as e:
-        logger.exception(f"提取事实失败: {e}")
+        logger.exception(f"[extract_and_save_memory] 提取事实失败: {e}")
+    logger.debug(f"[extract_and_save_memory] 执行完毕 user_id={user_id}, session_id={session_id}")

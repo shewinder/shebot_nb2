@@ -21,6 +21,7 @@ from hoshino.sres import Res
 
 from .mcp import mcp_tool_bridge, get_mcp_session_manager
 from .md_render import render_text_if_markdown
+from .memory_core import extract_and_save_memory, format_memory_for_prompt
 
 conf = Config.get_instance('aichat')
 
@@ -254,7 +255,8 @@ class Session:
 4. 错误示例（不要这样做）：
    "这是你发的图片"（没有标识符，用户看不到图片）
    "图片在这：<user_image_1>"（标识符会被移除，露出空白）
-5. generate_image/edit_image 工具的 image_identifiers 参数仍可使用这些标识符
+5. 不要在同一条回复中重复引用同一个图片标识符，每个标识符在同一条消息中最多出现一次，重复引用会导致图片被系统发送多次
+6. generate_image/edit_image 工具的 image_identifiers 参数仍可使用这些标识符
 【规则结束】
 """
     
@@ -523,7 +525,6 @@ AI回复：🎨 已生成：<ai_image_1>
         # 用户记忆注入
         if conf.enable_memory:
             try:
-                from .memory_core import format_memory_for_prompt
                 memory_text = format_memory_for_prompt(
                     self.user_id,
                     max_summaries=conf.memory_max_summaries,
@@ -929,11 +930,13 @@ class SessionManager:
         if session_id in self.sessions:
             session = self.sessions[session_id]
             # 触发记忆提取（后台异步，不阻塞清理）
+            logger.debug(f"[_remove_session] 开始清理 session={session_id}, enable_memory={conf.enable_memory}")
             if conf.enable_memory:
                 try:
-                    from .memory_core import extract_and_save_memory
                     msg_count = len([m for m in session.messages if m.get("role") in ("user", "assistant")])
+                    logger.debug(f"[_remove_session] session={session_id} 用户/助手消息数={msg_count}")
                     if msg_count >= 2:
+                        logger.debug(f"[_remove_session] 触发记忆提取 task for session={session_id}, user_id={session.user_id}")
                         asyncio.create_task(
                             extract_and_save_memory(
                                 user_id=session.user_id,
@@ -942,9 +945,15 @@ class SessionManager:
                                 active_skills=set(session.active_skills)
                             )
                         )
-                except Exception:
-                    pass
+                        logger.debug(f"[_remove_session] 记忆提取 task 已创建")
+                    else:
+                        logger.debug(f"[_remove_session] 消息不足 2 条，跳过记忆提取")
+                except Exception as e:
+                    logger.exception(f"[_remove_session] 创建记忆提取任务失败: {e}")
+            else:
+                logger.debug(f"[_remove_session] 记忆功能已禁用，跳过记忆提取")
             del self.sessions[session_id]
+            logger.debug(f"[_remove_session] session={session_id} 已从内存中删除")
         
         mcp_sm = get_mcp_session_manager()
         if mcp_sm is not None:
