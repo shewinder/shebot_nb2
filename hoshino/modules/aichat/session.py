@@ -1,4 +1,5 @@
 """Session 管理模块"""
+import asyncio
 import base64
 import json
 import re
@@ -519,6 +520,21 @@ AI回复：🎨 已生成：<ai_image_1>
             active_mcp_servers = mcp_sm.get_active_servers(self.session_id) if mcp_sm else []
             logger.info(f"[MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
         
+        # 用户记忆注入
+        if conf.enable_memory:
+            try:
+                from .memory_core import format_memory_for_prompt
+                memory_text = format_memory_for_prompt(
+                    self.user_id,
+                    max_summaries=conf.memory_max_summaries,
+                    max_facts=conf.memory_max_facts
+                )
+                if memory_text:
+                    system_content = f"{system_content}\n\n{memory_text}" if system_content else memory_text
+                    logger.debug(f"[Memory] 已注入用户记忆")
+            except Exception:
+                pass
+        
         # 组装消息列表
         non_system_msgs = [msg for msg in self.messages if msg.get("role") != "system"]
         
@@ -911,6 +927,23 @@ class SessionManager:
     def _remove_session(self, session_id: str) -> None:
         """统一删除 session 入口，同时清理 MCP 状态"""
         if session_id in self.sessions:
+            session = self.sessions[session_id]
+            # 触发记忆提取（后台异步，不阻塞清理）
+            if conf.enable_memory:
+                try:
+                    from .memory_core import extract_and_save_memory
+                    msg_count = len([m for m in session.messages if m.get("role") in ("user", "assistant")])
+                    if msg_count >= 2:
+                        asyncio.create_task(
+                            extract_and_save_memory(
+                                user_id=session.user_id,
+                                session_id=session_id,
+                                messages=list(session.messages),
+                                active_skills=set(session.active_skills)
+                            )
+                        )
+                except Exception:
+                    pass
             del self.sessions[session_id]
         
         mcp_sm = get_mcp_session_manager()
