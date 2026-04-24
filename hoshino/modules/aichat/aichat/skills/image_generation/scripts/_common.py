@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 # ---------- image_store_core 动态加载 ----------
 _project_root = Path(os.environ.get("PROJECT_ROOT", "."))
-_core_path = _project_root / "hoshino" / "modules" / "aichat" / "_image_store_core.py"
+_core_path = _project_root / "hoshino" / "modules" / "aichat" / "aichat" / "_image_store_core.py"
 
 if _core_path.exists():
     import importlib.util
