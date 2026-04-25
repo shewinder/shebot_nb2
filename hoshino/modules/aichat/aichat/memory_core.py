@@ -1,7 +1,7 @@
 """记忆核心模块：AI 驱动的摘要生成与事实提取"""
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set
 
 import httpx
@@ -24,20 +24,29 @@ SUMMARY_SYSTEM_PROMPT = """你是一个对话摘要助手。请用不超过50字
 不要记录角色扮演剧情、情感描写或无关细节。
 只输出摘要内容，不要解释、不要加引号。"""
 
-FACT_EXTRACTION_SYSTEM_PROMPT = """请从以下对话中提取关于用户的信息，包括两类：
-1. 用户的事实（偏好、习惯、关键信息、长期有效的个人资料）
-2. 用户对AI的行为约束、规则或期望（如"不要重复引用图片"、"回复要简洁"等）
+FACT_EXTRACTION_SYSTEM_PROMPT = """请从以下对话中提取关于用户的信息，并为每条事实标注分类。
 
 返回严格合法的 JSON 数组，格式示例：
-[{"key": "preferred_quality", "value": "4K REMUX", "confidence": 0.9}]
-[{"key": "image_identifier_rule", "value": "不要在同一条回复中重复引用同一个图片标识符", "confidence": 0.95}]
+[{"key": "preferred_quality", "value": "4K REMUX", "confidence": 0.9, "category": "preference"}]
+[{"key": "image_identifier_rule", "value": "不要在同一条回复中重复引用同一个图片标识符", "confidence": 0.95, "category": "rule"}]
+[{"key": "user_name", "value": "小明", "confidence": 0.9, "category": "profile"}]
+
+分类说明（category 字段必填）：
+- "preference": 用户偏好、习惯（如喜欢详细回复、喜欢用表情）
+- "rule": 用户对AI的行为约束、规则（如"不要重复引用图片"、"回复要简洁"）
+- "profile": 用户个人资料（如姓名、职业、所在地）
+- "context": 临时上下文约定（如"这次讨论用英文"、"今天聊电影"），仅适用于当前短期场景
 
 规则：
+- 首先判断上下文是否处于角色扮演过程，角色扮演的内容以及过程中产生的规则不提取
 - key 使用英文 snake_case
 - value 使用自然语言描述，清晰完整
 - confidence 取值 0.0~1.0，表示确信程度
+- category 必须从上述四类中选择
 - 不要提取临时信息（如"现在几点"、"今天天气如何"）
 - 用户明确提出的规则和要求必须提取，即使只出现一次
+- 不要提取角色扮演、虚构剧情、场景对话中产生的规则或设定，只提取用户本人对 AI 助手明确表达的真实要求和偏好
+- 如果规则是在角色扮演过程中由 AI 提出、用户只是配合回应的，不要提取为事实
 - 如果没有任何可提取的信息，返回空数组 []"""
 
 
@@ -220,6 +229,7 @@ async def extract_facts(
         key = item.get("key", "").strip()
         value = str(item.get("value", "")).strip()
         confidence = float(item.get("confidence", 0.5))
+        category = str(item.get("category", "preference")).strip().lower()
         
         if not key or not value:
             continue
@@ -227,6 +237,16 @@ async def extract_facts(
         # 过滤低置信度
         if confidence < 0.6:
             continue
+        
+        # 标准化分类
+        valid_categories = {"preference", "rule", "profile", "context"}
+        if category not in valid_categories:
+            category = "preference"
+        
+        # context 类事实自动设置 1 小时过期时间
+        expires_at = None
+        if category == "context":
+            expires_at = datetime.now() + timedelta(hours=1)
         
         # 如果已有同 key，保留 confidence 更高的
         if key in fact_map and fact_map[key].confidence >= confidence:
@@ -237,7 +257,9 @@ async def extract_facts(
             value=value,
             confidence=confidence,
             updated_at=datetime.now(),
-            source=session_id
+            source=session_id,
+            category=category,
+            expires_at=expires_at
         )
     
     return list(fact_map.values())
@@ -248,7 +270,14 @@ def format_memory_for_prompt(user_id: int, max_summaries: int = 3, max_facts: in
     summaries = load_summaries(user_id)
     facts = load_facts(user_id)
     
-    if not summaries and not facts:
+    # 过滤已过期的事实
+    now = datetime.now()
+    valid_facts = [f for f in facts if f.expires_at is None or f.expires_at > now]
+    expired_count = len(facts) - len(valid_facts)
+    if expired_count > 0:
+        logger.debug(f"[Memory] 过滤了 {expired_count} 条已过期事实")
+    
+    if not summaries and not valid_facts:
         return ""
     
     lines = ["<user_memory>"]
@@ -263,13 +292,31 @@ def format_memory_for_prompt(user_id: int, max_summaries: int = 3, max_facts: in
             lines.append(f"- {session_type} ({time_str}): {s.summary}")
         lines.append("</recent_sessions>")
     
-    # 已知事实
-    if facts:
+    # 已知事实，按分类分组
+    if valid_facts:
         # 按 updated_at 排序，取最近 max_facts 条
-        recent_facts = sorted(facts, key=lambda f: f.updated_at, reverse=True)[:max_facts]
-        lines.append("<known_facts>")
+        recent_facts = sorted(valid_facts, key=lambda f: f.updated_at, reverse=True)[:max_facts]
+        
+        category_names = {
+            "rule": "行为规则",
+            "preference": "用户偏好",
+            "profile": "个人资料",
+            "context": "当前上下文"
+        }
+        
+        # 按分类分组
+        by_category: Dict[str, List[UserFact]] = {}
         for f in recent_facts:
-            lines.append(f"- {f.value}")
+            by_category.setdefault(f.category, []).append(f)
+        
+        lines.append("<known_facts>")
+        for cat in ["rule", "preference", "profile", "context"]:
+            if cat not in by_category:
+                continue
+            cat_name = category_names.get(cat, cat)
+            lines.append(f"  [{cat_name}]")
+            for f in by_category[cat]:
+                lines.append(f"  - {f.value}")
         lines.append("</known_facts>")
     
     lines.append("</user_memory>")

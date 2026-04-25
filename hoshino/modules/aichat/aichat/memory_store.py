@@ -31,6 +31,8 @@ class UserFact(BaseModel):
     confidence: float
     updated_at: datetime
     source: str
+    category: str = "preference"  # preference | rule | profile | context
+    expires_at: Optional[datetime] = None  # None 表示永不过期
 
 
 def _ensure_dirs() -> None:
@@ -39,7 +41,7 @@ def _ensure_dirs() -> None:
 
 
 def _iso_fields() -> List[str]:
-    return ['timestamp', 'updated_at']
+    return ['timestamp', 'updated_at', 'expires_at']
 
 
 def _summary_file(user_id: int) -> Path:
