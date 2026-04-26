@@ -101,8 +101,8 @@ async def send_response(
 
 
 async def handle_ai_chat(bot: Bot, event: Event):
-    # 获取消息纯文本内容（去除 at、图片等 CQ 码）
-    msg = event.get_plaintext().strip()
+    # 获取消息内容
+    msg = str(event.message).strip()
     
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
@@ -110,9 +110,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
     # 先检查是否有活跃 session（不创建）
     session = session_manager.get_session(user_id, group_id)
     in_continuous_mode = session.continuous_mode if session else False
-    
-    # 群聊中 @机器人时触发
-    is_at_bot = event.is_tome() and group_id is not None
     
     if msg.startswith('#'):
         user_input = msg[1:].strip()
@@ -122,8 +119,6 @@ async def handle_ai_chat(bot: Bot, event: Event):
             user_input = shortcut.prompt
             logger.info(f"触发快捷指令「{shortcut.name}」")
     elif in_continuous_mode:
-        user_input = msg
-    elif is_at_bot:
         user_input = msg
     else:
         return
