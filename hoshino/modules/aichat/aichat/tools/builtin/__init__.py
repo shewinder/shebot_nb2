@@ -14,6 +14,5 @@ from . import broadcast
 from . import fetch_url
 from . import send_images
 from . import file_storage
-from . import ai_call
 
 __all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "broadcast", "fetch_url", "send_images", "file_storage"]

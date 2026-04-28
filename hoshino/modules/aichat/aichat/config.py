@@ -54,11 +54,6 @@ class Config(BaseConfig):
     max_history: int = 100
     session_timeout: int = 3600  # 秒，0 表示永不过期
 
-    # 记忆系统配置
-    enable_memory: bool = True              # 记忆系统总开关
-    memory_max_summaries: int = 5           # 保留的最近会话摘要数量
-    memory_max_facts: int = 30              # 保留的用户事实数量
-
     # 人格配置
     default_persona: str = ""
 
