@@ -30,8 +30,7 @@ class ScheduledTask(BaseModel):
     id: str                    # UUID
     user_id: int              # 创建者QQ
     group_id: Optional[int]   # 群组ID（私聊为null）
-    raw_description: str      # 用户原始描述
-    task_summary: str         # AI整理后的执行摘要
+    raw_description: str      # 用户原始描述（同时作为展示名称）
     cron_expression: str      # cron表达式（循环任务用）
     is_active: bool = True    # 是否激活
     silent: bool = False      # 静默模式：True时不添加任务报告框架
@@ -172,7 +171,7 @@ class TaskManager:
             logger.warning(f"任务 {task_id} 已停用，跳过执行")
             return
         
-        logger.info(f"开始执行任务 {task_id}: {task.task_summary}")
+        logger.info(f"开始执行任务 {task_id}: {task.raw_description[:50]}")
         
         from .session import Session
         from .persona import persona_manager
@@ -191,8 +190,9 @@ class TaskManager:
             agent_session_id = f"agent_task_{task.id}_{uuid.uuid4().hex[:6]}"
             temp_session = Session(agent_session_id, persona=persona)
             
-            # 添加任务描述作为用户消息
-            temp_session.add_message("user", task.raw_description)
+            # 明确执行上下文，防止AI误以为是创建定时任务
+            temp_session.add_message("system", "【系统提示】你正在执行一个已调度的定时任务。请直接完成下面指定的操作，不要创建新的定时任务，也不要向用户询问确认。")
+            temp_session.add_message("user", f"请执行以下任务：{task.raw_description}")
             
             # 调用 chat 执行对话（event=None，复用 session 的环境信息）
             result = await temp_session.chat(api_config)
@@ -237,7 +237,7 @@ class TaskManager:
                 final_messages = content_messages
             else:
                 # 非静默模式：添加报告框架到第一条消息
-                report_text = f"📋 定时任务执行结果\n任务: {task.task_summary[:50]}{'...' if len(task.task_summary) > 50 else ''}\n\n"
+                report_text = f"📋 定时任务执行结果\n任务: {task.raw_description[:50]}{'...' if len(task.raw_description) > 50 else ''}\n\n"
                 report_msg = MessageSegment.text(report_text)
                 
                 final_messages = []
@@ -272,7 +272,6 @@ class TaskManager:
         user_id: int,
         group_id: Optional[int],
         raw_description: str,
-        task_summary: str,
         cron_expression: str,
         silent: bool = False,
         is_one_time: bool = False,
@@ -285,7 +284,6 @@ class TaskManager:
             user_id=user_id,
             group_id=group_id,
             raw_description=raw_description,
-            task_summary=task_summary,
             cron_expression=cron_expression,
             is_active=True,
             silent=silent,
@@ -371,16 +369,6 @@ class TaskManager:
 
 # 全局任务管理器实例
 scheduler_manager = TaskManager()
-
-
-def generate_task_summary(description: str) -> str:
-    if not description:
-        return "未命名任务"
-    
-    # 截取前20字，超长时添加省略号
-    if len(description) <= 20:
-        return description
-    return description[:20] + "..."
 
 
 # ============ 模块导入时自动加载并调度所有任务 ============

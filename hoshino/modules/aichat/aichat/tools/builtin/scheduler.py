@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from loguru import logger
 
 from ..registry import tool_registry, ok, fail
-from ...scheduler_core import scheduler_manager, generate_task_summary
+from ...scheduler_core import scheduler_manager
 
 if TYPE_CHECKING:
     from hoshino import Event
@@ -75,7 +75,20 @@ if TYPE_CHECKING:
 **示例：**
 - "30分钟后提醒我该开会了" + mention_user=true, silent=true（任务描述中不加@，mention_user会自动@）
 
-任务创建后，到时间会调用AI自动执行，可以链式调用其他工具完成复杂任务。""",
+任务创建后，到时间会调用AI自动执行，可以链式调用其他工具完成复杂任务。
+
+## task_description 填写规范（重要）
+`task_description` 应该只描述**要执行的具体操作内容**，不要包含时间、频率、定时等调度描述。时间信息通过 `minute`/`hour`/`day`/`month`/`day_of_week` 或 `one_time`/`delay_minutes` 等参数单独传递。
+
+- ✅ 正确示例: "分析用户股票持仓并给出操作建议"
+- ✅ 正确示例: "搜索今日AI新闻并生成摘要"
+- ❌ 错误示例: "每日12点分析用户股票持仓"（包含了时间调度描述）
+- ❌ 错误示例: "每天早上8点提醒我喝水"（包含了时间调度描述）
+
+如果用户说"每天8点发早报"，你应该：
+- task_description = "搜索今日新闻并生成早报摘要"
+- hour="8", minute="0", day="*", month="*", day_of_week='*'
+""",
     parameters={
         "type": "object",
         "properties": {
@@ -86,7 +99,7 @@ if TYPE_CHECKING:
             },
             "task_description": {
                 "type": "string",
-                "description": "任务描述，说明要执行什么操作。create 时必需。例如: '搜索AI新闻并生成摘要'"
+                "description": "【重要】任务执行内容，只描述要执行的具体操作，不要包含时间、频率、定时等调度信息（时间由 cron 参数单独设置）。create 时必需。正确示例: '分析用户股票持仓并给出操作建议'。错误示例: '每日12点分析用户股票持仓'（包含时间信息）"
             },
             "minute": {
                 "type": "string",
@@ -319,15 +332,11 @@ async def _create_task(
                 error="Invalid cron expression"
             )
     
-    # 生成任务摘要
-    task_summary = generate_task_summary(task_description)
-    
     # 创建任务
     task = scheduler_manager.create_task(
         user_id=user_id,
         group_id=group_id,
         raw_description=task_description,
-        task_summary=task_summary,
         cron_expression=cron_expr,
         silent=silent,
         is_one_time=is_one_time,
@@ -343,8 +352,7 @@ async def _create_task(
         content_lines = [
             f"✅ 一次性任务创建成功！",
             f"",
-            f"📋 任务摘要: {task_summary}",
-            f"📝 任务描述: {task_description[:80]}{'...' if len(task_description) > 80 else ''}",
+            f"📝 任务: {task_description[:80]}{'...' if len(task_description) > 80 else ''}",
             f"⏰ 执行时间: {time_str} (一次性)",
             f"📍 创建位置: {location}",
             f"🔇 静默模式: {'是' if silent else '否'}",
@@ -358,8 +366,7 @@ async def _create_task(
         content_lines = [
             f"✅ 定时任务创建成功！",
             f"",
-            f"📋 任务摘要: {task_summary}",
-            f"📝 任务描述: {task_description[:80]}{'...' if len(task_description) > 80 else ''}",
+            f"📝 任务: {task_description[:80]}{'...' if len(task_description) > 80 else ''}",
             f"⏰ 执行时间: {cron_expr}",
             f"📍 创建位置: {location}",
             f"🔇 静默模式: {'是' if silent else '否'}",
@@ -378,7 +385,7 @@ async def _create_task(
             "execute_at": execute_datetime.isoformat() if is_one_time and execute_datetime else None,
             "is_one_time": is_one_time,
             "mention_user": should_mention,
-            "task_summary": task_summary
+            "raw_description": task_description
         }
     )
 
@@ -402,7 +409,8 @@ def _list_tasks(user_id: int) -> Dict[str, Any]:
         # @提醒标记
         mention_mark = " [@提醒]" if task.mention_user else ""
         
-        lines.append(f"{i}. {status} {task.task_summary}{one_time_mark}{mention_mark}")
+        display = task.raw_description[:20] + ('...' if len(task.raw_description) > 20 else '')
+        lines.append(f"{i}. {status} {display}{one_time_mark}{mention_mark}")
         lines.append(f"   ID: {task.id}")
         
         # 显示时间信息
