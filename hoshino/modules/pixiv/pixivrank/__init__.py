@@ -123,7 +123,7 @@ async def _implicit_preference_update(
             ]
             await session.store_user_image(base64_image)
         else:
-            message_content = text + f"\n图片URL: {img_url}"
+            message_content = text
 
         session.add_message("user", message_content)
 
