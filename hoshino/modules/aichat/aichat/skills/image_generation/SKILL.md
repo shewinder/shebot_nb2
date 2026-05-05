@@ -24,14 +24,13 @@ disable-model_invocation: false
 
 ## 可用模型
 
-| 模型 | 协议脚本 | Prompt 语言 | 特点 | 能力 | 内容审查 |
-|------|---------|------------|------|------|----------|
-| WAI-illustrious | comfyui.py | **英文** | 动漫/二次元专用，角色还原度高 | 文生图 | 完全无审核 |
-| novaAnimeXL_ilV180 | comfyui.py | **英文** | 动漫/二次元风格，色彩鲜艳，细节丰富 | 文生图 | 完全无审核 |
-| z_image_turbo | comfyui.py | **中文** | 通用创意图，中文理解好，速度快，适合插画/概念设计 | 文生图 | 完全无审核 |
-| bytedance/seedream-v4/edit | atlascloud.py | 中文 | 通用高质量生图，提示词遵循好，写实和动漫均可 | 文生图, 单图编辑, 多张编辑 | 几乎无审核 |
-| google/nano-banana/edit | atlascloud.py | **英文** | Nano Banana 格式，Google 图像编辑，提示词遵循好 | 单图编辑, 多张编辑 | 几乎无审核 |
-| gemini-3.1-flash-image-preview | gemini.py | **英文** | 通用生图，理解力强，支持复杂构图描述 | 文生图, 单图编辑, 多张编辑 | 审核严格 |
+| 模型 | 协议脚本 | Prompt 语言 | 特点与调优要点 | 能力 | 内容审查 |
+|------|---------|------------|---------------|------|----------|
+| WAI-illustrious | comfyui.py | **英文** | 动漫/二次元专用。英文标签式 prompt，加 `masterpiece, best quality, highly detailed` 和角色名标签 | 文生图 | 完全无审核 |
+| novaAnimeXL_ilV180 | comfyui.py | **英文** | 动漫/二次元，色彩鲜艳。同标签式英文 prompt，加 `anime style, vibrant colors, cel shading` | 文生图 | 完全无审核 |
+| z_image_turbo | comfyui.py | **中文** | 通用创意图，中文理解好。保留中文，加 `高清细节，精美画质` 和中文风格词 | 文生图 | 完全无审核 |
+| bytedance/seedream-v4/edit | atlascloud.py | 中文 | 通用高质量，写实/动漫均可。保留中文，加 `高清细节，精美画质，极致细腻` 和中文风格词 | 文生图, 单图编辑, 多张编辑 | 几乎无审核 |
+| openai/gpt-image-2/text-to-image | atlascloud.py | **中文/英文** | OpenAI 最新模型，文字渲染强。保留原语言，结构化描述，无需质量词 | 文生图, 单图编辑, 多张编辑 | 审核严格 |
 
 ## 工作流程
 
@@ -55,98 +54,6 @@ disable-model_invocation: false
 > - 走编辑流程，**必须**传 `--images`
 
 ---
-
-## 模型级调优策略
-
-### gemini-3.1-flash-image-preview
-
-**Prompt 语言**：英文
-
-**调优方法**：
-1. 将中文核心概念翻译为高质量英文
-2. 附加英文质量词：`masterpiece, best quality, highly detailed`
-3. 根据内容附加风格词（anime style / photorealistic / cyberpunk 等）
-4. 重组为自然语言描述，而非标签列表
-
-**调优示例**：
-```
-用户: "画一只可爱的橘猫在樱花树下"
-AI 调优后: "A cute orange tabby cat sleeping under a cherry blossom tree,
-            soft pink petals falling, warm sunlight filtering through branches,
-            masterpiece, best quality, highly detailed, anime style"
-```
-
----
-
-### bytedance/seedream-v4/edit
-
-**Prompt 语言**：**保留中文**
-
-**调优方法**：
-1. 保留用户原始中文描述（Seedream 中文理解优秀）
-2. 补充中文质量词：`高清细节，精美画质，极致细腻`
-3. 根据内容补充中文风格词：`电影级光影`，`治愈系画风`，`赛博朋克风格` 等
-4. **不要翻译为英文**
-
-**调优示例**：
-```
-用户: "一只可爱的橘猫在樱花树下睡觉"
-AI 调优后: "高清细节，精美画质，一只可爱的橘猫在樱花树下睡觉，
-            粉色花瓣飘落，温暖阳光透过树枝，治愈系画风"
-```
-
----
-
-### WAI-illustrious
-
-**Prompt 语言**：**英文**
-
-### novaAnimeXL_ilV180
-
-**Prompt 语言**：**英文**
-- 动漫/二次元风格模型，适合角色插画、场景渲染
-- 色彩鲜艳，线条清晰，对人物面部和服装细节表现较好
-- 与 WAI-illustrious 相比，风格更偏向传统日式动画，可根据用户喜好选择
-
-**调优方法**：
-1. 将用户描述翻译/转换为英文标签式 prompt（SDXL CLIP 对英文标签理解最佳）
-2. 补充英文质量词：`masterpiece, best quality, highly detailed`
-3. 根据内容补充风格词：`anime style, vibrant colors, cel shading`
-4. 角色图追加角色名标签（如 `hatsune miku, vocaloid`）以提升还原度
-5. **不要保留中文**
-
-**调优示例**：
-```
-用户: "画一个穿水手服的蓝发女孩在樱花树下"
-AI 调优后: "1girl, solo, blue hair, blue eyes, school uniform, cherry blossoms,
-            smile, looking at viewer, soft lighting, anime style, vibrant colors,
-            masterpiece, best quality, highly detailed"
-```
-
-**注意事项**：
-- 该模型为**动漫/二次元专用**，写实/真人/照片类 prompt 效果差，应切换至其他模型
-- 原生分辨率 1024x1024，二次元角色推荐 2:3 或 1:1 比例
-
----
-
-### z_image_turbo
-
-**Prompt 语言**：**保留中文**
-
-**调优方法**：
-1. 保留用户原始中文描述（qwen_3_4b CLIP 中文理解极强）
-2. 补充中文质量词：`高清细节，精美画质`
-3. 根据内容补充中文风格词：`治愈系画风`，`赛博朋克风格`，`油画质感` 等
-4. **不要翻译为英文**
-
-**调优示例**：
-```
-用户: "一只可爱的橘猫在樱花树下睡觉"
-AI 调优后: "高清细节，精美画质，一只可爱的橘猫在樱花树下睡觉，
-            粉色花瓣飘落，温暖阳光透过树枝，治愈系画风"
-```
-
-
 
 ## 图像编辑
 
@@ -173,7 +80,7 @@ execute_script(
     skill_name="image_generation",
     script_path="scripts/comfyui.py",  # 或 scripts/gemini.py / scripts/atlascloud.py
     args=["--prompt", "<调优后的prompt>", "--images", "<user_image_1>,<user_image_2>"],
-    timeout=180
+    timeout=300
 )
 ```
 
@@ -196,7 +103,7 @@ execute_script(
 - `--aspect-ratio` (可选): `1:1`, `4:3`, `3:4`, `16:9`, `9:16`, `2:3`, `3:2`
 - `--size` (可选): `512`, `1K`, `2K`, `4K`
 - `--model` (必填): 模型名称（如 `z_image_turbo`、`qwen_image_edit`），脚本用此名称加载 `reference/{model}.json` 工作流
-- `timeout` (execute_script 参数): 生图任务建议设为 `180`（默认 30 秒对本地 ComfyUI 通常不够）
+- `timeout` (execute_script 参数): 生图任务建议设为 `300`（默认 180 秒，生图建议拉满）
 
 **通用调用示例**：
 ```python

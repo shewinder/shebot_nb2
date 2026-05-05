@@ -122,7 +122,7 @@ def call_comfyui_generate(prompt: str,
 
     # 轮询 /history/{prompt_id}
     history_url = f"{base}/history/{prompt_id}"
-    timeout = 180
+    timeout = 300
     interval = 2
     elapsed = 0
 

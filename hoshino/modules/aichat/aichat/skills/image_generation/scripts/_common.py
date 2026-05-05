@@ -112,7 +112,7 @@ def http_post(url: str,
               json_data: Optional[Dict[str, Any]] = None,
               data: Optional[Any] = None,
               files: Optional[Any] = None,
-              timeout: int = 180) -> Dict[str, Any]:
+              timeout: int = 300) -> Dict[str, Any]:
     """同步 POST 请求"""
     try:
         with httpx.Client(timeout=timeout) as client:
@@ -129,7 +129,7 @@ def http_post(url: str,
 
 def http_get(url: str,
              headers: Optional[Dict[str, str]] = None,
-             timeout: int = 180) -> Dict[str, Any]:
+             timeout: int = 300) -> Dict[str, Any]:
     """同步 GET 请求"""
     try:
         with httpx.Client(timeout=timeout) as client:

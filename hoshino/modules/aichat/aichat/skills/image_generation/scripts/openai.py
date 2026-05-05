@@ -30,12 +30,22 @@ from _common import (
 
 
 def _map_size(size: str) -> str:
-    """将通用 size 映射到 OpenAI 标准尺寸"""
+    """将通用 size 映射到 OpenAI 标准尺寸
+
+    支持直接透传原生尺寸（如 2048x2048）。
+    GPT-Image-2 支持：1024x1024, 1024x1536, 1536x1024, 2048x2048
+    DALL-E 3 支持：1024x1024, 1024x1792, 1792x1024
+    """
+    # 如果已经是标准尺寸格式，直接透传
+    if "x" in size:
+        parts = size.split("x")
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            return size
     mapping = {
         "512": "1024x1024",
         "1K": "1024x1024",
         "2K": "1536x1024",
-        "4K": "1536x1536",
+        "4K": "2048x2048",
     }
     return mapping.get(size, "1024x1024")
 

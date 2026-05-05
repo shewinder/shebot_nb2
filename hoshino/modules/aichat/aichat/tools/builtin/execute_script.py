@@ -45,7 +45,7 @@ def _is_path_safe(target: Path, allowed_base: Path) -> bool:
 - skill_name: SKILL 名称（必须从当前激活的 SKILL 中选择）
 - script_path: 脚本文件路径（相对于 SKILL 目录，如 'scripts/calc.py'）
 - args: 传递给脚本的参数列表（字符串数组）
-- timeout: 超时时间（秒，默认30，最大300）
+- timeout: 超时时间（秒，默认180，最大300）
 
 ## 使用示例
 ```python
@@ -86,8 +86,8 @@ execute_script(
             },
             "timeout": {
                 "type": "integer",
-                "description": "超时时间（秒，默认30，最大300）",
-                "default": 30,
+                "description": "超时时间（秒，默认180，最大300）",
+                "default": 180,
                 "minimum": 1,
                 "maximum": 300
             }
@@ -99,7 +99,7 @@ async def execute_script(
     skill_name: str,
     script_path: str,
     args: Optional[List[str]] = None,
-    timeout: int = 30,
+    timeout: int = 180,
     session: Optional["Session"] = None,
     bot: Optional["Bot"] = None,
     event: Optional["Event"] = None,

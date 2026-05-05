@@ -61,7 +61,7 @@ def _poll_prediction(api_key: str, prediction_id: str) -> list:
     """轮询 AtlasCloud 预测任务，返回图片 URL 列表"""
     poll_url = f"{ATLAS_BASE_URL}/model/prediction/{prediction_id}"
     headers = {"Authorization": f"Bearer {api_key}"}
-    timeout = 180
+    timeout = 300
     interval = 2
     elapsed = 0
 
