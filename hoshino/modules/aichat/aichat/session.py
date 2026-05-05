@@ -520,6 +520,17 @@ AI回复：🎨 已生成：<ai_image_1>
             active_mcp_servers = mcp_sm.get_active_servers(self.session_id) if mcp_sm else []
             logger.info(f"[MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
         
+        # 记忆注入
+        if conf.enable_memory and self.user_id:
+            from .memory import memory_store
+            try:
+                memory_text = await memory_store.get_inject_text(self.user_id, conf.memory_max_inject_length)
+                if memory_text:
+                    system_content = f"{system_content}\n\n【关于该用户的历史记忆】\n{memory_text}" if system_content else f"【关于该用户的历史记忆】\n{memory_text}"
+                    logger.debug(f"[Memory] 已注入记忆，长度: {len(memory_text)}")
+            except Exception as e:
+                logger.warning(f"[Memory] 注入记忆失败: {e}")
+        
         # 组装消息列表
         non_system_msgs = [msg for msg in self.messages if msg.get("role") != "system"]
         

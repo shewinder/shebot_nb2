@@ -166,6 +166,10 @@ SKILL 系统：
   #当前技能  查看已激活的 SKILL
   #停用技能 <skill名称>  停用指定 SKILL
   #停用所有技能  停用所有 SKILL
+记忆系统：
+  查看记忆  查看AI记录的个人记忆笔记
+  记住 [内容]  手动添加一条记忆
+  清除记忆  清空所有个人记忆
 ''')
 
 sv.on_message(priority=10, block=False, only_group=False).handle()(handle_ai_chat)
@@ -1143,3 +1147,68 @@ async def query_token(bot: Bot, event: Event):
     ]
     
     await query_token_cmd.finish("\n".join(lines))
+
+
+# ========== 记忆管理命令 ==========
+
+view_memory_cmd = sv.on_command('查看记忆', aliases=('我的记忆',), only_group=False)
+
+@view_memory_cmd.handle()
+async def view_memory(bot: Bot, event: Event):
+    """查看用户的记忆笔记"""
+    user_id = event.user_id
+    from .memory import memory_store
+    content = await memory_store.read(user_id)
+    default = memory_store.default_template()
+
+    if content.strip() == default.strip():
+        await view_memory_cmd.finish(
+            "你还没有记忆记录。\n"
+            "在对话中我会自动记录重要信息，你也可以发送「记住 内容」手动添加。"
+        )
+        return
+
+    header = f"📖 你的记忆笔记（共 {len(content)} 字符）：\n\n"
+    max_len = 2000
+    if len(content) > max_len:
+        content = content[:max_len] + f"\n\n...（已截断，剩余 {len(content) - max_len} 字符）"
+
+    await view_memory_cmd.finish(header + content)
+
+
+clear_memory_cmd = sv.on_command('清除记忆', aliases=('清空记忆', '删除记忆'), only_group=False)
+
+@clear_memory_cmd.handle()
+async def clear_memory(bot: Bot, event: Event):
+    """清空用户记忆"""
+    user_id = event.user_id
+    from .memory import memory_store
+    success = await memory_store.clear(user_id)
+    if success:
+        await clear_memory_cmd.finish("✅ 记忆已清空")
+    else:
+        await clear_memory_cmd.finish("没有找到记忆记录")
+
+
+remember_cmd = sv.on_command('记住', aliases=('记下来',), only_group=False)
+
+@remember_cmd.handle()
+async def remember(bot: Bot, event: Event):
+    """手动添加记忆"""
+    args = str(event.message).strip().split(maxsplit=1)
+    if len(args) < 2:
+        await remember_cmd.finish("请提供要记住的内容，例如：记住 我喜欢喝美式咖啡")
+        return
+
+    text = args[1].strip()
+    if not text:
+        await remember_cmd.finish("内容不能为空")
+        return
+
+    user_id = event.user_id
+    from .memory import memory_store
+    success = await memory_store.append(user_id, text)
+    if success:
+        await remember_cmd.finish(f"✅ 已记住：{text}")
+    else:
+        await remember_cmd.finish("记录失败，请稍后重试")

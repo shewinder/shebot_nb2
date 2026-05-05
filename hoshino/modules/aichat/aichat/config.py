@@ -91,6 +91,11 @@ class Config(BaseConfig):
     # 工具调用配置
     max_tool_rounds: int = 10           # 单次对话最大工具调用轮数
 
+    # 记忆系统配置
+    enable_memory: bool = True
+    memory_max_length: int = 5000          # 单用户记忆文件最大字符数
+    memory_max_inject_length: int = 1500   # 注入 system prompt 的最大字符数
+
     def get_apis(self) -> List[ApiEntry]:
         """获取厂商列表"""
         return self.apis
