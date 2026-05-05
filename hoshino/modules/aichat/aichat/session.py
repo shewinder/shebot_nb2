@@ -92,7 +92,6 @@ class Session:
         self._image_store.clear()  # 新建 Session 时清空旧图像缓存
         # SKILL 系统：已激活的 SKILL 名称集合
         self.active_skills: Set[str] = set()
-        self._skill_contents: Dict[str, str] = {}
         # 当前正在执行的 SKILL（用于工具权限检查）
         self.active_skill: Optional[str] = None
         # Token 使用量统计
@@ -101,37 +100,19 @@ class Session:
         self.total_tokens: int = 0
         # 从 session_id 解析 user_id 和 group_id
         self.user_id, self.group_id = self._parse_session_id(session_id)
-        if persona:
-            self.messages.append({"role": "system", "content": persona})
     
-    def _append_and_trim(self, message: Dict[str, Any]) -> None:
-        """统一的消息追加 + 裁剪入口"""
+    def _append_message(self, message: Dict[str, Any]) -> None:
+        """追加消息到历史"""
         self.messages.append(message)
-        
-        system_msg = None
-        if self.messages and self.messages[0].get("role") == "system":
-            system_msg = self.messages[0]
-            other_messages = self.messages[1:]
-        else:
-            other_messages = self.messages
-        
-        if len(other_messages) > conf.max_history * 2:  # *2因为包含user和assistant
-            other_messages = other_messages[-conf.max_history * 2:]
-        
-        if system_msg:
-            self.messages = [system_msg] + other_messages
-        else:
-            self.messages = other_messages
-        
         self.last_active = time.time()
 
     def add_message(self, role: str, content: Union[str, List[Dict[str, Any]]]):
         """添加标准 user/assistant 消息"""
-        self._append_and_trim({"role": role, "content": content})
+        self._append_message({"role": role, "content": content})
 
     def add_raw_message(self, message: Dict[str, Any]) -> None:
         """添加完整 API 格式消息（支持 tool_calls、tool 等）"""
-        self._append_and_trim(message)
+        self._append_message(message)
     
     async def store_user_image(self, image_data: str) -> str:
         entry = await self._image_store.store(image_data, "user")
@@ -366,7 +347,6 @@ AI回复：🎨 已生成：<ai_image_1>
             return False, f"激活 '{skill_name}' 会导致循环依赖，已阻止", None
         
         self.active_skills.add(skill_name)
-        self._skill_contents[skill_name] = skill.content
         self.last_active = time.time()
         logger.info(f"Session {self.session_id} 激活 SKILL: {skill_name}")
         return True, f"SKILL '{skill_name}' 已激活", skill.content
@@ -457,107 +437,116 @@ AI回复：🎨 已生成：<ai_image_1>
         
         return f'<context type="environment" {" ".join(attrs)} />'
     
-    async def _build_messages_for_chat(self, event: Optional[Any] = None) -> None:
-        """构建用于 API 调用的消息列表，直接更新 self.messages
-        
-        使用内部保存的 persona 以及 event 构建环境信息
-        
+    async def _build_messages_for_chat(self, event: Optional[Any] = None) -> List[Dict[str, Any]]:
+        """构建用于 API 调用的消息列表
+
+        System prompt 只保留静态核心指令（缓存友好）。
+        动态内容（skill、mcp、memory、env）作为上下文消息对注入。
+
         Args:
             event: 消息事件（可选，用于构建环境信息）
+
+        Returns:
+            完整 API 消息列表
         """
-        messages: List[Dict[str, Any]] = []
-        image_list_prompt = self.build_image_list_prompt()
-        
-        # 构建系统消息内容（使用内部保存的 persona）
+        # 1. 构建干净的 system content（静态核心指令）
         system_content = self.persona or ""
-        
-        # 环境信息（从 event 构建，包含当前日期时间）
+
+        # 环境信息
         env_info = self._build_env_info(event)
         if env_info:
             system_content = f"{system_content}\n\n{env_info}" if system_content else env_info
-        
+
         # 工具提示
         tool_hint = "<instructions>\n你可以调用 get_current_time 工具获取当前准确时间。\n</instructions>"
         system_content = f"{system_content}\n\n{tool_hint}" if system_content else tool_hint
-        
+
         # 执行风格指南（固定内容，提高缓存利用率）
         execution_style = self.build_execution_style_prompt()
         system_content = f"{system_content}\n\n{execution_style}"
-        
+
         # 图片发送规则（固定内容，提高缓存利用率）
         image_rules = self.build_image_rules_prompt()
         system_content = f"{system_content}\n\n{image_rules}"
-        
+
+        system_msg = {"role": "system", "content": system_content}
+
+        # 2. 构建动态上下文
+        context_parts: List[str] = []
+
         # SKILL 内容注入
         if conf.enable_skills:
             skill_summary = skill_manager.get_metadata_summary()
             if skill_summary:
-                system_content = f"{system_content}\n\n{skill_summary}" if system_content else skill_summary
+                context_parts.append(skill_summary)
                 logger.debug(f"[SKILL] 可用 SKILL 列表已注入")
-            
-            # 获取已激活的 SKILL
+
             active_skills = self.active_skills
             logger.info(f"[SKILL] 当前会话已激活 SKILL: {active_skills if active_skills else '无'}")
-            
+
             skill_content = skill_manager.get_injected_content(self.active_skills)
             if skill_content:
                 content_preview = skill_content[:500] + "..." if len(skill_content) > 500 else skill_content
                 logger.info(f"[SKILL] 注入内容预览:\n{content_preview}")
-                system_content = f"{system_content}\n\n{skill_content}" if system_content else skill_content
+                context_parts.append(skill_content)
             else:
                 logger.info(f"[SKILL] 没有需要注入的 SKILL 内容")
-        
+
         # MCP 内容注入
         if conf.enable_mcp:
-            # 1. 注入 MCP server 摘要（用于 AI 选择）
             mcp_summary = mcp_tool_bridge.get_metadata_summary()
             if mcp_summary:
-                system_content = f"{system_content}\n\n{mcp_summary}" if system_content else mcp_summary
+                context_parts.append(mcp_summary)
                 logger.debug("[MCP] MCP server 摘要已注入")
-            
-            # 2. 记录已激活的 MCP server
+
             mcp_sm = get_mcp_session_manager()
             active_mcp_servers = mcp_sm.get_active_servers(self.session_id) if mcp_sm else []
             logger.info(f"[MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
-        
+
         # 记忆注入
         if conf.enable_memory and self.user_id:
             from .memory import memory_store
             try:
                 memory_text = await memory_store.get_inject_text(self.user_id, conf.memory_max_inject_length)
                 if memory_text:
-                    system_content = f"{system_content}\n\n【关于该用户的历史记忆】\n{memory_text}" if system_content else f"【关于该用户的历史记忆】\n{memory_text}"
+                    context_parts.append(f"【关于该用户的历史记忆】\n{memory_text}")
                     logger.debug(f"[Memory] 已注入记忆，长度: {len(memory_text)}")
             except Exception as e:
                 logger.warning(f"[Memory] 注入记忆失败: {e}")
-        
-        # 组装消息列表
-        non_system_msgs = [msg for msg in self.messages if msg.get("role") != "system"]
-        
-        if system_content:
-            messages.append({"role": "system", "content": system_content})
-            # 同步更新 session.messages，供 web 端调试查看
-            self.messages = [{"role": "system", "content": system_content}] + non_system_msgs
-            # 调试日志：记录完整系统消息（截断）
-            system_log = system_content[:2000] + "...[截断]" if len(system_content) > 2000 else system_content
-            logger.debug(f"[SKILL] 完整系统消息:\n{system_log}")
-        else:
-            self.messages = non_system_msgs
-        
-        messages.extend(non_system_msgs)
-        
-        # 追加图片列表提示到最近的用户消息
+
+        context_msgs: List[Dict[str, Any]] = []
+        if context_parts:
+            context_text = "\n\n".join(p for p in context_parts if p)
+            context_msgs = [
+                {"role": "user", "content": context_text},
+                {"role": "assistant", "content": "已了解当前系统上下文。"},
+            ]
+
+        # 3. 图片列表提示附加到历史最后一条 user 消息
+        image_list_prompt = self.build_image_list_prompt()
         if image_list_prompt:
-            for msg in reversed(messages):
+            for msg in reversed(self.messages):
                 if msg.get("role") == "user":
-                    content = msg.get("content")
+                    content = msg.get("content", "")
+                    # 避免重复附加
+                    if isinstance(content, str) and image_list_prompt in content:
+                        break
+                    if isinstance(content, list):
+                        texts = [item.get("text", "") for item in content if isinstance(item, dict)]
+                        if any(image_list_prompt in t for t in texts):
+                            break
                     if isinstance(content, list):
                         content.append({"type": "text", "text": image_list_prompt})
                     elif isinstance(content, str):
                         msg["content"] = content + image_list_prompt
                     break
-        
-        return messages
+
+        # 调试日志
+        system_log = system_content[:2000] + "...[截断]" if len(system_content) > 2000 else system_content
+        logger.debug(f"[SKILL] 完整系统消息:\n{system_log}")
+
+        # 4. 返回完整 API 消息（system + context + history）
+        return [system_msg] + context_msgs + self.messages
     
     # ========== 对话方法 ==========
     
@@ -581,7 +570,7 @@ AI回复：🎨 已生成：<ai_image_1>
             ChatResult: 对话结果
         """
         # 1. 内部自动构建消息
-        await self._build_messages_for_chat(event)
+        messages = await self._build_messages_for_chat(event)
         
         # 2. 内部自动获取 tools（传入 session 以支持 MCP 渐进式加载）
         tools = None
@@ -597,7 +586,7 @@ AI回复：🎨 已生成：<ai_image_1>
         
         # 4. 调用 API
         result = await self._chat_with_api(
-            messages=self.messages,
+            messages=messages,
             api_config=api_config,
             tools=tools,
             context=chat_context,
