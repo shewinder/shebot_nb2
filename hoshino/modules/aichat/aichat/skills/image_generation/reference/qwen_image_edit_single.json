@@ -1,7 +1,7 @@
 {
   "60": {
     "inputs": {
-      "filename_prefix": "qwen_edit",
+      "filename_prefix": "qwen_image_edit_single",
       "images": [
         "433:8",
         0

@@ -1,7 +1,7 @@
 {
   "1": {
     "inputs": {
-      "ckpt_name": "novaAnimeXL_ilV180.safetensors"
+      "ckpt_name": "illustriousxlMmmix_v80.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -20,7 +20,7 @@
   },
   "3": {
     "inputs": {
-      "text": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry",
+      "text": "worst quality, low quality, jpeg artifacts, 3d, multiple views, 4koma, bad anatomy, bad hands, text",
       "clip": ["1", 1]
     },
     "class_type": "CLIPTextEncode",
@@ -31,7 +31,7 @@
   "4": {
     "inputs": {
       "width": 1024,
-      "height": 1024,
+      "height": 1536,
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",
@@ -43,7 +43,7 @@
     "inputs": {
       "seed": 12345,
       "steps": 25,
-      "cfg": 7,
+      "cfg": 5,
       "sampler_name": "euler",
       "scheduler": "normal",
       "denoise": 1,
@@ -69,7 +69,7 @@
   },
   "7": {
     "inputs": {
-      "filename_prefix": "novaAnimeXL_ilV180",
+      "filename_prefix": "illustriousxlMmmix_v80",
       "images": ["6", 0]
     },
     "class_type": "SaveImage",

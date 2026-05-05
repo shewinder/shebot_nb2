@@ -69,7 +69,7 @@
   },
   "7": {
     "inputs": {
-      "filename_prefix": "sdxl-txt2img",
+      "filename_prefix": "WAI-illustrious",
       "images": ["6", 0]
     },
     "class_type": "SaveImage",

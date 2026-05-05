@@ -1,7 +1,7 @@
 {
   "9": {
     "inputs": {
-      "filename_prefix": "z-image-turbo",
+      "filename_prefix": "z_image_turbo",
       "images": ["57:8", 0]
     },
     "class_type": "SaveImage",

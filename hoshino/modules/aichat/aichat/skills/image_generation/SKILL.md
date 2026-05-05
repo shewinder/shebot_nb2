@@ -28,7 +28,7 @@ disable-model_invocation: false
 |------|---------|------------|---------------|------|----------|
 | WAI-illustrious | comfyui.py | **英文** | 动漫/二次元专用。英文标签式 prompt，加 `masterpiece, best quality, highly detailed` 和角色名标签 | 文生图 | 完全无审核 |
 | novaAnimeXL_ilV180 | comfyui.py | **英文** | 动漫/二次元，色彩鲜艳。同标签式英文 prompt，加 `anime style, vibrant colors, cel shading` | 文生图 | 完全无审核 |
-| z_image_turbo | comfyui.py | **中文** | 通用创意图，中文理解好。保留中文，加 `高清细节，精美画质` 和中文风格词 | 文生图 | 完全无审核 |
+| illustriousxlMmmix_v80 | comfyui.py | **英文** | 基于 illustriousXL 的 Mmmix v8.0，增强写实风格。英文 prompt，加 `masterpiece, best quality, very aesthetic, latest`，标签式 | 文生图 | 完全无审核 |
 | bytedance/seedream-v4/edit | atlascloud.py | 中文 | 通用高质量，写实/动漫均可。保留中文，加 `高清细节，精美画质，极致细腻` 和中文风格词 | 文生图, 单图编辑, 多张编辑 | 几乎无审核 |
 | openai/gpt-image-2/text-to-image | atlascloud.py | **中文/英文** | OpenAI 最新模型，文字渲染强。保留原语言，结构化描述，无需质量词 | 文生图, 单图编辑, 多张编辑 | 审核严格 |
 
@@ -102,7 +102,7 @@ execute_script(
 - `--images` (可选): 待编辑图片标识符，逗号分隔。**只有图像编辑时才需要传，纯文生图不要传**
 - `--aspect-ratio` (可选): `1:1`, `4:3`, `3:4`, `16:9`, `9:16`, `2:3`, `3:2`
 - `--size` (可选): `512`, `1K`, `2K`, `4K`
-- `--model` (必填): 模型名称（如 `z_image_turbo`、`qwen_image_edit`），脚本用此名称加载 `reference/{model}.json` 工作流
+- `--model` (必填): 模型名称（如 `WAI-illustrious`、`qwen_image_edit`），脚本用此名称加载 `reference/{model}.json` 工作流
 - `timeout` (execute_script 参数): 生图任务建议设为 `300`（默认 180 秒，生图建议拉满）
 
 **通用调用示例**：
@@ -112,7 +112,7 @@ execute_script(
     script_path="scripts/comfyui.py",
     args=["--prompt", "<AI调优后的prompt>",
           "--aspect-ratio", "1:1",
-          "--model", "z_image_turbo"],
+          "--model", "WAI-illustrious"],
     timeout=180
 )
 ```

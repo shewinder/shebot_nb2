@@ -34,6 +34,7 @@ _SCRIPTS_DIR = (
     / "hoshino"
     / "modules"
     / "aichat"
+    / "aichat"
     / "skills"
     / "image_generation"
     / "scripts"
@@ -85,6 +86,20 @@ TEST_CASES: List[Dict[str, Any]] = [
         "prompt": "1girl, solo, spread legs, pussy, detailed genitalia, close-up, soft lighting, masterpiece, best quality",
         "aspect_ratio": "1:1",
     },
+    {
+        "name": "anime_natural_lang",
+        "category": "动漫",
+        "type": "safe",
+        "prompt": "A cute anime girl with long silver hair and purple eyes, wearing a cozy oversized sweater, sitting by a window on a rainy day, holding a warm cup of tea, soft indoor lighting, peaceful atmosphere",
+        "aspect_ratio": "2:3",
+    },
+    {
+        "name": "anime_chinese",
+        "category": "动漫",
+        "type": "safe",
+        "prompt": "一个银发紫瞳的可爱动漫少女，穿着宽松的针织衫，坐在窗边听雨，手里捧着一杯热茶，柔和的室内光线，宁静的氛围",
+        "aspect_ratio": "2:3",
+    },
     # ---- 真人风格 ----
     {
         "name": "real_safe",
@@ -113,6 +128,20 @@ TEST_CASES: List[Dict[str, Any]] = [
         "type": "nsfw",
         "prompt": "a beautiful woman, spread legs, detailed pussy, close-up, soft lighting, photorealistic, 8k uhd",
         "aspect_ratio": "1:1",
+    },
+    {
+        "name": "real_natural_lang",
+        "category": "真人",
+        "type": "safe",
+        "prompt": "A young woman with natural makeup standing in a sunflower field during golden hour, wearing a flowing white dress, warm backlight creating a soft glow around her hair, photorealistic, cinematic composition",
+        "aspect_ratio": "2:3",
+    },
+    {
+        "name": "real_chinese",
+        "category": "真人",
+        "type": "safe",
+        "prompt": "一位淡妆的年轻女子站在向日葵花田里，夕阳的余晖洒在她身上，穿着飘逸的白色长裙，温暖的逆光勾勒出她的发丝，真实感照片风格，电影级构图",
+        "aspect_ratio": "2:3",
     },
     # ---- 二次元角色还原 ----
     {
