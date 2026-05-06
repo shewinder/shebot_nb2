@@ -113,11 +113,22 @@ async def handle_ai_chat(bot: Bot, event: Event):
     
     if msg.startswith('#'):
         user_input = msg[1:].strip()
-        # 检查快捷指令
-        shortcut = shortcuts_manager.get_shortcut(user_input)
+        # 检查快捷指令（支持参数覆盖，如 #角色扮演 model=WAI-illustrious）
+        shortcut_name = user_input.split()[0] if user_input else ""
+        shortcut = shortcuts_manager.get_shortcut(shortcut_name)
         if shortcut:
-            user_input = shortcut.prompt
-            logger.info(f"触发快捷指令「{shortcut.name}」")
+            overrides = {}
+            positional = []
+            for part in user_input.split()[1:]:
+                if '=' in part:
+                    k, v = part.split('=', 1)
+                    overrides[k] = v
+                else:
+                    positional.append(part)
+            rendered = shortcuts_manager.render_prompt(shortcut_name, overrides, positional)
+            if rendered:
+                user_input = rendered
+                logger.info(f"触发快捷指令「{shortcut.name}」")
     elif in_continuous_mode:
         user_input = msg
     else:

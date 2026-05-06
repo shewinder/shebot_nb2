@@ -7,7 +7,7 @@ Description: aichat 快捷指令管理
 import json
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from loguru import logger
 
 from hoshino import data_dir
@@ -35,7 +35,7 @@ BUILT_IN_SHORTCUTS: Dict[str, dict] = {
             "服饰、环境、光影、动作细节等。这段描述必须足够详细，可以直接用于图像生成。"
             "如果场景包含 NSFW 元素，画面描述也必须对 NSFW 元素进行详细视觉化描写。\n\n"
             "4. 【配图生成】\n"
-            "   每次回复后，必须使用 image_generation skill 生成当前场景的配图。"
+            "   每次回复后，必须使用 image_generation skill 生成当前场景的配图。模型选择{{model}}"
             "生图 prompt 使用【场景画面】中的完整描述，让画面与剧情文字保持一致。\n\n"
             "【NSFW 内容处理规范】\n"
             "以下要求仅适用于包含 NSFW 元素的场景，非 NSFW 场景请忽略：\n"
@@ -55,17 +55,23 @@ BUILT_IN_SHORTCUTS: Dict[str, dict] = {
             "请先以角色身份进行开场白，并给出第一个选项。"
         ),
         "description": "沉浸式角色扮演，选项模式+自动配图，剧情逐步向成人方向发展",
+        "defaults": {
+            "model": "illustriousxlMmmix_v80"
+        },
+        "positional": ["model"],
     }
 }
 
 
 class Shortcut:
-    def __init__(self, name: str, prompt: str, description: str = "", created_at: float = 0, is_builtin: bool = False):
+    def __init__(self, name: str, prompt: str, description: str = "", created_at: float = 0, is_builtin: bool = False, defaults: Optional[Dict[str, str]] = None, positional: Optional[List[str]] = None):
         self.name = name
         self.prompt = prompt
         self.description = description
         self.created_at = created_at
         self.is_builtin = is_builtin
+        self.defaults = defaults or {}
+        self.positional = positional or []
 
 
 class ShortcutsManager:
@@ -79,6 +85,8 @@ class ShortcutsManager:
                 description=item.get("description", ""),
                 created_at=0,
                 is_builtin=True,
+                defaults=item.get("defaults"),
+                positional=item.get("positional"),
             )
         # 再加载用户自定义（同名项覆盖内置）
         self._load()
@@ -96,6 +104,8 @@ class ShortcutsManager:
                     description=item.get("description", ""),
                     created_at=item.get("created_at", 0),
                     is_builtin=False,
+                    defaults=item.get("defaults"),
+                positional=item.get("positional"),
                 )
         except Exception as e:
             logger.error(f"加载快捷指令失败: {e}")
@@ -109,6 +119,8 @@ class ShortcutsManager:
                     "prompt": s.prompt,
                     "description": s.description,
                     "created_at": s.created_at,
+                    "defaults": s.defaults,
+                    "positional": s.positional,
                 }
                 for name, s in self.shortcuts.items()
                 if not s.is_builtin
@@ -121,13 +133,47 @@ class ShortcutsManager:
     def get_shortcut(self, name: str) -> Optional[Shortcut]:
         return self.shortcuts.get(name)
 
-    def add_shortcut(self, name: str, prompt: str, description: str = "") -> bool:
+    def render_prompt(self, name: str, overrides: Optional[Dict[str, str]] = None, positional: Optional[List[str]] = None) -> Optional[str]:
+        """渲染快捷指令 prompt，替换模板变量
+
+        Args:
+            name: 快捷指令名称
+            overrides: 显式覆盖默认值的参数，如 {"model": "WAI-illustrious"}
+            positional: 位置参数列表，按 shortcut.positional 定义的顺序映射
+
+        Returns:
+            替换后的 prompt，或 None（shortcut 不存在）
+        """
+        shortcut = self.shortcuts.get(name)
+        if not shortcut:
+            return None
+        params = dict(shortcut.defaults)
+
+        # 先应用位置参数
+        if positional and shortcut.positional:
+            for i, key in enumerate(shortcut.positional):
+                if i < len(positional):
+                    params[key] = positional[i]
+
+        # 显式命名参数优先级更高，覆盖位置参数
+        if overrides:
+            params.update(overrides)
+
+        prompt = shortcut.prompt
+        for key, value in params.items():
+            placeholder = f"{{{{{key}}}}}"
+            prompt = prompt.replace(placeholder, str(value))
+        return prompt
+
+    def add_shortcut(self, name: str, prompt: str, description: str = "", defaults: Optional[Dict[str, str]] = None, positional: Optional[List[str]] = None) -> bool:
         self.shortcuts[name] = Shortcut(
             name=name,
             prompt=prompt,
             description=description,
             created_at=time.time(),
             is_builtin=False,
+            defaults=defaults,
+            positional=positional,
         )
         self._save()
         return True
