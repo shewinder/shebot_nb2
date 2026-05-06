@@ -3,7 +3,7 @@ AI Chat Web 管理 API
 提供 API 厂商管理、模型切换、人格管理等功能
 """
 import time
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from fastapi import APIRouter, File, UploadFile, Form
 from pydantic import BaseModel
 from nonebot import get_driver
@@ -875,6 +875,30 @@ async def get_sessions():
         return {"status": 500, "data": f"获取失败: {str(e)}"}
 
 
+def _truncate_base64_in_message(msg: Dict[str, Any]) -> Dict[str, Any]:
+    """截断消息中的 base64 图片数据，保留元信息，防止响应体过大"""
+    msg = dict(msg)
+    content = msg.get("content")
+    if isinstance(content, list):
+        new_content = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "image_url":
+                url = item.get("image_url", {}).get("url", "")
+                if url.startswith("data:image"):
+                    # 截断 base64，保留前缀和长度信息
+                    prefix = url[:50]
+                    item = {
+                        "type": "image_url",
+                        "image_url": {"url": f"{prefix}...[base64 已截断，原长度 {len(url)}]"}
+                    }
+            new_content.append(item)
+        msg["content"] = new_content
+    elif isinstance(content, str) and content.startswith("data:image"):
+        prefix = content[:50]
+        msg["content"] = f"{prefix}...[base64 已截断，原长度 {len(content)}]"
+    return msg
+
+
 @router.get("/sessions/{session_id}")
 async def get_session_detail(session_id: str):
     """获取指定 Session 详情"""
@@ -900,26 +924,27 @@ async def get_session_detail(session_id: str):
             except ValueError:
                 pass
         
-        # 处理 messages，保留完整内容
+        # 1. 原始消息历史（保留完整字段，截断 base64）
         messages = []
         for msg in session.messages:
-            content = msg.get("content", "")
-            content_display = content
-            if isinstance(content, list):
-                # 多模态消息，简化展示
-                content_display = f"[多模态消息，共{len(content)}个部分]"
-            
-            messages.append({
-                "role": msg.get("role"),
-                "content": content_display
-            })
+            msg_copy = _truncate_base64_in_message(dict(msg))
+            messages.append(msg_copy)
         
-        # 获取人格
-        persona = ""
-        if session.messages and session.messages[0].get("role") == "system":
-            persona = session.messages[0].get("content", "")
-            if not isinstance(persona, str):
-                persona = ""
+        # 2. 完整上下文（实际发送给 LLM 的消息列表）
+        full_context = []
+        try:
+            built_messages = await session._build_messages_for_chat(event=None)
+            for msg in built_messages:
+                full_context.append(_truncate_base64_in_message(dict(msg)))
+        except Exception as e:
+            logger.warning(f"构建完整上下文失败: {e}")
+            full_context = []
+        
+        # 3. 环境信息
+        env_info = session._build_env_info(event=None)
+        
+        # 4. 获取人格（从 session 属性直接获取，不依赖 messages[0]）
+        persona = session.persona or ""
         
         return {
             "status": 200,
@@ -927,8 +952,13 @@ async def get_session_detail(session_id: str):
                 "session_id": session_id,
                 "user_id": user_id,
                 "group_id": group_id,
+                "persona": persona,
+                "env_info": env_info,
+                "active_skills": list(session.active_skills),
                 "messages": messages,
                 "message_count": len(session.messages),
+                "full_context": full_context,
+                "full_context_count": len(full_context),
                 "user_images": [i.identifier for i in session.list_images() if i.source == "user"],
                 "ai_images": [i.identifier for i in session.list_images() if i.source == "ai"],
                 "continuous_mode": session.continuous_mode,
@@ -936,8 +966,7 @@ async def get_session_detail(session_id: str):
                 "choice_guideline": "",
                 "last_choices": session.get_last_choices(),
                 "last_active": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.last_active)),
-                "is_expired": session.is_expired(),
-                "persona": persona
+                "is_expired": session.is_expired()
             }
         }
     except Exception as e:

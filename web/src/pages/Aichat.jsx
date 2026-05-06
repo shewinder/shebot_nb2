@@ -132,6 +132,7 @@ function Aichat() {
   const [sessionDetailVisible, setSessionDetailVisible] = useState(false)
   const [sessionDetail, setSessionDetail] = useState(null)
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false)
+  const [expandedMessageIdx, setExpandedMessageIdx] = useState(null)
 
   // SKILL 管理相关
   const [skills, setSkills] = useState([])
@@ -1925,10 +1926,16 @@ function Aichat() {
           <Modal
             title="Session 详情"
             open={sessionDetailVisible}
-            onCancel={() => setSessionDetailVisible(false)}
-            width={800}
+            onCancel={() => {
+              setSessionDetailVisible(false)
+              setExpandedMessageIdx(null)
+            }}
+            width={900}
             footer={[
-              <Button key="close" onClick={() => setSessionDetailVisible(false)}>
+              <Button key="close" onClick={() => {
+                setSessionDetailVisible(false)
+                setExpandedMessageIdx(null)
+              }}>
                 关闭
               </Button>
             ]}
@@ -1956,6 +1963,16 @@ function Aichat() {
                   <Descriptions.Item label="是否过期">
                     {sessionDetail.is_expired ? <Tag color="red">已过期</Tag> : <Tag color="green">活跃</Tag>}
                   </Descriptions.Item>
+                  <Descriptions.Item label="环境信息" span={2}>
+                    <code style={{ fontSize: 12 }}>{sessionDetail.env_info || '-'}</code>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="已激活 SKILL" span={2}>
+                    {sessionDetail.active_skills?.length > 0 ? (
+                      <Space wrap>
+                        {sessionDetail.active_skills.map(s => <Tag key={s} color="cyan">{s}</Tag>)}
+                      </Space>
+                    ) : <Text type="secondary">无</Text>}
+                  </Descriptions.Item>
                 </Descriptions>
 
                 {sessionDetail.user_images?.length > 0 && (
@@ -1980,31 +1997,156 @@ function Aichat() {
                   </div>
                 )}
 
-                <Divider orientation="left">消息历史 ({sessionDetail.messages?.length || 0} 条)</Divider>
+                <Alert
+                  message={`完整消息记录（共 ${sessionDetail.full_context_count || 0} 条，含 system prompt、动态上下文注入和历史消息）`}
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                />
                 <List
                   size="small"
                   bordered
-                  dataSource={sessionDetail.messages || []}
-                  renderItem={(msg, idx) => (
-                    <List.Item>
-                      <div style={{ width: '100%' }}>
-                        <Tag color={msg.role === 'user' ? 'blue' : msg.role === 'assistant' ? 'green' : 'default'}>
-                          {msg.role}
-                        </Tag>
-                        <TextArea
-                          value={typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}
-                          readOnly
-                          autoSize={{ minRows: 1, maxRows: 20 }}
-                          style={{ 
-                            marginTop: 8,
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                            background: 'var(--ant-color-bg-elevated)'
-                          }}
-                        />
-                      </div>
-                    </List.Item>
-                  )}
+                  dataSource={sessionDetail.full_context || []}
+                  renderItem={(msg, idx) => {
+                    const roleColor = {
+                      user: 'blue',
+                      assistant: 'green',
+                      system: 'orange',
+                      tool: 'purple'
+                    }[msg.role] || 'default'
+
+                    let textContent = ''
+                    let imageCount = 0
+                    if (typeof msg.content === 'string') {
+                      textContent = msg.content
+                    } else if (Array.isArray(msg.content)) {
+                      msg.content.forEach(item => {
+                        if (item.type === 'text') textContent += item.text
+                        if (item.type === 'image_url') imageCount++
+                      })
+                    }
+
+                    const isSystem = msg.role === 'system'
+
+                    return (
+                      <List.Item>
+                        <div style={{ width: '100%' }}>
+                          <Space>
+                            <Tag color={roleColor}>{msg.role}</Tag>
+                            {msg.tool_call_id && (
+                              <Tag color="purple" style={{ fontSize: 11 }}>
+                                tool_call_id: {msg.tool_call_id.slice(0, 16)}...
+                              </Tag>
+                            )}
+                            {imageCount > 0 && (
+                              <Tag color="magenta" style={{ fontSize: 11 }}>
+                                <PictureOutlined /> {imageCount} 张图片
+                              </Tag>
+                            )}
+                            {msg.tool_calls && msg.tool_calls.length > 0 && (
+                              <Tag color="volcano" style={{ fontSize: 11 }}>
+                                <ToolOutlined /> {msg.tool_calls.length} 个 tool_call
+                              </Tag>
+                            )}
+                            {msg.reasoning_content && (
+                              <Tag color="geekblue" style={{ fontSize: 11 }}>
+                                <CodeOutlined /> 思维链
+                              </Tag>
+                            )}
+                            {isSystem && (
+                              <Tag color="orange" style={{ fontSize: 11 }}>
+                                {textContent.length} 字符
+                              </Tag>
+                            )}
+                          </Space>
+
+                          {/* 主内容 */}
+                          {textContent && (
+                            <TextArea
+                              value={textContent}
+                              readOnly
+                              autoSize={{ minRows: 1, maxRows: isSystem ? 25 : 15 }}
+                              style={{
+                                marginTop: 8,
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                background: 'var(--ant-color-bg-elevated)'
+                              }}
+                            />
+                          )}
+
+                          {/* 思维链 */}
+                          {msg.reasoning_content && (
+                            <div style={{ marginTop: 8 }}>
+                              <Text type="secondary" style={{ fontSize: 11 }}>
+                                <CodeOutlined /> reasoning_content:
+                              </Text>
+                              <TextArea
+                                value={msg.reasoning_content}
+                                readOnly
+                                autoSize={{ minRows: 1, maxRows: 10 }}
+                                style={{
+                                  marginTop: 4,
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                  background: 'var(--ant-color-bg-elevated)'
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Tool Calls */}
+                          {msg.tool_calls && msg.tool_calls.length > 0 && (
+                            <div style={{ marginTop: 8 }}>
+                              <Text type="secondary" style={{ fontSize: 11 }}>
+                                <ToolOutlined /> tool_calls:
+                              </Text>
+                              {msg.tool_calls.map((tc, tidx) => (
+                                <div key={tidx} style={{ marginTop: 4, padding: 6, background: 'var(--ant-color-bg-elevated)', border: '1px solid var(--ant-color-border)', borderRadius: 4 }}>
+                                  <Text strong style={{ fontSize: 11 }}>{tc.function?.name}</Text>
+                                  <TextArea
+                                    value={tc.function?.arguments || ''}
+                                    readOnly
+                                    autoSize={{ minRows: 1, maxRows: 8 }}
+                                    style={{
+                                      marginTop: 4,
+                                      fontFamily: 'monospace',
+                                      fontSize: 11,
+                                      background: 'transparent'
+                                    }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* 原始 JSON 展开 */}
+                          <div style={{ marginTop: 8 }}>
+                            <Button
+                              size="small"
+                              type="link"
+                              onClick={() => setExpandedMessageIdx(expandedMessageIdx === idx ? null : idx)}
+                            >
+                              {expandedMessageIdx === idx ? '收起原始 JSON' : '查看原始 JSON'}
+                            </Button>
+                            {expandedMessageIdx === idx && (
+                              <TextArea
+                                value={JSON.stringify(msg, null, 2)}
+                                readOnly
+                                autoSize={{ minRows: 3, maxRows: 20 }}
+                                style={{
+                                  marginTop: 4,
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                  background: 'var(--ant-color-bg-elevated)'
+                                }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      </List.Item>
+                    )
+                  }}
                 />
               </Space>
             ) : null}
