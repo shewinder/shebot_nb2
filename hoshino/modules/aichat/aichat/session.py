@@ -241,45 +241,22 @@ class Session:
 """
     
     @staticmethod
-    def build_execution_style_prompt() -> str:
-        """构建执行风格提示（固定内容，用于系统消息）"""
-        return """
-【执行风格指南】
-调用工具执行任务时，遵循以下风格：
+    def build_mode_prelude() -> str:
+        """构建系统模式说明和执行规则（放在最前面）"""
+        return """【系统模式与规则】
 
-✅ 允许做的事情（简洁即可）：
-- 开始执行前简单确认（如"好的"、"稍等"）
-- 操作失败后说明原因并重试
-- 最终输出完整结果
+🔧 工具执行 — 调用工具完成任务时：
+  · 简洁直接，能一步做完的不分步
+  · 可简单确认（"好的""稍等"），可保留角色口吻，但去掉行动叙事（"让我来帮你..."）
+  · 不要问"需要我帮你做吗"、不要步骤预告、不要解释正在做什么
+  ✔️ "好的" → 调工具 → 返回结果
+  ❌ "好的，让我来帮你查一下，这就去调用天气API..."
 
-❌ 禁止做的事情（废话/冗余）：
-- "首先让我..."、"第一步..."、"接下来..."等步骤预告
-- 详细解释每一步在做什么（如"正在获取日期..."、"正在调用API..."）
-- 分多条消息输出中间过程
-- 询问用户"需要我帮你做吗？"（用户已经提出了请求）
+💬 角色扮演 — 日常对话、情感互动、NSFW 场景：
+  完全遵循下方【角色设定】，上方简洁规则不适用"""
 
-🎯 原则：
-1. 能直接完成的，直接给出结果
-2. 需要用户等待的，简单回复"好的"或"稍等"即可，不要啰嗦
-3. 一次工具调用失败要重试时，可以简单说明失败原因
-4. 最终结果要完整，但不要冗余
 
-正确示例：
-用户：查询北京天气
-AI：[直接调用 get_weather 工具]
-AI回复：🌤️ 北京今天晴，15-22℃
 
-用户：生成一张猫的图片
-AI：[调用 generate_image]
-AI回复：🎨 已生成：<ai_image_1>
-
-错误示例（过于啰嗦）：
-❌ "我来帮你查询北京天气，首先需要获取当前城市信息..."
-❌ "正在调用天气API接口获取数据..."
-❌ "根据查询结果分析，北京今天的天气情况是..."
-【风格指南结束】
-"""
-    
     def build_image_list_prompt(self) -> str:
         """构建可用图片列表提示（动态内容，附加到用户消息）"""
         images = self._image_store.list_all()
@@ -423,25 +400,29 @@ AI回复：🎨 已生成：<ai_image_1>
         Returns:
             完整 API 消息列表
         """
-        # 1. 构建干净的 system content（静态核心指令）
-        system_content = self.persona or ""
+        # 1. 构建 system content
+        # 顺序：模式说明（顶）→ 功能规则（优先级高）→ 角色设定 → 环境/工具（尾）
+        parts: List[str] = []
+
+        # 系统模式说明 + 执行规则（合并，先于角色设定以提升权重）
+        parts.append(self.build_mode_prelude())
+
+        # 图片发送规则（功能规则）
+        parts.append(self.build_image_rules_prompt())
+
+        # 角色设定（persona 放后面，不影响工具执行规则的优先级）
+        if self.persona:
+            parts.append(f"【角色设定】\n{self.persona}")
 
         # 环境信息
         env_info = self._build_env_info(event)
         if env_info:
-            system_content = f"{system_content}\n\n{env_info}" if system_content else env_info
+            parts.append(env_info)
 
         # 工具提示
-        tool_hint = "<instructions>\n你可以调用 get_current_time 工具获取当前准确时间。\n</instructions>"
-        system_content = f"{system_content}\n\n{tool_hint}" if system_content else tool_hint
+        parts.append("<instructions>\n你可以调用 get_current_time 工具获取当前准确时间。\n</instructions>")
 
-        # 执行风格指南（固定内容，提高缓存利用率）
-        execution_style = self.build_execution_style_prompt()
-        system_content = f"{system_content}\n\n{execution_style}"
-
-        # 图片发送规则（固定内容，提高缓存利用率）
-        image_rules = self.build_image_rules_prompt()
-        system_content = f"{system_content}\n\n{image_rules}"
+        system_content = "\n\n".join(parts)
 
         system_msg = {"role": "system", "content": system_content}
 
