@@ -181,14 +181,6 @@ export const importCharacterSingle = (user_id, file, as_global = false) => {
   })
 }
 
-// ===== 图像模型管理 API =====
-// 获取图像 API 配置
-export const getImageApis = () => request.get('/aichat/image-apis')
-
-// 更新图像 API 配置
-export const updateImageApis = (data) => request.post('/aichat/image-apis', data)
-
-
 // ===== Session 调试 API =====
 // 获取所有 Session 列表
 export const getSessions = () => request.get('/aichat/sessions')

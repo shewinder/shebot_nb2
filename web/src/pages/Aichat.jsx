@@ -122,10 +122,6 @@ function Aichat() {
   const [switchingModel, setSwitchingModel] = useState(false)
   const [loadingModels, setLoadingModels] = useState(false)
 
-  // 图像 API 配置相关
-  const [imageApisForm] = Form.useForm()
-  const [imageApisLoading, setImageApisLoading] = useState(false)
-
   // Session 调试相关
   const [sessions, setSessions] = useState([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
@@ -153,7 +149,6 @@ function Aichat() {
         fetchSuperusers(),
         fetchGroups(),
         fetchGlobalPresets(),
-        fetchImageApis(),
         fetchSkillsConfig()
       ])
     } catch (error) {
@@ -598,33 +593,6 @@ function Aichat() {
       await fetchConfig()
     } catch (error) {
       message.error('配置更新失败: ' + error.message)
-    }
-  }
-
-  // ===== 图像 API 配置相关函数 =====
-  const fetchImageApis = async () => {
-    setImageApisLoading(true)
-    try {
-      const data = await aichatApi.getImageApis()
-      if (data) {
-        imageApisForm.setFieldsValue({
-          generate_api: data.generate_api,
-          edit_api: data.edit_api
-        })
-      }
-    } catch (error) {
-      // 静默处理
-    } finally {
-      setImageApisLoading(false)
-    }
-  }
-
-  const handleImageApisSubmit = async (values) => {
-    try {
-      const result = await aichatApi.updateImageApis(values)
-      message.success(result.data || '保存成功')
-    } catch (error) {
-      message.error('保存失败: ' + error.message)
     }
   }
 
@@ -1483,117 +1451,6 @@ function Aichat() {
               <Empty description="暂无全局预设人格，点击「添加预设人格」创建" />
             )}
           </Card>
-        </TabPane>
-
-        <TabPane
-          tab={<span><PictureOutlined /> 图像 API 配置</span>}
-          key="image-apis"
-        >
-          <Spin spinning={imageApisLoading}>
-            <Form
-              form={imageApisForm}
-              layout="vertical"
-              onFinish={handleImageApisSubmit}
-              autoComplete="off"
-            >
-              <Row gutter={24}>
-                <Col xs={24} lg={12}>
-                  <Card title="🎨 图像生成 API" style={{ marginBottom: 16 }}>
-                    <Form.Item
-                      name={['generate_api', 'api']}
-                      label="API 标识"
-                      rules={[{ required: true, message: '请输入API标识' }]}
-                    >
-                      <Input placeholder="例如：gemini-gen" />
-                    </Form.Item>
-                    <Form.Item
-                      name={['generate_api', 'api_base']}
-                      label="API Base URL"
-                      rules={[{ required: true, message: '请输入API Base URL' }]}
-                    >
-                      <Input placeholder="例如：https://generativelanguage.googleapis.com/v1beta" />
-                    </Form.Item>
-                    <Form.Item
-                      name={['generate_api', 'api_key']}
-                      label="API Key"
-                      rules={[{ required: true, message: '请输入API Key' }]}
-                    >
-                      <Input.Password placeholder="输入API Key" />
-                    </Form.Item>
-                    <Form.Item
-                      name={['generate_api', 'model']}
-                      label="模型名称"
-                      rules={[{ required: true, message: '请输入模型名称' }]}
-                    >
-                      <Input placeholder="例如：gemini-3-pro-image-preview" />
-                    </Form.Item>
-                    <Form.Item
-                      name={['generate_api', 'api_format']}
-                      label="API 格式"
-                      rules={[{ required: true, message: '请选择API格式' }]}
-                    >
-                      <Select placeholder="选择API格式">
-                        <Option value="openai">OpenAI (openai)</Option>
-                        <Option value="gemini">Gemini (gemini)</Option>
-                        <Option value="atlascloud">AtlasCloud (atlascloud)</Option>
-                      </Select>
-                    </Form.Item>
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="🖌️ 图像编辑 API" style={{ marginBottom: 16 }}>
-                    <Form.Item
-                      name={['edit_api', 'api']}
-                      label="API 标识"
-                      rules={[{ required: true, message: '请输入API标识' }]}
-                    >
-                      <Input placeholder="例如：openai-edit" />
-                    </Form.Item>
-                    <Form.Item
-                      name={['edit_api', 'api_base']}
-                      label="API Base URL"
-                      rules={[{ required: true, message: '请输入API Base URL' }]}
-                    >
-                      <Input placeholder="例如：https://api.openai.com/v1" />
-                    </Form.Item>
-                    <Form.Item
-                      name={['edit_api', 'api_key']}
-                      label="API Key"
-                      rules={[{ required: true, message: '请输入API Key' }]}
-                    >
-                      <Input.Password placeholder="输入API Key" />
-                    </Form.Item>
-                    <Form.Item
-                      name={['edit_api', 'model']}
-                      label="模型名称"
-                      rules={[{ required: true, message: '请输入模型名称' }]}
-                    >
-                      <Input placeholder="例如：gpt-image-1" />
-                    </Form.Item>
-                    <Form.Item
-                      name={['edit_api', 'api_format']}
-                      label="API 格式"
-                      rules={[{ required: true, message: '请选择API格式' }]}
-                    >
-                      <Select placeholder="选择API格式">
-                        <Option value="openai">OpenAI (openai)</Option>
-                        <Option value="gemini">Gemini (gemini)</Option>
-                        <Option value="atlascloud">AtlasCloud (atlascloud)</Option>
-                      </Select>
-                    </Form.Item>
-                  </Card>
-                </Col>
-              </Row>
-              <Space>
-                <Button type="primary" htmlType="submit" icon={<SaveOutlined />}>
-                  保存配置
-                </Button>
-                <Button icon={<ReloadOutlined />} onClick={fetchImageApis}>
-                  刷新
-                </Button>
-              </Space>
-            </Form>
-          </Spin>
         </TabPane>
 
         <TabPane
