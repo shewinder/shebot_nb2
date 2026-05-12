@@ -188,7 +188,8 @@ class TaskManager:
             
             # 创建独立 Agent Session，使用唯一 ID 避免与用户 session 冲突
             agent_session_id = f"agent_task_{task.id}_{uuid.uuid4().hex[:6]}"
-            temp_session = Session(agent_session_id, persona=persona)
+            temp_session = Session(agent_session_id, task.user_id,
+                                   persona=persona, group_id=task.group_id)
             
             # 明确执行上下文，防止AI误以为是创建定时任务
             temp_session.add_message("system", "【系统提示】你正在执行一个已调度的定时任务。请直接完成下面指定的操作，不要创建新的定时任务，也不要向用户询问确认。")

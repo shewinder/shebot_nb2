@@ -94,7 +94,7 @@ async def _implicit_preference_update(
         # 创建独立 Session（不干扰用户的正常对话历史）
         session_id = f"private_{user_id}_pixivrank"
         persona = persona_manager.get_persona(user_id, group_id)
-        session = Session(session_id, persona)
+        session = Session(session_id, user_id, persona=persona, group_id=group_id)
 
         # 激活 image_preference skill
         session.activate_skill("image_preference")

@@ -82,7 +82,8 @@ class ChatResult:
 
 
 class Session:
-    def __init__(self, session_id: str, persona: Optional[str] = None):
+    def __init__(self, session_id: str, user_id: int,
+                 persona: Optional[str] = None, group_id: Optional[int] = None):
         self.session_id = session_id
         self.persona = persona
         self.messages: List[Dict[str, Any]] = []
@@ -98,8 +99,8 @@ class Session:
         self.total_prompt_tokens: int = 0
         self.total_completion_tokens: int = 0
         self.total_tokens: int = 0
-        # 从 session_id 解析 user_id 和 group_id
-        self.user_id, self.group_id = self._parse_session_id(session_id)
+        self.user_id = user_id
+        self.group_id = group_id
     
     def _append_message(self, message: Dict[str, Any]) -> None:
         """追加消息到历史"""
@@ -379,35 +380,8 @@ AI回复：🎨 已生成：<ai_image_1>
         self.total_tokens += prompt_tokens + completion_tokens
         self.last_active = time.time()
     
-    @staticmethod
-    def _parse_session_id(session_id: str) -> Tuple[Optional[int], Optional[int]]:
-        """从 session_id 解析 user_id 和 group_id
-        
-        格式：
-        - group_{group_id}_user_{user_id} -> (user_id, group_id)
-        - private_{user_id} -> (user_id, None)
-        
-        Returns:
-            Tuple[user_id, group_id]
-        """
-        user_id = None
-        group_id = None
-        
-        try:
-            if session_id.startswith("group_"):
-                # group_{group_id}_user_{user_id}
-                parts = session_id.split("_")
-                if len(parts) >= 4:
-                    group_id = int(parts[1])
-                    user_id = int(parts[3])
-            elif session_id.startswith("private_"):
-                # private_{user_id}
-                user_id = int(session_id.split("_")[1])
-        except (ValueError, IndexError):
-            pass
-        
-        return user_id, group_id
-    
+
+
     def _build_env_info(self, event: Optional[Any] = None) -> str:
         """构建环境信息（XML格式）
         
@@ -939,7 +913,7 @@ class SessionManager:
         session_id = self.get_session_id(user_id, group_id)
         if session_id in self.sessions:
             self._remove_session(session_id)
-        session = Session(session_id, persona)
+        session = Session(session_id, user_id, persona=persona, group_id=group_id)
         self.sessions[session_id] = session
         return session
     
