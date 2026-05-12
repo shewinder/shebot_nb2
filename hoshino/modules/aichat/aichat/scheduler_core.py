@@ -229,8 +229,12 @@ class TaskManager:
             
             logger.debug(f"[Scheduler] 发送任务结果: task_id={task.id}, silent={task.silent}, mention_user={task.mention_user}")
             
-            # 构建完整消息（处理图片标识符）
-            content_messages = await session.build_message(content)
+            # 构建完整消息（处理图片标识符和 Markdown 渲染）
+            content_messages = await session.build_message(
+                content,
+                enable_markdown=conf.enable_markdown_render,
+                markdown_min_length=conf.markdown_min_length
+            )
             
             # 构建任务报告框架
             if task.silent:
