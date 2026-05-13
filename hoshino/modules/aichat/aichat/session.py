@@ -716,7 +716,21 @@ class Session:
             content = result.get("content", "")
             error = result.get("error")
             metadata = result.get("metadata", {})
-            
+
+            # MCP 图像自动管道：将工具返回的 images 字段存入 ImageStore
+            images = result.get("images", [])
+            if images:
+                identifiers = []
+                for img in images:
+                    if isinstance(img, str) and img.startswith("data:"):
+                        try:
+                            identifier = await self.store_ai_image(img)
+                            identifiers.append(identifier)
+                        except Exception:
+                            logger.exception(f"自动存储 MCP 图像失败")
+                if identifiers:
+                    content = content + "\n" + " ".join(identifiers)
+
             # 简化日志中的图片数据（如果 content 中包含 base64）
             if "data:image" in content:
                 import re

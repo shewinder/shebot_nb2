@@ -12,8 +12,8 @@ from . import web_search
 from . import execute_script
 from . import broadcast
 from . import fetch_url
-from . import send_images
+from . import store_images
 from . import file_storage
 from . import memory_tools
 
-__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "broadcast", "fetch_url", "send_images", "file_storage", "memory_tools"]
+__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "broadcast", "fetch_url", "store_images", "file_storage", "memory_tools"]
