@@ -21,6 +21,9 @@ from .mcp import mcp_server_manager, mcp_tool_bridge, init_mcp_session_manager
 # SKILL 系统导入
 from .skills import skill_manager
 
+# 后台任务导入
+from .background_task_core import recover_background_tasks
+
 conf = Config.get_instance('aichat')
 
 
@@ -118,6 +121,8 @@ try:
         await init_mcp_servers()
         # 同时初始化 SKILL 系统
         init_skill_system()
+        # 恢复未完成的后台任务
+        await recover_background_tasks()
     
     @driver.on_shutdown
     async def _shutdown_mcp():

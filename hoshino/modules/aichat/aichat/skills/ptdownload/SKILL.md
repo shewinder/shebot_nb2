@@ -3,6 +3,8 @@ name: pt-download
 description: 搜索 PT 站资源并添加到 qBittorrent 下载，或查看下载进度。当用户想看/下载影视、动漫等资源（如"我想看xxx电影"、"帮我下载xxx"），或查询下载进度（如"查看下载"、"下载进度"、"qb状态"）时使用
 allowed-tools:
   - "execute_script"
+  - "run_background_task"
+  - "schedule_continuation"
 user-invocable: true
 ---
 
@@ -12,9 +14,13 @@ user-invocable: true
 
 ## 工作流程
 
-1. **搜索**: 用户说想看某资源时，执行搜索脚本
+1. **搜索**: 用户说想看某资源时，执行搜索脚本（快速操作，直接在当前对话完成）
 2. **选择**: 向用户展示搜索结果
-3. **下载**: 用户选择序号后，判断资源类型，调用下载脚本时传入 `--category` 参数
+3. **添加**: 用户选择序号后，**在当前对话中直接调用 `qb_add.py` 添加下载**（秒级完成，不需要后台）
+4. **监控**: 添加成功后，**使用 `run_background_task`（action=start）提交后台监控任务**
+   - task_description 示例："监控 qBittorrent 中「Oppenheimer.2023.1080p...」的下载进度，每3分钟检查一次，完成后汇报文件信息（文件名、大小、路径）"
+5. 告知用户"已添加下载任务，完成后通知你"
+6. 后台任务中通过 `schedule_continuation` 定时查进度 → 完成后汇报
 
 ## category 参数
 
@@ -65,7 +71,7 @@ execute_script(skill_name="pt-download", script_path="scripts/qb_list.py")
 
 ```
 用户：我想看奥本海默
-AI：[执行搜索]
+AI：[执行搜索 - 当前对话完成]
     🔍 找到3个结果：
     1. [北洋园] Oppenheimer.2023.1080p... (18GB) | 做种: 45
     2. [audiences] Oppenheimer.2023.2160p... (45GB) | 做种: 12
@@ -73,10 +79,21 @@ AI：[执行搜索]
     回复序号下载
 
 用户：下载第1个
-AI：[执行 qb_add.py --category movie]
+AI：[执行 qb_add.py - 当前对话完成]
     ✅ 已添加下载任务
     🏷️ 分类: 电影
     📌 来源: 北洋园
+    然后调用 run_background_task 提交后台监控
+    🔍 将在后台监控下载进度，完成后通知你
+
+[几分钟后，下载完成，自动推送通知]
+
+AI：  📋 后台任务执行完成
+     任务: 监控 qBittorrent 中「Oppenheimer.2023.1080p...」的下载进度
+     ✅ 下载完成
+     📁 文件名: Oppenheimer.2023.1080p.BluRay.x264
+     📦 大小: 18 GB
+     📂 路径: /downloads/movie/Oppenheimer.2023.1080p.BluRay.x264
 ```
 
 ## 注意事项
