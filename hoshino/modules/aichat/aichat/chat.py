@@ -7,13 +7,13 @@ from loguru import logger
 
 from hoshino import Bot, Event
 from hoshino.util import aiohttpx, get_event_imageurl, truncate_log, log_json
-from hoshino.util.message_util import extract_images_from_reply, send_group_forward_msg
-from hoshino import MessageSegment
+from hoshino.util.message_util import extract_images_from_reply
 
 from .api import api_manager
 from .config import Config
 from .md_render import strip_thinking_tags
 from .persona import persona_manager
+from ._send_util import send_ai_response
 from .session import session_manager, ChatResult, Session, parse_choices_from_response, format_choices_for_display
 from .shortcuts import shortcuts_manager
 
@@ -63,41 +63,13 @@ async def send_response(
     markdown_min_length: int = 100,
 ) -> bool:
     """统一发送 AI 回复内容，支持 Markdown 渲染、图片提取和图片标识符"""
-    if not content or not content.strip():
-        return False
-    
-    # 构建消息列表（根据 Markdown 设置采用不同策略）
-    messages = await session.build_message(
-        content,
+    return await send_ai_response(
+        content, session,
+        group_id=getattr(event, 'group_id', None),
+        user_id=event.user_id,
         enable_markdown=enable_markdown,
-        markdown_min_length=markdown_min_length
+        markdown_min_length=markdown_min_length,
     )
-    
-    messages = [m for m in messages if m]
-    if not messages:
-        return False
-    
-    group_id: Optional[int] = getattr(event, 'group_id', None)
-    
-    if group_id and len(messages) > 1:
-        try:
-            msg_segments: List[MessageSegment] = []
-            for msg in messages:
-                msg_segments.extend(msg)
-            await send_group_forward_msg(bot, group_id, msg_segments)
-            return True
-        except Exception as e:
-            logger.warning(f"转发消息发送失败，降级为逐条发送: {e}")
-    
-    success_count = 0
-    for i, msg in enumerate(messages):
-        try:
-            await bot.send(event, msg)
-            success_count += 1
-        except Exception as e:
-            logger.error(f"发送第 {i+1}/{len(messages)} 条消息失败: {e}")
-    
-    return success_count > 0
 
 
 async def handle_ai_chat(bot: Bot, event: Event):

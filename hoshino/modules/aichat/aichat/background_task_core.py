@@ -13,9 +13,9 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from loguru import logger
 from pydantic import BaseModel
 
-from hoshino import get_bot_list, MessageSegment
 from hoshino import userdata_dir
 
+from ._send_util import send_ai_response
 from .api import api_manager
 from .config import Config
 
@@ -282,33 +282,13 @@ class BackgroundTaskManager:
 
     async def _send_result(self, task: BackgroundTask, content: str, session):
         try:
-            bots = get_bot_list()
-            if not bots:
-                logger.warning("没有可用的 Bot，无法发送后台任务结果")
-                return
-
-            bot = bots[0]
-
-            # 构建完整消息（处理图片标识符和 Markdown 渲染）
-            content_messages = []
-            if session:
-                content_messages = await session.build_message(
-                    content,
-                    enable_markdown=conf.enable_markdown_render,
-                    markdown_min_length=conf.markdown_min_length,
-                )
-
-            # 确保有内容可发
-            if not content_messages:
-                content_messages = [MessageSegment.text(content)]
-
-            # 发送所有消息
-            if task.group_id:
-                for msg in content_messages:
-                    await bot.send_group_msg(group_id=task.group_id, message=msg)
-            else:
-                for msg in content_messages:
-                    await bot.send_private_msg(user_id=task.user_id, message=msg)
+            await send_ai_response(
+                content, session,
+                group_id=task.group_id,
+                user_id=task.user_id,
+                enable_markdown=conf.enable_markdown_render,
+                markdown_min_length=conf.markdown_min_length,
+            )
 
         except Exception as e:
             logger.exception(f"发送后台任务结果失败: {e}")

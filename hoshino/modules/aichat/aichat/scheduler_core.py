@@ -12,7 +12,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from hoshino.schedule import scheduler, add_job
-from hoshino import get_bot_list, Message, MessageSegment
+
+from ._send_util import send_ai_response
 
 from .config import Config
 from .api import api_manager
@@ -220,55 +221,17 @@ class TaskManager:
     
     async def _send_result(self, task: ScheduledTask, content: str, session):
         try:
-            bots = get_bot_list()
-            if not bots:
-                logger.warning("没有可用的 Bot，无法发送结果")
-                return
-            
-            bot = bots[0]
-            
-            logger.debug(f"[Scheduler] 发送任务结果: task_id={task.id}, silent={task.silent}, mention_user={task.mention_user}")
-            
-            # 构建完整消息（处理图片标识符和 Markdown 渲染）
-            content_messages = await session.build_message(
-                content,
+            logger.debug(f"[Scheduler] 发送任务结果: task_id={task.id}, mention_user={task.mention_user}")
+
+            await send_ai_response(
+                content, session,
+                group_id=task.group_id,
+                user_id=task.user_id,
                 enable_markdown=conf.enable_markdown_render,
-                markdown_min_length=conf.markdown_min_length
+                markdown_min_length=conf.markdown_min_length,
+                at_user_id=task.user_id if task.mention_user and task.group_id else None,
             )
-            
-            # 构建任务报告框架
-            if task.silent:
-                # 静默模式：直接发送内容消息
-                final_messages = content_messages
-            else:
-                # 非静默模式：添加报告框架到第一条消息
-                report_text = f"📋 定时任务执行结果\n任务: {task.raw_description[:50]}{'...' if len(task.raw_description) > 50 else ''}\n\n"
-                report_msg = MessageSegment.text(report_text)
-                
-                final_messages = []
-                for i, content_msg in enumerate(content_messages):
-                    if i == 0:
-                        # 第一条消息添加报告框架（使用 + 拼接）
-                        final_messages.append(report_msg + content_msg)
-                    else:
-                        final_messages.append(content_msg)
-            
-            # 添加 @ 提醒（只在第一条消息添加，使用 + 拼接）
-            if task.mention_user and task.group_id and final_messages:
-                try:
-                    at_prefix = MessageSegment.at(task.user_id) + MessageSegment.text(" ")
-                    final_messages[0] = at_prefix + final_messages[0]
-                except Exception as e:
-                    logger.warning(f"构造 @ 消息失败: {e}")
-            
-            # 发送所有消息
-            if task.group_id:
-                for msg in final_messages:
-                    await bot.send_group_msg(group_id=task.group_id, message=msg)
-            else:
-                for msg in final_messages:
-                    await bot.send_private_msg(user_id=task.user_id, message=msg)
-                
+
         except Exception as e:
             logger.exception(f"发送任务结果失败: {e}")
     
