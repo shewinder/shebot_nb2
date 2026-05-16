@@ -8,11 +8,8 @@ from loguru import logger
 from .config import Config
 from ._image_store import ImageStore, ImageEntry
 from .skills import skill_manager
-from hoshino import Message, MessageSegment
-from hoshino.sres import Res
 
 from .mcp import mcp_tool_bridge, get_mcp_session_manager
-from .md_render import render_text_if_markdown
 
 conf = Config.get_instance('aichat')
 
@@ -112,115 +109,33 @@ class Session:
     def resolve_image_identifier(self, identifier: str) -> Optional[str]:
         return self._image_store.get_data_url(identifier)
     
-    async def get_image_segment(self, identifier: str) -> Optional["MessageSegment"]:
-        """根据标识符获取图片 MessageSegment"""
-        entry = self._image_store.get(identifier)
-        if not entry or not entry.file_path.exists():
-            return None
-        try:
-            return Res.image(entry.file_path)
-        except Exception:
-            return None
-    
     def list_images(self) -> List[ImageEntry]:
         """列出当前会话所有图像（供 Skill 脚本使用）"""
         return self._image_store.list_all()
-    
-    async def build_message(
-        self,
-        content: str,
-        enable_markdown: bool = False,
-        markdown_min_length: int = 100
-    ) -> "List[Message]":
-        """构建消息对象列表
-        
-        根据是否启用 Markdown，采用不同的处理策略：
-        
-        **未启用 Markdown**：图文混合，标识符替换为图片
-        - 返回单个 Message，包含文本和图片段
-        
-        **启用 Markdown**：分离处理
-        - 文本部分走 Markdown 渲染（返回渲染后的图片或原文本）
-        - 标识符图片单独提取，各自作为独立 Message
-        - 返回 Message 列表
-        
-        Args:
-            content: 原始内容，可能包含图片标识符
-            enable_markdown: 是否启用 Markdown 渲染
-            markdown_min_length: Markdown 渲染的最小文本长度
-        
-        Returns:
-            Message 列表（未启用 Markdown 时长度为1，启用时可能多个）
-        """
-        IMAGE_PATTERN = re.compile(r'<(user_image_\d+|ai_image_\d+)>')
-        identifiers = IMAGE_PATTERN.findall(content)
-        clean_text = IMAGE_PATTERN.sub('', content).strip()
-        
-        # 获取所有图片段
-        image_segments = []
-        for identifier in identifiers:
-            img_seg = await self.get_image_segment(identifier)
-            if img_seg:
-                image_segments.append(img_seg)
-        
-        if not enable_markdown:
-            # 图片数量较多时(>3张)分批发送，避免QQ协议超时
-            if len(image_segments) > 3:
-                messages = []
-                if clean_text:
-                    messages.append(Message(MessageSegment.text(clean_text)))
-                for img_seg in image_segments:
-                    messages.append(Message(img_seg))
-                return messages
-            else:
-                msg = Message()
-                if clean_text:
-                    msg = MessageSegment.text(clean_text)
-                for img_seg in image_segments:
-                    msg = msg + img_seg if msg else img_seg
-                return [msg] if msg else []
-        
-        # 模式2：启用 Markdown，分离处理
-        messages = []
-        
-        # 处理文本（Markdown 渲染）
-        if clean_text:
-            text_msg = None
-            if len(clean_text) >= markdown_min_length:
-                try:
-                    img_bytes = await render_text_if_markdown(clean_text, min_length=markdown_min_length)
-                    if img_bytes:
-                        text_msg = MessageSegment.image(file=img_bytes)
-                except Exception:
-                    pass
-            
-            if not text_msg:
-                text_msg = MessageSegment.text(clean_text)
-            
-            messages.append(Message(text_msg))
-        
-        # 每个图片作为独立 Message
-        for img_seg in image_segments:
-            messages.append(Message(img_seg))
-        
-        return messages
-    
+
     @staticmethod
     def build_image_rules_prompt() -> str:
-        """构建图片发送规则提示（固定内容，用于系统消息）"""
+        """构建多媒体发送规则提示（固定内容，用于系统消息）"""
         return """
-【图片发送规则】
-当需要向用户展示图片时，请遵循以下规则：
+【多媒体发送规则】
+当需要向用户展示图片、@用户或戳一戳时，请遵循以下规则：
+
+📷 图片标识符：
 1. 在回复文本中直接写出图片标识符（如 <user_image_1> 或 <ai_image_1>）
 2. 系统会自动检测标识符、发送对应图片，并将标识符从用户看到的文本中移除
 3. 正确示例：
    你回复："这是<user_image_1>，一只可爱的猫"
    用户看到：[图片] + "这是一只可爱的猫"
-4. 错误示例（不要这样做）：
-   "这是你发的图片"（没有标识符，用户看不到图片）
-   "图片在这：<user_image_1>"（标识符会被移除，露出空白）
-5. 不要在同一条回复中重复引用同一个图片标识符，每个标识符在同一条消息中最多出现一次，重复引用会导致图片被系统发送多次
-6. generate_image/edit_image 工具的 image_identifiers 参数仍可使用这些标识符
+4. 不要在同一条回复中重复引用同一个图片标识符
+5. generate_image/edit_image 工具的 image_identifiers 参数仍可使用这些标识符
+
+👤 @用户：
+1. 需要提及/点名某人时，使用 <@QQ号> 格式
+2. 正确示例：
+   你回复："<@12345>早上好" → 用户看到：@某人 早上好
+   你回复："<@12345> <@67890> 请确认" → @两人
+3. 注意：不要虚构 QQ 号，使用 context 中的 user_id
+
 【规则结束】
 """
     
