@@ -20,7 +20,7 @@ from .api import api_manager
 from .config import Config
 
 if TYPE_CHECKING:
-    from .session import ChatResult
+    from .chat_executor import ChatResult
 
 conf = Config.get_instance('aichat')
 aichat_data_dir: Path = userdata_dir.joinpath('aichat')
@@ -203,6 +203,7 @@ class BackgroundTaskManager:
 
     async def _run_task_loop(self, task: BackgroundTask):
         from .session import Session
+        from .chat_executor import ChatExecutor
         from .persona import persona_manager
 
         try:
@@ -238,7 +239,7 @@ class BackgroundTaskManager:
                     f"请执行以下任务：{task.task_description}\n{hint}",
                 )
 
-                result = await session.chat(api_config)
+                result = await ChatExecutor(session).chat(api_config)
 
                 cont = self._check_continuation(result)
                 if not cont:

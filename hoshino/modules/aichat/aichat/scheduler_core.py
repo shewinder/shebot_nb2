@@ -175,6 +175,7 @@ class TaskManager:
         logger.info(f"开始执行任务 {task_id}: {task.raw_description[:50]}")
         
         from .session import Session
+        from .chat_executor import ChatExecutor
         from .persona import persona_manager
         
         api_config = api_manager.get_api_config()
@@ -196,8 +197,7 @@ class TaskManager:
             temp_session.add_message("system", "【系统提示】你正在执行一个已调度的定时任务。请直接完成下面指定的操作，不要创建新的定时任务，也不要向用户询问确认。")
             temp_session.add_message("user", f"请执行以下任务：{task.raw_description}")
             
-            # 调用 chat 执行对话（event=None，复用 session 的环境信息）
-            result = await temp_session.chat(api_config)
+            result = await ChatExecutor(temp_session).chat(api_config)
             
             task.execution_count += 1
             task.last_execution = datetime.now()

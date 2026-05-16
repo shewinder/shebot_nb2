@@ -14,7 +14,8 @@ from .config import Config
 from .md_render import strip_thinking_tags
 from .persona import persona_manager
 from ._send_util import send_ai_response
-from .session import session_manager, ChatResult, Session, parse_choices_from_response, format_choices_for_display
+from .chat_executor import ChatExecutor, ChatResult
+from .session import session_manager, Session, parse_choices_from_response, format_choices_for_display
 from .shortcuts import shortcuts_manager
 
 conf = Config.get_instance('aichat')
@@ -200,8 +201,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
                 markdown_min_length=conf.markdown_min_length
             )
     
-    # 使用 Session 内聚的 chat 方法（自动处理消息构建和工具获取）
-    api_result = await session.chat(
+    api_result = await ChatExecutor(session).chat(
         api_config=api_config,
         bot=bot,
         event=event,
