@@ -9,6 +9,10 @@ from loguru import logger
 
 from hoshino import Message, MessageSegment
 from hoshino.sres import Res
+from hoshino.util import get_bot_list
+from hoshino.util.message_util import send_group_forward_msg
+
+from .md_render import render_text_if_markdown
 
 if TYPE_CHECKING:
     from .session import Session
@@ -115,9 +119,6 @@ async def _build_markdown_messages(
     markdown_min_length: int,
 ) -> List[Message]:
     """Markdown 模式：文本走渲染，图片独立，@ 独立消息"""
-
-    from .md_render import render_text_if_markdown
-
     # 拼接非多媒体 token 的文本
     text_parts = [t for t in tokens if t and not _segment_is_image(t) and not _segment_is_at(t)]
     clean_text = "".join(text_parts).strip()
@@ -178,8 +179,6 @@ async def send_messages(
 
     if group_id and len(messages) > 1:
         try:
-            from hoshino.util.message_util import send_group_forward_msg
-
             msg_segments: List[MessageSegment] = []
             for msg in messages:
                 msg_segments.extend(msg)
@@ -225,8 +224,6 @@ async def send_ai_response(
     """
     if not content or not content.strip():
         return False
-
-    from hoshino import get_bot_list
 
     bots = get_bot_list()
     if not bots:

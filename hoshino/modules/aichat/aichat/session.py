@@ -1,12 +1,14 @@
 """Session 管理模块"""
 import re
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from loguru import logger
 
 from .config import Config
 from ._image_store import ImageStore, ImageEntry
+from .memory import memory_store
 from .skills import skill_manager
 
 from .mcp import mcp_tool_bridge, get_mcp_session_manager
@@ -260,8 +262,6 @@ class Session:
         Args:
             event: 消息事件（优先使用），如为 None 则使用 session 解析的值
         """
-        from datetime import datetime
-        
         attrs = []
         
         # 优先从 event 获取，否则使用 session 解析的值
@@ -353,9 +353,16 @@ class Session:
             active_mcp_servers = mcp_sm.get_active_servers(self.session_id) if mcp_sm else []
             logger.info(f"[MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
 
+        # 子 Agent 模型配置注入
+        if conf.subagent_profiles:
+            lines = ["【可用的子 Agent 模型配置】", "使用 delegate_task 工具时，可通过 profile 参数选择合适的模型："]
+            for p in conf.subagent_profiles:
+                model_name = p.model or (conf.get_api_by_name(p.api).model if p.api and conf.get_api_by_name(p.api) else "默认")
+                lines.append(f"  · {p.name}: {p.description}（{model_name}）")
+            context_parts.append("\n".join(lines))
+
         # 记忆注入
         if conf.enable_memory and self.user_id:
-            from .memory import memory_store
             try:
                 memory_text = await memory_store.get_inject_text(self.user_id, conf.memory_max_inject_length)
                 if memory_text:

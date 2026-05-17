@@ -13,10 +13,11 @@ from pydantic import BaseModel
 
 from hoshino.schedule import scheduler, add_job
 
+from ._agent_runner import run_agent
 from ._send_util import send_ai_response
-
-from .config import Config
 from .api import api_manager
+from .config import Config
+from .persona import persona_manager
 from hoshino import userdata_dir
 
 if TYPE_CHECKING:
@@ -174,10 +175,6 @@ class TaskManager:
         
         logger.info(f"开始执行任务 {task_id}: {task.raw_description[:50]}")
         
-        from .session import Session
-        from .chat_executor import ChatExecutor
-        from .persona import persona_manager
-        
         api_config = api_manager.get_api_config()
         if not api_config:
             logger.error("API 未配置，无法执行任务")
@@ -185,19 +182,17 @@ class TaskManager:
             return
         
         try:
-            # 获取 persona
             persona = persona_manager.get_persona(task.user_id, task.group_id)
-            
-            # 创建独立 Agent Session，使用唯一 ID 避免与用户 session 冲突
-            agent_session_id = f"agent_task_{task.id}_{uuid.uuid4().hex[:6]}"
-            temp_session = Session(agent_session_id, task.user_id,
-                                   persona=persona, group_id=task.group_id)
-            
-            # 明确执行上下文，防止AI误以为是创建定时任务
-            temp_session.add_message("system", "【系统提示】你正在执行一个已调度的定时任务。请直接完成下面指定的操作，不要创建新的定时任务，也不要向用户询问确认。")
-            temp_session.add_message("user", f"请执行以下任务：{task.raw_description}")
-            
-            result = await ChatExecutor(temp_session).chat(api_config)
+
+            result = await run_agent(
+                task=f"请执行以下任务：{task.raw_description}",
+                system_prompt="【系统提示】你正在执行一个已调度的定时任务。请直接完成下面指定的操作，不要创建新的定时任务，也不要向用户询问确认。",
+                user_id=task.user_id,
+                group_id=task.group_id,
+                persona=persona,
+                session_prefix=f"agent_task_{task.id}_{uuid.uuid4().hex[:6]}",
+                api_config=api_config,
+            )
             
             task.execution_count += 1
             task.last_execution = datetime.now()
@@ -211,7 +206,7 @@ class TaskManager:
                 self.save_tasks()
             
             content = result.content if result.content else "任务执行完成，但没有返回内容"
-            await self._send_result(task, content, temp_session)
+            await self._send_result(task, content, None)
             
             if not task.is_one_time:
                 logger.info(f"任务 {task_id} 执行完成")

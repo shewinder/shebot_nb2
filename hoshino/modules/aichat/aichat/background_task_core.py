@@ -15,9 +15,11 @@ from pydantic import BaseModel
 
 from hoshino import userdata_dir
 
+from ._agent_runner import run_agent
 from ._send_util import send_ai_response
 from .api import api_manager
 from .config import Config
+from .persona import persona_manager
 
 if TYPE_CHECKING:
     from .chat_executor import ChatResult
@@ -202,10 +204,6 @@ class BackgroundTaskManager:
         return None
 
     async def _run_task_loop(self, task: BackgroundTask):
-        from .session import Session
-        from .chat_executor import ChatExecutor
-        from .persona import persona_manager
-
         try:
             api_config = api_manager.get_api_config()
             if not api_config or not api_config.get("api_key"):
@@ -225,21 +223,16 @@ class BackgroundTaskManager:
                 else:
                     task.status = "running"
 
-                session = Session(
-                    f"bg_task_{task.id}",
-                    task.user_id,
-                    persona=persona,
-                    group_id=task.group_id,
-                )
-
                 hint = self._build_continuation_prompt(task)
-                session.add_message("system", _BG_SYSTEM_PROMPT)
-                session.add_message(
-                    "user",
-                    f"请执行以下任务：{task.task_description}\n{hint}",
+                result = await run_agent(
+                    task=f"请执行以下任务：{task.task_description}\n{hint}",
+                    system_prompt=_BG_SYSTEM_PROMPT,
+                    user_id=task.user_id,
+                    group_id=task.group_id,
+                    persona=persona,
+                    session_prefix=f"bg_task_{task.id}",
+                    api_config=api_config,
                 )
-
-                result = await ChatExecutor(session).chat(api_config)
 
                 cont = self._check_continuation(result)
                 if not cont:
@@ -247,7 +240,7 @@ class BackgroundTaskManager:
                     task.status = "done"
                     task.completed_at = datetime.now()
                     task.result_summary = (result.content or "")[:500]
-                    await self._send_result(task, result.content or "任务执行完成，但没有返回内容", session)
+                    await self._send_result(task, result.content or "任务执行完成，但没有返回内容", None)
                     self.save()
                     return
 

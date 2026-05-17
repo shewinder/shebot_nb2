@@ -34,6 +34,14 @@ class ApiEntry(BaseModel):
     temperature: Optional[float] = None  # None 表示不传给 API，使用模型默认值
 
 
+class SubAgentProfile(BaseModel):
+    """子 Agent 模型配置"""
+    name: str           # 标识，如 "search" / "vision"
+    api: str = ""       # API 厂商名，空=跟随主 API
+    model: str = ""     # 模型名，空=使用 API 厂商默认模型
+    description: str = ""  # 用途描述（注入提示让 AI 选择）
+
+
 @configuration('aichat')
 class Config(BaseConfig):
     """AI Chat插件配置"""
@@ -91,6 +99,7 @@ class Config(BaseConfig):
     # 工具调用配置
     max_tool_rounds: int = 10           # 单次对话最大工具调用轮数
     subagent_max_rounds: int = 5        # 子 Agent 最大工具调用轮数
+    subagent_profiles: List[SubAgentProfile] = []  # 子 Agent 模型配置
 
     # 记忆系统配置
     enable_memory: bool = True

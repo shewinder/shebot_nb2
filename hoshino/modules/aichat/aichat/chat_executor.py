@@ -45,12 +45,18 @@ class ChatExecutor:
         bot: Optional[Any] = None,
         event: Optional[Any] = None,
         on_content: Optional[Callable[[str], Any]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        max_rounds: Optional[int] = None,
     ) -> "ChatResult":
-        """执行对话调用，自动处理消息构建和工具获取"""
+        """执行对话调用，自动处理消息构建和工具获取
+
+        Args:
+            tools: 显式指定工具列表。None=自动获取全量工具，[]=无工具
+            max_rounds: 最大工具调用轮数。None=使用配置默认值
+        """
         messages = await self.session._build_messages_for_chat(event)
 
-        tools = None
-        if api_config.get("supports_tools", False):
+        if tools is None and api_config.get("supports_tools", False):
             tools = await get_available_tools(session=self.session)
 
         chat_context: Dict[str, Any] = {'session': self.session}
@@ -63,6 +69,7 @@ class ChatExecutor:
             messages=messages,
             api_config=api_config,
             tools=tools,
+            max_tool_rounds=max_rounds,
             context=chat_context,
             on_content=on_content,
         )
