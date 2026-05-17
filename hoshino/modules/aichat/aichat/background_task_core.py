@@ -2,18 +2,17 @@
 
 支持 AI 提交耗时任务到后台执行，任务提交后立即返回，主对话不阻塞。
 支持多轮续查（轮询场景），完成后自动通知用户。
+
+任务仅存在于内存中，重启后不恢复。
 """
 import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 from pydantic import BaseModel
-
-from hoshino import userdata_dir
 
 from ._agent_runner import run_agent
 from ._send_util import send_ai_response
@@ -25,8 +24,6 @@ if TYPE_CHECKING:
     from .chat_executor import ChatResult
 
 conf = Config.get_instance('aichat')
-aichat_data_dir: Path = userdata_dir.joinpath('aichat')
-TASKS_FILE = aichat_data_dir.joinpath('background_tasks.json')
 
 
 _BG_SYSTEM_PROMPT = """【后台执行模式】
@@ -59,61 +56,6 @@ class BackgroundTask(BaseModel):
 class BackgroundTaskManager:
     def __init__(self):
         self.tasks: Dict[str, BackgroundTask] = {}
-
-    def _get_tasks_file(self) -> Path:
-        TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        return TASKS_FILE
-
-    def load(self) -> List[BackgroundTask]:
-        file_path = self._get_tasks_file()
-        if not file_path.exists():
-            logger.info("后台任务文件不存在，创建空任务列表")
-            return []
-
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            tasks = []
-            for task_data in data.get('tasks', []):
-                try:
-                    for field in ['created_at', 'completed_at', 'next_run_at']:
-                        if task_data.get(field):
-                            task_data[field] = datetime.fromisoformat(task_data[field])
-                    if 'max_continuations' not in task_data:
-                        task_data['max_continuations'] = 10
-                    tasks.append(BackgroundTask(**task_data))
-                except Exception as e:
-                    logger.warning(f"加载后台任务失败: {e}, 数据: {task_data}")
-
-            logger.info(f"已加载 {len(tasks)} 个后台任务")
-            return tasks
-        except Exception as e:
-            logger.exception(f"加载后台任务文件失败: {e}")
-            return []
-
-    def save(self):
-        file_path = self._get_tasks_file()
-        try:
-            data = {
-                "version": "1.0",
-                "updated_at": datetime.now().isoformat(),
-                "tasks": []
-            }
-
-            for task in self.tasks.values():
-                task_dict = task.dict()
-                for field in ['created_at', 'completed_at', 'next_run_at']:
-                    if task_dict.get(field):
-                        task_dict[field] = task_dict[field].isoformat()
-                data["tasks"].append(task_dict)
-
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-
-            logger.debug(f"已保存 {len(self.tasks)} 个后台任务")
-        except Exception as e:
-            logger.exception(f"保存后台任务失败: {e}")
 
     def _count_running(self, user_id: int) -> int:
         count = 0
@@ -152,8 +94,6 @@ class BackgroundTaskManager:
         )
 
         self.tasks[task.id] = task
-        self.save()
-
         asyncio.create_task(self._run_task_loop(task))
         logger.info(f"后台任务 {task.id} 已创建: {task_description[:50]}")
 
@@ -170,7 +110,6 @@ class BackgroundTaskManager:
 
         task.status = "cancelled"
         task.completed_at = datetime.now()
-        self.save()
         return True, f"任务 {task_id} 已取消"
 
     def list_tasks(self, user_id: int) -> List[BackgroundTask]:
@@ -211,13 +150,11 @@ class BackgroundTaskManager:
                 task.error = "API 未配置"
                 task.completed_at = datetime.now()
                 await self._send_result(task, "任务执行失败：API 未配置", None)
-                self.save()
                 return
 
             persona = persona_manager.get_persona(task.user_id, task.group_id)
 
             while task.continuation_count < task.max_continuations:
-                # 进入 waiting 后 sleep 到 next_run_at
                 if task.status == "waiting":
                     task.status = "running"
                 else:
@@ -236,21 +173,17 @@ class BackgroundTaskManager:
 
                 cont = self._check_continuation(result)
                 if not cont:
-                    # 没调 schedule_continuation，任务结束
                     task.status = "done"
                     task.completed_at = datetime.now()
                     task.result_summary = (result.content or "")[:500]
                     await self._send_result(task, result.content or "任务执行完成，但没有返回内容", None)
-                    self.save()
                     return
 
-                # 有续查标记，进入 waiting
                 delay = cont.get("delay_minutes", 5)
                 task.status = "waiting"
                 task.continuation_count += 1
                 task.next_run_at = datetime.now() + timedelta(minutes=delay)
                 task.context = cont.get("context", "")
-                self.save()
 
                 logger.info(
                     f"后台任务 {task.id} 进入 waiting，"
@@ -259,12 +192,10 @@ class BackgroundTaskManager:
                 )
                 await asyncio.sleep(delay * 60)
 
-            # 达到最大轮数
             task.status = "failed"
             task.error = f"达到最大续查次数 ({task.max_continuations})"
             task.completed_at = datetime.now()
             await self._send_result(task, "任务超时：达到最大续查次数，请手动检查状态。", None)
-            self.save()
 
         except Exception as e:
             logger.exception(f"后台任务 {task.id} 执行异常: {e}")
@@ -272,7 +203,6 @@ class BackgroundTaskManager:
             task.error = str(e)
             task.completed_at = datetime.now()
             await self._send_result(task, f"任务执行失败: {str(e)}", None)
-            self.save()
 
     async def _send_result(self, task: BackgroundTask, content: str, session):
         try:
@@ -289,15 +219,3 @@ class BackgroundTaskManager:
 
 
 bg_task_manager = BackgroundTaskManager()
-
-
-async def recover_background_tasks():
-    """启动时恢复 waiting 状态的后台任务"""
-    loaded_tasks = bg_task_manager.load()
-    for _task in loaded_tasks:
-        bg_task_manager.tasks[_task.id] = _task
-    waiting_tasks = [t for t in loaded_tasks if t.status == "waiting"]
-    if waiting_tasks:
-        logger.info(f"恢复 {len(waiting_tasks)} 个 waiting 后台任务")
-        for _task in waiting_tasks:
-            asyncio.create_task(bg_task_manager._run_task_loop(_task))

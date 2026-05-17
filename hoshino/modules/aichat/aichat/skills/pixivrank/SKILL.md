@@ -3,7 +3,7 @@ name: pixivrank
 description: 获取 Pixiv 日榜图片并发送给用户
 allowed-tools:
   - "fetch_url"
-  - "send_images"
+  - "store_images"
   - "read_file"
 user-invocable: true
 disable-model_invocation: false
@@ -73,6 +73,6 @@ disable-model_invocation: false
 ## 注意事项
 
 - 图片 URL 必须替换为 `pixiv.shewinder.win`
-- `send_images` 返回 `<ai_image_N>`，在回复中引用
+- `store_images` 返回 `<ai_image_N>`，在回复中引用
 - **回复中不要提及"根据喜好筛选"、"个性化推荐"等字样**，默默进行即可
 - 无画像时发送默认热门作品
