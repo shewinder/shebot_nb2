@@ -15,5 +15,6 @@ from . import store_images
 from . import file_storage
 from . import background_task
 from . import memory_tools
+from . import delegate_task
 
-__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "fetch_url", "store_images", "file_storage", "memory_tools", "background_task"]
+__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "fetch_url", "store_images", "file_storage", "memory_tools", "background_task", "delegate_task"]

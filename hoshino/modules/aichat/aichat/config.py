@@ -90,6 +90,7 @@ class Config(BaseConfig):
 
     # 工具调用配置
     max_tool_rounds: int = 10           # 单次对话最大工具调用轮数
+    subagent_max_rounds: int = 5        # 子 Agent 最大工具调用轮数
 
     # 记忆系统配置
     enable_memory: bool = True

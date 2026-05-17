@@ -5,6 +5,7 @@
 - 工具执行调度
 - 将结果写回 Session
 """
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
@@ -302,7 +303,7 @@ class ChatExecutor:
         for round_num in range(max_tool_rounds):
             logger.debug(f"Tool calling 第 {round_num + 1} 轮")
 
-            if round_num > 0 and api_config.get("supports_tools", False):
+            if round_num > 0 and api_config.get("supports_tools", False) and not getattr(self.session, '_subagent_locked_tools', False):
                 tools = await get_available_tools(session=self.session)
                 logger.debug(f"[MCP] 第 {round_num + 1} 轮重新获取工具，共 {len(tools) if tools else 0} 个")
 
@@ -339,8 +340,13 @@ class ChatExecutor:
             current_messages.append(assistant_message)
             self.session.add_raw_message(assistant_message)
 
-            for tool_call in tool_calls:
-                tool_result = await self._execute_tool_call(tool_call, context=context)
+            # 并行执行所有独立工具调用
+            async def _run_one(tc):
+                return tc, await self._execute_tool_call(tc, context=context)
+
+            results = await asyncio.gather(*[_run_one(tc) for tc in tool_calls])
+
+            for tool_call, tool_result in results:
                 all_tool_results.append({
                     "tool_call": tool_call,
                     "result": tool_result
