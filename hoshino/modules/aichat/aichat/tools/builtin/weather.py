@@ -3,6 +3,7 @@ AI 工具：天气查询
 使用高德地图 API 查询实时天气和天气预报
 """
 import asyncio
+import os
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -10,10 +11,6 @@ from loguru import logger
 from hoshino.util import aiohttpx
 
 from ..registry import tool_registry, ok, fail
-from ...config import Config
-
-# 加载配置
-conf = Config.get_instance('aichat')
 
 
 async def _get_city_code(city_name: str, api_key: str) -> Optional[str]:
@@ -104,7 +101,7 @@ async def _get_weather_data(city_code: str, api_key: str, extensions: str) -> Op
 async def get_weather(city: str) -> Dict[str, Any]:
     """查询天气信息"""
     try:
-        gaode_key = getattr(conf, 'gaode_api_key', '')
+        gaode_key = os.getenv("GAODE_API_KEY", "")
         if not gaode_key:
             return fail("天气服务未配置，请联系管理员设置高德地图 API Key")
         

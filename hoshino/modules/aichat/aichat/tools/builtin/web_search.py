@@ -3,6 +3,7 @@ AI 工具：网页搜索
 使用阿里云百炼 IQS (信息查询服务) 搜索网页内容
 文档: https://help.aliyun.com/zh/document_detail/2883041.html
 """
+import os
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -10,10 +11,6 @@ from loguru import logger
 from hoshino.util import aiohttpx
 
 from ..registry import tool_registry, ok, fail
-from ...config import Config
-
-# 加载配置
-conf = Config.get_instance('aichat')
 
 # IQS API 配置
 IQS_API_BASE = "https://cloud-iqs.aliyuncs.com"
@@ -208,7 +205,7 @@ async def web_search(
     """
     try:
         # 获取 API Key
-        api_key = getattr(conf, 'iqs_api_key', '')
+        api_key = os.getenv("IQS_API_KEY", "")
         if not api_key:
             return fail("搜索服务未配置，请联系管理员设置阿里云 IQS API Key")
         
