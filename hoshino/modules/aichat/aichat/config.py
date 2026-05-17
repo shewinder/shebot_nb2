@@ -39,6 +39,7 @@ class SubAgentProfile(BaseModel):
     name: str           # 标识，如 "search" / "vision"
     api: str = ""       # API 厂商名，空=跟随主 API
     model: str = ""     # 模型名，空=使用 API 厂商默认模型
+    supports_multimodal: Optional[bool] = None  # 覆盖 API 厂商的多模态设置
     description: str = ""  # 用途描述（注入提示让 AI 选择）
 
 

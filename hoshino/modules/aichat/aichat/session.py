@@ -84,7 +84,12 @@ class Session:
         self.total_tokens: int = 0
         self.user_id = user_id
         self.group_id = group_id
-    
+        self.agent_label: str = "main"  # 日志标识：main / sub:vision / sub:search
+
+    @property
+    def _tag(self) -> str:
+        return f"[Agent:{self.agent_label}]"
+
     def _append_message(self, message: Dict[str, Any]) -> None:
         """追加消息到历史"""
         self.messages.append(message)
@@ -223,7 +228,7 @@ class Session:
         
         self.active_skills.add(skill_name)
         self.last_active = time.time()
-        logger.info(f"Session {self.session_id} 激活 SKILL: {skill_name}")
+        logger.info(f"{self._tag} Session 激活 SKILL: {skill_name}")
         return True, f"SKILL '{skill_name}' 已激活", skill.content
     
     def deactivate_skill(self, skill_name: str) -> bool:
@@ -329,32 +334,32 @@ class Session:
             skill_summary = skill_manager.get_metadata_summary()
             if skill_summary:
                 context_parts.append(skill_summary)
-                logger.debug(f"[SKILL] 可用 SKILL 列表已注入")
+                logger.debug(f"{self._tag} [SKILL] 可用 SKILL 列表已注入")
 
             active_skills = self.active_skills
-            logger.info(f"[SKILL] 当前会话已激活 SKILL: {active_skills if active_skills else '无'}")
+            logger.info(f"{self._tag} [SKILL] 当前会话已激活 SKILL: {active_skills if active_skills else '无'}")
 
             skill_content = skill_manager.get_injected_content(self.active_skills)
             if skill_content:
                 content_preview = skill_content[:500] + "..." if len(skill_content) > 500 else skill_content
-                logger.info(f"[SKILL] 注入内容预览:\n{content_preview}")
+                logger.info(f"{self._tag} [SKILL] 注入内容预览:\n{content_preview}")
                 context_parts.append(skill_content)
             else:
-                logger.info(f"[SKILL] 没有需要注入的 SKILL 内容")
+                logger.info(f"{self._tag} [SKILL] 没有需要注入的 SKILL 内容")
 
         # MCP 内容注入
         if conf.enable_mcp:
             mcp_summary = mcp_tool_bridge.get_metadata_summary()
             if mcp_summary:
                 context_parts.append(mcp_summary)
-                logger.debug("[MCP] MCP server 摘要已注入")
+                logger.debug(f"{self._tag} [MCP] MCP server 摘要已注入")
 
             mcp_sm = get_mcp_session_manager()
             active_mcp_servers = mcp_sm.get_active_servers(self.session_id) if mcp_sm else []
-            logger.info(f"[MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
+            logger.info(f"{self._tag} [MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
 
-        # 子 Agent 模型配置注入
-        if conf.subagent_profiles:
+        # 子 Agent 模型配置注入（仅主 Agent 可见，子 Agent 不需要知道）
+        if conf.subagent_profiles and self.agent_label == "main":
             lines = ["【可用的子 Agent 模型配置】", "使用 delegate_task 工具时，可通过 profile 参数选择合适的模型："]
             for p in conf.subagent_profiles:
                 model_name = p.model or (conf.get_api_by_name(p.api).model if p.api and conf.get_api_by_name(p.api) else "默认")
@@ -367,7 +372,7 @@ class Session:
                 memory_text = await memory_store.get_inject_text(self.user_id, conf.memory_max_inject_length)
                 if memory_text:
                     context_parts.append(f"【关于该用户的历史记忆】\n{memory_text}")
-                    logger.debug(f"[Memory] 已注入记忆，长度: {len(memory_text)}")
+                    logger.debug(f"{self._tag} [Memory] 已注入记忆，长度: {len(memory_text)}")
             except Exception as e:
                 logger.warning(f"[Memory] 注入记忆失败: {e}")
 

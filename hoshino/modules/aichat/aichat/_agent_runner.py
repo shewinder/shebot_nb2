@@ -40,6 +40,8 @@ def _resolve_api_config(profile_name: Optional[str] = None) -> Optional[Dict[str
             api_dict = _build_api_config_dict(entry)
             if target.model:
                 api_dict["model"] = target.model
+            if target.supports_multimodal is not None:
+                api_dict["supports_multimodal"] = target.supports_multimodal
             return api_dict
 
     return api_config
@@ -111,12 +113,14 @@ async def run_agent(
     if not api_config or not api_config.get("api_key"):
         return ChatResult(error="API 未配置")
 
+    label = f"sub:{profile}" if profile else "sub"
     session = Session(
         f"{session_prefix}_{user_id}",
         user_id,
         persona=persona,
         group_id=group_id,
     )
+    session.agent_label = label
     if locked_tools:
         session._subagent_locked_tools = True
 

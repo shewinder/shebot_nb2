@@ -39,6 +39,11 @@ class ChatExecutor:
     def __init__(self, session: "Session"):
         self.session = session
 
+    @property
+    def _tag(self) -> str:
+        label = getattr(self.session, 'agent_label', 'main')
+        return f"[Agent:{label}]"
+
     async def chat(
         self,
         api_config: Dict[str, Any],
@@ -139,21 +144,21 @@ class ChatExecutor:
         if "tool_choice" in payload:
             log_payload["tool_choice"] = payload["tool_choice"]
 
-        logger.info(f"调用 AI API: URL={url}, Payload: {log_json(truncate_log(log_payload))}")
+        logger.info(f"{self._tag} 调用 AI API: URL={url}, Payload: {log_json(truncate_log(log_payload))}")
 
         try:
             resp = await aiohttpx.post(url, headers=headers, json=payload)
             if not resp.ok:
                 error_text = truncate_log(resp.text) if hasattr(resp, 'text') else 'unknown'
-                logger.error(f"AI API 调用失败: {resp.status_code}, 响应: {error_text}")
-                return {"error": f"HTTP {resp.status_code}", "content": None}
+                logger.error(f"{self._tag} AI API 调用失败: {resp.status_code}, 响应: {error_text}")
+                return {"error": error_text, "content": None}
 
             result = resp.json
             if not result:
                 logger.error("AI API 返回空结果")
                 return {"error": "返回空结果", "content": None}
 
-            logger.info(f"AI API 响应: {log_json(result)}")
+            logger.info(f"{self._tag} AI API 响应: {log_json(result)}")
 
             if "choices" in result and len(result["choices"]) > 0:
                 choice = result["choices"][0]
@@ -194,7 +199,7 @@ class ChatExecutor:
         function_name = function_info.get("name", "")
         arguments_str = function_info.get("arguments", "{}")
 
-        logger.info(f"执行工具: {function_name}, args: {truncate_log(arguments_str)}")
+        logger.info(f"{self._tag} 执行工具: {function_name}, args: {truncate_log(arguments_str)}")
 
         try:
             arguments = json.loads(arguments_str)
@@ -308,11 +313,11 @@ class ChatExecutor:
         total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         for round_num in range(max_tool_rounds):
-            logger.debug(f"Tool calling 第 {round_num + 1} 轮")
+            logger.debug(f"{self._tag} Tool calling 第 {round_num + 1} 轮")
 
             if round_num > 0 and api_config.get("supports_tools", False) and not getattr(self.session, '_subagent_locked_tools', False):
                 tools = await get_available_tools(session=self.session)
-                logger.debug(f"[MCP] 第 {round_num + 1} 轮重新获取工具，共 {len(tools) if tools else 0} 个")
+                logger.debug(f"{self._tag} [MCP] 第 {round_num + 1} 轮重新获取工具，共 {len(tools) if tools else 0} 个")
 
             result = await self._call_ai_api(current_messages, api_config, tools=tools)
 
@@ -370,7 +375,7 @@ class ChatExecutor:
                             logger.info(f"工具调用 stderr:\n{metadata['stderr']}")
                 except Exception:
                     pass
-                logger.info(f"工具调用结果: {truncate_log(tool_result['content'])}")
+                logger.info(f"{self._tag} 工具调用结果: {truncate_log(tool_result['content'])}")
 
         logger.warning(f"达到最大工具调用轮数限制: {max_tool_rounds}")
         return ChatResult(
