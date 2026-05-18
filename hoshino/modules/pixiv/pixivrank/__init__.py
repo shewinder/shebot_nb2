@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import json
 import os
 import re
 from io import BytesIO
@@ -17,6 +18,7 @@ from hoshino import (
     hsn_config,
     scheduled_job,
     sucmd,
+    userdata_dir,
 )
 from hoshino.log import logger
 from hoshino.sres import Res as R
@@ -28,6 +30,7 @@ from PIL import Image, ImageFont, ImageDraw
 from hoshino.modules.aichat.aichat.session import Session
 from hoshino.modules.aichat.aichat.api import api_manager
 from hoshino.modules.aichat.aichat.persona import persona_manager
+from hoshino.modules.aichat.aichat.chat_executor import ChatExecutor
 
 from .config import Config
 from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic
@@ -49,6 +52,82 @@ _raw_rank_r18: List[RankPic] = []
 # 各群筛选后的榜单
 _group_ranks: Dict[int, List[RankPic]] = {}
 _group_ranks_r18: Dict[int, List[RankPic]] = {}
+
+
+def _rank_data_dir():
+    d = userdata_dir.joinpath('pixiv')
+    if not d.exists():
+        d.mkdir(parents=True)
+    return d
+
+
+def _pic_to_dict(p: RankPic) -> dict:
+    return {
+        "pid": p.pid,
+        "url": p.url,
+        "tags": p.tags,
+        "score": p.score,
+        "page_count": p.page_count,
+        "author": p.author,
+        "author_id": p.author_id,
+        "urls": p.urls,
+        "title": p.title,
+    }
+
+
+def _dict_to_pic(d: dict) -> RankPic:
+    return RankPic(
+        pid=d["pid"],
+        url=d["url"],
+        tags=d["tags"],
+        score=d.get("score", 0),
+        page_count=d.get("page_count", 1),
+        author=d["author"],
+        author_id=d["author_id"],
+        urls=d.get("urls", [d["url"]]),
+        title=d.get("title", ""),
+    )
+
+
+def _save_rank_data():
+    yesterday = str(datetime.date.today() - datetime.timedelta(days=1))
+    for key, raw_pics, group_ranks, label in [
+        ("pixiv_rank.json", _raw_rank, _group_ranks, "日榜"),
+        ("pixiv_rank_r18.json", _raw_rank_r18, _group_ranks_r18, "R18日榜"),
+    ]:
+        p = _rank_data_dir().joinpath(key)
+        data = {
+            "date": yesterday,
+            "raw": [_pic_to_dict(x) for x in raw_pics],
+            "groups": {
+                str(gid): [_pic_to_dict(x) for x in pics]
+                for gid, pics in group_ranks.items()
+            },
+        }
+        p.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        logger.info(f"{label}数据已持久化: raw={len(raw_pics)}, groups={len(group_ranks)}")
+
+
+def _load_rank_data():
+    for key, raw_target, group_target, label in [
+        ("pixiv_rank.json", _raw_rank, _group_ranks, "日榜"),
+        ("pixiv_rank_r18.json", _raw_rank_r18, _group_ranks_r18, "R18日榜"),
+    ]:
+        p = _rank_data_dir().joinpath(key)
+        if not p.exists():
+            continue
+        try:
+            data = json.loads(p.read_text())
+            for pic_data in data.get("raw", []):
+                raw_target.append(_dict_to_pic(pic_data))
+            for gid_str, pic_list in data.get("groups", {}).items():
+                group_target[int(gid_str)] = [_dict_to_pic(x) for x in pic_list]
+            logger.info(f"从磁盘加载{label}数据: raw={len(raw_target)}, groups={len(group_target)}")
+        except Exception as e:
+            logger.warning(f"加载{label}数据失败: {e}")
+
+
+_load_rank_data()
 
 
 async def _download_image_to_base64(image_url: str) -> Optional[str]:
@@ -82,29 +161,36 @@ async def _download_image_to_base64(image_url: str) -> Optional[str]:
 async def _implicit_preference_update(
     bot: Bot, event: GroupMessageEvent, pic: RankPic, is_r18: bool
 ):
-    """后台任务：隐式调用 aichat 更新用户画像"""
-    try:
-        user_id = event.user_id
-        group_id = event.group_id
+    """后台任务：静默调用 aichat 更新用户画像，不向用户发送任何消息"""
+    user_id = event.user_id
+    group_id = event.group_id
+    label = f"[preference] user={user_id} pid={pic.pid}"
 
+    try:
         api_config = api_manager.get_api_config()
         if not api_config or not api_config.get("api_key"):
+            logger.info(f"{label} 跳过: 无可用 API 配置")
             return
 
-        # 创建独立 Session（不干扰用户的正常对话历史）
+        logger.info(f"{label} 开始隐式偏好更新")
+
         session_id = f"private_{user_id}_pixivrank"
         persona = persona_manager.get_persona(user_id, group_id)
         session = Session(session_id, user_id, persona=persona, group_id=group_id)
+        logger.info(f"{label} Session 已创建 (persona_len={len(persona or '')})")
 
-        # 激活 image_preference skill
-        session.activate_skill("image_preference")
+        ok, msg, _ = session.activate_skill("image_preference")
+        logger.info(f"{label} 激活 image_preference: {msg}")
 
-        # 下载图片为 base64
         img_url = pic.url.replace("i.pximg.net", "pixiv.shewinder.win")
         base64_image = await _download_image_to_base64(img_url)
+        if base64_image:
+            logger.info(f"{label} 图片下载成功 ({len(base64_image)} chars)")
+        else:
+            logger.warning(f"{label} 图片下载失败，降级为纯文本")
 
-        # 构造消息
         tags_str = ", ".join(pic.tags[:10])
+        supports_multimodal = api_config.get("supports_multimodal", False) and base64_image
         text = (
             f"#图片点评\n"
             f"标题:{pic.title}\n"
@@ -116,7 +202,7 @@ async def _implicit_preference_update(
             f"则仅作为中性浏览记录处理，不要强化偏好。"
         )
 
-        if base64_image and api_config.get("supports_multimodal", False):
+        if supports_multimodal:
             message_content = [
                 {"type": "text", "text": text},
                 {"type": "image_url", "image_url": {"url": base64_image}},
@@ -126,17 +212,21 @@ async def _implicit_preference_update(
             message_content = text
 
         session.add_message("user", message_content)
+        logger.info(f"{label} 消息已加入 Session (multimodal={supports_multimodal})")
 
-        # 执行对话，on_content=None 确保不发送中间内容
-        await session.chat(
+        # on_content=None: 不向用户流式输出任何内容
+        # 返回值忽略: 仅用于更新偏好文件，不回复消息
+        result = await ChatExecutor(session).chat(
             api_config=api_config,
             bot=bot,
             event=event,
             on_content=None,
         )
+        logger.info(f"{label} 对话完成 (content_len={len(result.content or '')}, "
+                    f"error={result.error}, usage={result.usage})")
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"{label} 异常: {e}")
 
 
 def get_text_size(font, text):
@@ -355,11 +445,13 @@ async def _(bot: Bot, event: GroupMessageEvent):
 @scheduled_job("cron", hour=conf.hour, minute=conf.minute + 1, id="pixiv日榜")
 async def pixiv_rank():
     await send_rank(sv, _raw_rank, is_r18=False)
+    _save_rank_data()
 
 
 @scheduled_job("cron", hour=conf.hour, minute=conf.minute + 5, id="pixiv日榜r18")
 async def pixiv_rank_r18():
     await send_rank(sv_r18, _raw_rank_r18, is_r18=True)
+    _save_rank_data()
 
 
 def _get_superuser_id() -> str:
@@ -391,6 +483,7 @@ async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
     _group_ranks_r18.clear()
 
     save_score_data()
+    _save_rank_data()
 
 
 sucmd("更新日榜").handle()(update_rank)
@@ -400,6 +493,7 @@ sucmd("更新日榜").handle()(update_rank)
 async def _(bot: Bot, event: GroupMessageEvent):
     await send_rank(sv, _raw_rank, gids=[event.group_id], is_r18=False)
     await send_rank(sv_r18, _raw_rank_r18, gids=[event.group_id], is_r18=True)
+    _save_rank_data()
 
 
 scheduled_job("cron", hour=conf.hour, minute=conf.minute, id="pixiv日榜数据更新")(update_rank)
