@@ -3,6 +3,7 @@ import base64
 import datetime
 import json
 import os
+from pathlib import Path
 import re
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
@@ -59,6 +60,35 @@ def _rank_data_dir():
     if not d.exists():
         d.mkdir(parents=True)
     return d
+
+
+def _rank_log_dir(date_str: str = None) -> Path:
+    if date_str is None:
+        date_str = str(datetime.date.today())
+    d = _rank_data_dir().joinpath('rank_logs', date_str)
+    if not d.exists():
+        d.mkdir(parents=True)
+    return d
+
+
+def _save_rank_log(group_id: int, log: dict, suffix: str = ""):
+    """保存群日榜筛选日志"""
+    date_str = str(datetime.date.today())
+    log["timestamp"] = datetime.datetime.now().isoformat()
+    log["group_id"] = group_id
+    name = f"{group_id}{suffix}.json"
+    p = _rank_log_dir(date_str).joinpath(name)
+    p.write_text(json.dumps(log, ensure_ascii=False, indent=2))
+    logger.info(f"群 {group_id}{suffix} 筛选日志已保存: {p}")
+
+
+def _read_rank_log(group_id: int, date_str: str, suffix: str = "") -> Optional[dict]:
+    """读取指定日期的群筛选日志"""
+    name = f"{group_id}{suffix}.json"
+    p = _rank_log_dir(date_str).joinpath(name)
+    if p.exists():
+        return json.loads(p.read_text())
+    return None
 
 
 def _pic_to_dict(p: RankPic) -> dict:
@@ -337,7 +367,7 @@ async def send_rank(sv: Service, raw_pics: List[RankPic], gids: List[int] = None
 
     for gid in gids:
         # 每个群独立筛选
-        pics = await filter_rank_ai(raw_pics, group_id=gid, bot=bot)
+        pics, filter_log = await filter_rank_ai(raw_pics, group_id=gid, bot=bot)
 
         if not pics:
             sv.logger.warning(f"群{gid} 筛选结果为空，跳过发送")
@@ -359,6 +389,9 @@ async def send_rank(sv: Service, raw_pics: List[RankPic], gids: List[int] = None
             await bot.send_group_msg(group_id=gid, message=R.image_from_memory(preview_modified))
             sv.logger.info(f"群{gid} 投递成功！")
             sent_pids.extend(p.pid for p in pics)
+            if filter_log:
+                filter_log["is_r18"] = is_r18
+                _save_rank_log(gid, filter_log, suffix="_r18" if is_r18 else "")
         except Exception as e:
             sv.logger.exception(e)
 
@@ -396,7 +429,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     gid = event.group_id
     rank_list = _group_ranks.get(gid)
     if not rank_list and _raw_rank:
-        rank_list = await filter_rank_ai(_raw_rank, group_id=gid, bot=bot)
+        rank_list, _ = await filter_rank_ai(_raw_rank, group_id=gid, bot=bot)
         _group_ranks[gid] = rank_list
 
     if not rank_list:
@@ -430,7 +463,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     gid = event.group_id
     rank_list = _group_ranks_r18.get(gid)
     if not rank_list and _raw_rank_r18:
-        rank_list = await filter_rank_ai(_raw_rank_r18, group_id=gid, bot=bot)
+        rank_list, _ = await filter_rank_ai(_raw_rank_r18, group_id=gid, bot=bot)
         _group_ranks_r18[gid] = rank_list
 
     if not rank_list:
@@ -468,7 +501,7 @@ def _get_superuser_id() -> str:
 
 async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
     today = datetime.date.today()
-    yesterday = today - datetime.timedelta(days=1)
+    yesterday = today - datetime.timedelta(days=2)
     date = f"{yesterday}"
 
     logger.info("正在下载日榜")
@@ -652,3 +685,62 @@ async def _(bot: Bot, event: GroupMessageEvent):
     except Exception as e:
         sv.logger.exception(f"[dislike] 异常: {e}")
         await bot.send(event, f"处理失败: {e}")
+
+
+_filter_log = sv.on_command("筛选日志", handlers=[_strip_cmd])
+
+
+@_filter_log.handle()
+async def _(bot: Bot, event: GroupMessageEvent):
+    arg = str(event.get_message()).strip()
+    gid = event.group_id
+
+    date_str = arg if arg else str(datetime.date.today())
+    # 验证日期格式
+    try:
+        datetime.datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        await bot.send(event, "日期格式错误，请使用 YYYY-MM-DD")
+        return
+
+    lines = []
+    for suffix, label in [("", "日榜"), ("_r18", "R18日榜")]:
+        log = _read_rank_log(gid, date_str, suffix)
+        if not log:
+            continue
+        users = log.get("users", [])
+        ai_count = log.get("ai_selected_count", 0)
+        random_count = log.get("random_count", 0)
+        final_pids = log.get("final_pids", [])
+
+        lines.append(f"📊 {label} | {date_str}")
+        lines.append(f"👥 参与画像 ({len(users)}人):")
+        for u in users:
+            su_tag = "[SU] " if u.get("is_superuser") else ""
+            uid = u.get("user_id", "?")
+            summary = u.get("summary", "")[:80]
+            selected = u.get("selected_pids", [])
+            lines.append(f"  - {su_tag}{uid}: {summary}")
+            if selected:
+                lines.append(f"    选中: {', '.join(str(p) for p in selected)}")
+
+        lines.append(f"🤖 AI 选中: {ai_count} 张")
+        if log.get("vote_details"):
+            lines.append("  投票明细:")
+            for pid, voters in log["vote_details"].items():
+                voter_ids = [users[v["user_idx"]]["user_id"] if v["user_idx"] < len(users) else "?"
+                           for v in voters]
+                lines.append(f"    PID:{pid} ← {', '.join(voter_ids)}")
+
+        if random_count:
+            random_pids = log.get("random_filled", [])
+            lines.append(f"🎲 随机补齐: {random_count} 张 ({', '.join(str(p) for p in random_pids)})")
+
+        lines.append(f"📋 最终输出 ({len(final_pids)}张): {', '.join(str(p) for p in final_pids)}")
+        lines.append("")
+
+    if not lines:
+        await bot.send(event, f"未找到 {date_str} 的筛选日志\n（只有启用了AI筛选的群才会生成日志）")
+        return
+
+    await bot.send(event, "\n".join(lines))

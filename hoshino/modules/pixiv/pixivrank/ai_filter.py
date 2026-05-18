@@ -28,8 +28,8 @@ async def _call_ai_filter(
     api_key: str,
     model: str,
     select_count: int,
-) -> Optional[List[int]]:
-    """单次 AI 筛选调用，返回选中的 PID 列表"""
+) -> Tuple[Optional[List[int]], str]:
+    """单次 AI 筛选调用，返回 (选中的 PID 列表, 选择理由)"""
 
     img_descriptions = []
     for i, img in enumerate(images, 1):
@@ -82,6 +82,7 @@ async def _call_ai_filter(
 
         result = json.loads(json_str.strip())
         selected_pids_raw = result.get("selected", [])
+        reason = result.get("reason", "")
 
         # 类型转换
         selected_pids = []
@@ -99,7 +100,7 @@ async def _call_ai_filter(
         if invalid_pids:
             logger.warning(f"AI 返回了无效 PID: {invalid_pids}")
 
-        return filtered
+        return filtered, reason
 
 
 async def ai_filter_images(
@@ -127,7 +128,7 @@ async def ai_filter_images(
     logger.info(f"画像长度: {len(preference)} 字符，准备调用 AI")
 
     try:
-        result = await _call_ai_filter(
+        result, reason = await _call_ai_filter(
             preference=preference,
             images=images,
             api_base=api_base,
@@ -135,7 +136,7 @@ async def ai_filter_images(
             model=model,
             select_count=select_count,
         )
-        logger.info(f"AI 筛选完成: 从 {len(images)} 张选中 {len(result)} 张")
+        logger.info(f"AI 筛选完成: 从 {len(images)} 张选中 {len(result)} 张, 理由: {reason[:100]}")
         return result[:select_count] if result else None
 
     except httpx.HTTPStatusError as e:
@@ -151,13 +152,13 @@ async def ai_filter_images(
 
 async def ai_filter_images_multi_user(
     images: List[Dict],
-    user_preferences: List[Tuple[str, bool]],
+    user_preferences: List[Tuple[str, bool, str]],
     api_base: str,
     api_key: str,
     model: str,
     select_count: int = 15,
     max_users: int = 8,
-) -> Optional[List[int]]:
+) -> Tuple[Optional[List[int]], Dict[int, List[Tuple[int, bool]]], List[str]]:
     """
     为多个用户分别调用 AI 筛选，每人配额制，给每个人一个机会。
 
@@ -175,15 +176,17 @@ async def ai_filter_images_multi_user(
         max_users: 最多处理多少个用户（避免 API 调用过多）
 
     Returns:
-        排序后的 PID 列表，失败时返回 None
+        (排序后的 PID 列表, 投票明细, 各用户的选择理由)
+        - 投票明细: pid -> [(user_idx, is_superuser), ...]
+        - 各用户理由: 与 user_preferences 索引对齐，无画像/失败的为空字符串
     """
     if not user_preferences:
         logger.info("无用户画像，跳过多用户 AI 筛选")
-        return None
+        return None, {}, []
 
     if not api_key:
         logger.warning("AI API 密钥未配置，跳过 AI 筛选")
-        return None
+        return None, {}, []
 
     # 限制用户数量
     user_preferences = user_preferences[:max_users]
@@ -198,8 +201,9 @@ async def ai_filter_images_multi_user(
 
     # 记录每张图被谁推荐: pid -> [(user_idx, is_superuser), ...]
     vote_details: Dict[int, List[Tuple[int, bool]]] = {}
+    user_reasons: List[str] = [""] * user_count
 
-    for i, (preference, is_su) in enumerate(user_preferences):
+    for i, (preference, is_su, _uid) in enumerate(user_preferences):
         if not preference:
             continue
 
@@ -208,7 +212,7 @@ async def ai_filter_images_multi_user(
         logger.info(f"第 {i+1}/{user_count} 次 AI 调用 ({user_label}, 配额 {quota} 张), 画像长度 {len(preference)}")
 
         try:
-            selected = await _call_ai_filter(
+            selected, reason = await _call_ai_filter(
                 preference=preference,
                 images=images,
                 api_base=api_base,
@@ -221,14 +225,15 @@ async def ai_filter_images_multi_user(
                     if pid not in vote_details:
                         vote_details[pid] = []
                     vote_details[pid].append((i, is_su))
-                logger.info(f"  选中 {len(selected)} 张")
+                user_reasons[i] = reason
+                logger.info(f"  选中 {len(selected)} 张, 理由: {reason[:100]}")
         except Exception as e:
             logger.warning(f"  该用户 AI 筛选失败: {e}")
             continue
 
     if not vote_details:
         logger.info("所有用户 AI 筛选均未返回结果")
-        return None
+        return None, {}, user_reasons
 
     # 排序规则：
     # 1. 被推荐次数越多越优先（多人共识）
@@ -246,4 +251,4 @@ async def ai_filter_images_multi_user(
         f"多用户 AI 筛选完成: 汇总 {len(vote_details)} 张不同作品, "
         f"取前 {select_count} 张"
     )
-    return sorted_pids[:select_count]
+    return sorted_pids[:select_count], vote_details, user_reasons
