@@ -9,7 +9,7 @@ from loguru import logger
 
 from .api import api_manager, _build_api_config_dict
 from .config import Config
-from .session import Session
+from .session import Session, session_manager
 
 if TYPE_CHECKING:
     from .session import Session as SessionType
@@ -119,6 +119,7 @@ async def run_agent(
         user_id,
         persona=persona,
         group_id=group_id,
+        register=True,
     )
     session.agent_label = label
     if locked_tools:
@@ -144,8 +145,11 @@ async def run_agent(
             prompt = f"{task}\n\n图片标识符：{' '.join(new_ids)}"
         session.add_message("user", prompt)
 
-    return await ChatExecutor(session).chat(
-        api_config=api_config,
-        tools=tools,
-        max_rounds=max_rounds,
-    )
+    try:
+        return await ChatExecutor(session).chat(
+            api_config=api_config,
+            tools=tools,
+            max_rounds=max_rounds,
+        )
+    finally:
+        session_manager.sessions.pop(session.session_id, None)

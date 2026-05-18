@@ -66,7 +66,8 @@ def format_choices_for_display(choices: Dict[int, str]) -> str:
 
 class Session:
     def __init__(self, session_id: str, user_id: int,
-                 persona: Optional[str] = None, group_id: Optional[int] = None):
+                 persona: Optional[str] = None, group_id: Optional[int] = None,
+                 register: bool = False):
         self.session_id = session_id
         self.persona = persona
         self.messages: List[Dict[str, Any]] = []
@@ -85,6 +86,9 @@ class Session:
         self.user_id = user_id
         self.group_id = group_id
         self.agent_label: str = "main"  # 日志标识：main / sub:vision / sub:search
+
+        if register:
+            session_manager.sessions[self.session_id] = self
 
     @property
     def _tag(self) -> str:

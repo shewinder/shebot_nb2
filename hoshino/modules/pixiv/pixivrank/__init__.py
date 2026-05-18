@@ -176,7 +176,7 @@ async def _implicit_preference_update(
 
         session_id = f"private_{user_id}_pixivrank"
         persona = persona_manager.get_persona(user_id, group_id)
-        session = Session(session_id, user_id, persona=persona, group_id=group_id)
+        session = Session(session_id, user_id, persona=persona, group_id=group_id, register=True)
         logger.info(f"{label} Session 已创建 (persona_len={len(persona or '')})")
 
         ok, msg, _ = session.activate_skill("image_preference")
@@ -200,6 +200,7 @@ async def _implicit_preference_update(
             f"默认视为对该图的隐性喜欢并更新偏好。"
             f"但如果该图的内容与用户现有画像中的核心偏好或回避内容明显冲突，"
             f"则仅作为中性浏览记录处理，不要强化偏好。"
+            f"如果你不具备图像能力，必要时你可以调用delegate_task工具委托任务"
         )
 
         if supports_multimodal:
@@ -210,6 +211,7 @@ async def _implicit_preference_update(
             await session.store_user_image(base64_image)
         else:
             message_content = text
+            await session.store_user_image(base64_image)
 
         session.add_message("user", message_content)
         logger.info(f"{label} 消息已加入 Session (multimodal={supports_multimodal})")

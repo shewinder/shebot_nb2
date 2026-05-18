@@ -817,7 +817,8 @@ class SessionInfo(BaseModel):
     session_id: str
     user_id: int
     group_id: Optional[int]
-    type: str  # "group" 或 "private"
+    type: str  # "group" / "private" / "agent"
+    agent_label: str = "main"
     message_count: int
     user_images: int
     ai_images: int
@@ -833,33 +834,25 @@ async def get_sessions():
     try:
         sessions = []
         for session_id, session in session_manager.sessions.items():
-            # 解析 session_id 获取 user_id 和 group_id
-            user_id = 0
-            group_id = None
-            session_type = "private"
-            
+            # 从 session 对象直接取 user_id/group_id，不再从 session_id 解析
+            user_id = getattr(session, 'user_id', 0) or 0
+            group_id = getattr(session, 'group_id', None)
+            agent_label = getattr(session, 'agent_label', 'main') or 'main'
+
+            # 类型推断：优先看 session_id 模式，再看 agent_label
             if session_id.startswith("group_"):
-                # group_{group_id}_user_{user_id}
-                parts = session_id.split("_")
-                if len(parts) >= 4:
-                    try:
-                        group_id = int(parts[1])
-                        user_id = int(parts[3])
-                        session_type = "group"
-                    except (ValueError, IndexError):
-                        pass
-            elif session_id.startswith("private_"):
-                # private_{user_id}
-                try:
-                    user_id = int(session_id.replace("private_", ""))
-                except ValueError:
-                    pass
+                session_type = "group"
+            elif agent_label != "main":
+                session_type = "agent"
+            else:
+                session_type = "private"
             
             sessions.append(SessionInfo(
                 session_id=session_id,
                 user_id=user_id,
                 group_id=group_id,
                 type=session_type,
+                agent_label=agent_label,
                 message_count=len(session.messages),
                 user_images=len([i for i in session.list_images() if i.source == "user"]),
                 ai_images=len([i for i in session.list_images() if i.source == "ai"]),
