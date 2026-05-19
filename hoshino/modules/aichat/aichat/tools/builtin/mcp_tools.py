@@ -14,32 +14,9 @@ if TYPE_CHECKING:
 
 @tool_registry.register(
     name="activate_mcp_server",
-    description="""激活指定的 MCP server，使其工具在当前会话中可用。
+    description="""激活 MCP server 以使用其工具（浏览器自动化、文件系统等）。
 
-当用户需要 MCP server 提供的功能时（如浏览器自动化、文件系统操作等），调用此工具激活。
-
-## 参数说明
-- server_id: 要激活的 MCP server ID（如 "playwright", "filesystem" 等）
-
-## 使用场景
-1. 用户说"帮我截图百度首页" -> 激活 playwright MCP server
-2. 用户说"读取这个文件" -> 激活 filesystem MCP server
-3. 用户说"搜索这个数据库" -> 激活 database MCP server
-
-## 激活流程
-1. 检查 MCP server 是否存在且已启用
-2. 连接到 MCP server
-3. 将 server 标记为激活状态
-4. 该 server 的工具在当前会话中可用
-
-## 注意事项
-- 已激活的 MCP server 在当前会话中持续有效
-- 单个会话最多激活 3 个 MCP server（防止上下文膨胀）
-- 如果 MCP server 禁用自动触发（auto_trigger=false），会返回错误
-- 激活后，AI 可以立即使用该 server 的工具
-
-## 示例
-activate_mcp_server(server_id="playwright")
+当用户请求的功能需要 MCP server 时调用。激活后其工具在当前会话中可用，最多激活 3 个。
 """,
     parameters={
         "type": "object",

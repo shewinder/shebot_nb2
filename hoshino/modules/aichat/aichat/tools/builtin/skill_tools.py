@@ -15,30 +15,9 @@ if TYPE_CHECKING:
 
 @tool_registry.register(
     name="activate_skill",
-    description="""激活指定的 SKILL，将其指导内容注入到当前对话上下文中。
+    description="""激活一个 SKILL 以获得其专业能力指导。
 
-当用户需要某个 SKILL 的功能，或 AI 判断当前任务需要某个 SKILL 的能力时，调用此工具。
-
-## 参数说明
-- skill_name: 要激活的 SKILL 名称（如 "calculate"、"weather" 等）
-
-## 使用场景
-1. 用户明确说"帮我计算..." -> 激活 calculate SKILL
-2. 用户说"分析这个目录的代码" -> 激活 code-analyzer SKILL
-3. 用户发送"#使用 xxx"命令后，AI 自动识别并激活
-
-## 激活流程
-1. 检查 SKILL 是否存在
-2. 将 SKILL 标记为激活状态
-3. 将 SKILL.md 的内容注入到对话上下文
-
-## 注意事项
-- 已激活的 SKILL 在当前会话中持续有效
-- 单个会话最多激活 5 个 SKILL（防止上下文膨胀）
-- 激活后，AI 可以在回复中引用 SKILL 的指导内容
-
-## 示例
-activate_skill(skill_name="calculate")
+当用户请求的功能对应某个可用 SKILL 时调用。激活后其指导内容会在当前会话中持续有效。每个会话最多激活 5 个 SKILL。
 """,
     parameters={
         "type": "object",
