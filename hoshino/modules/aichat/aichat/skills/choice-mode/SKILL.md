@@ -1,8 +1,6 @@
 ---
 name: choice-mode
 description: 在连续对话或聊天模式中，为AI回复末尾生成3个可选行动项供用户快速选择。当用户发送"进入对话模式 --option"、"开启选项模式"或要求生成选项时自动激活。
-user-invocable: true
-disable-model-invocation: false
 ---
 
 # 选项生成模式

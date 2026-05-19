@@ -1,12 +1,6 @@
 ---
 name: image_preference
 description: 识别到图片点评、偏好学习或画像查询意图时激活。场景：1）用户发图并请求点评/分析；2）用户对图片反馈喜欢/不喜欢；3）用户查询画像（"我的喜好"/"画像"/"图像偏好"/"喜欢什么"）；4）用户直接声明偏好（"我喜欢兽耳""不喜欢男同"）
-allowed-tools:
-  - "read_file"
-  - "write_file"
-  - "web_search"
-user-invocable: true
-disable-model-invocation: false
 ---
 
 # 图片喜好学习 SKILL

@@ -1,11 +1,6 @@
 ---
 name: setu
 description: 当用户请求色图/插画时激活，调用API获取并发送图片
-allowed-tools:
-  - "fetch_url"
-  - "send_images"
-  - "read_file"
-user-invocable: true
 disable-model_invocation: false
 ---
 

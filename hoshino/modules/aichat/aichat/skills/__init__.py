@@ -7,7 +7,6 @@ SKILL 系统 - AI 能力扩展机制
 from .discovery import SkillDiscovery
 from .manager import SkillManager, skill_manager
 from .model import Skill, SkillMetadata
-from .permissions import ToolPermissionChecker
 
 __all__ = [
     "Skill",
@@ -15,5 +14,4 @@ __all__ = [
     "SkillDiscovery",
     "SkillManager",
     "skill_manager",
-    "ToolPermissionChecker",
 ]

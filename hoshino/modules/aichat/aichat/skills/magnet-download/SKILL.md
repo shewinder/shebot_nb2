@@ -1,11 +1,6 @@
 ---
 name: magnet-download
 description: 下载磁力链接到 NAS 的 qBittorrent。用户发送 magnet 链接、"下载这个磁力"、"帮我下载" 附带磁力链接时激活
-allowed-tools:
-  - "execute_script"
-  - "run_background_task"
-  - "schedule_continuation"
-user-invocable: true
 ---
 
 # 磁力链接下载

@@ -1085,13 +1085,8 @@ async def list_skills(bot: Bot, event: Event):
     lines = [f"📚 可用 SKILL 列表（共 {len(skills)} 个）：\n"]
     
     for skill in skills:
-        model_invocation = "🤖" if not skill.metadata.disable_model_invocation else "🚫"
-        user_invocable = "👤" if skill.metadata.user_invocable else "🚫"
         lines.append(f"• {skill.metadata.name}")
-        lines.append(f"  {model_invocation}AI可触发 {user_invocable}用户可触发")
         lines.append(f"  📖 {skill.metadata.description}")
-        if skill.metadata.allowed_tools:
-            lines.append(f"  🔧 {', '.join(skill.metadata.allowed_tools)}")
         lines.append("")
     
     lines.append("使用方法：")

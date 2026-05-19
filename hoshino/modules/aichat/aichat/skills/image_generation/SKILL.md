@@ -1,9 +1,6 @@
 ---
 name: image_generation
 description: 当用户要求画图、生图、编辑图片、改图、风格转换时激活
-allowed-tools:
-  - "execute_script"
-user-invocable: true
 disable-model_invocation: false
 ---
 

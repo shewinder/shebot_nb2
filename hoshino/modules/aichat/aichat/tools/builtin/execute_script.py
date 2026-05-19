@@ -268,12 +268,7 @@ async def _check_execute_permission(
     Returns:
         (bool, str) - (是否允许, 原因)
     """
-    from hoshino.permission import SUPERUSER
-    
-    # 检查 skill 是否有 execute_script 权限
-    if not skill.metadata.has_tool_permission("execute_script"):
-        return False, f"SKILL '{skill.metadata.name}' 无权使用 execute_script 工具"
-    
+
     # 检查脚本路径是否在 skill 目录内
     script_path = Path(script_name)
     if script_path.is_absolute():

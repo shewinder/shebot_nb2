@@ -29,14 +29,12 @@ if TYPE_CHECKING:
 
 ## 激活流程
 1. 检查 SKILL 是否存在
-2. 检查是否允许 AI 自动触发（disable_model_invocation=false）
-3. 将 SKILL 标记为激活状态
-4. 将 SKILL.md 的内容注入到对话上下文
+2. 将 SKILL 标记为激活状态
+3. 将 SKILL.md 的内容注入到对话上下文
 
 ## 注意事项
 - 已激活的 SKILL 在当前会话中持续有效
 - 单个会话最多激活 5 个 SKILL（防止上下文膨胀）
-- 如果 SKILL 禁止 AI 自动触发（disable_model_invocation=true），会返回错误
 - 激活后，AI 可以在回复中引用 SKILL 的指导内容
 
 ## 示例
@@ -107,13 +105,6 @@ async def activate_skill(
                 error="Skill not found"
             )
     
-    # 检查是否允许 AI 自动触发
-    if skill.metadata.disable_model_invocation:
-        return fail(
-            f"SKILL '{skill_name}' 禁止 AI 自动触发，请让用户使用「#使用 {skill_name}」命令手动激活",
-            error="Model invocation disabled for this skill"
-        )
-    
     try:
         # 激活 SKILL（Session 内部处理存在性、重复激活、上限检查）
         success, message, content = session.activate_skill(skill_name)
@@ -124,9 +115,6 @@ async def activate_skill(
                 f"",
                 f"📖 描述：{skill.metadata.description}"
             ]
-            
-            if skill.metadata.allowed_tools:
-                result_lines.append(f"🔧 可用工具：{', '.join(skill.metadata.allowed_tools)}")
             
             # 添加完整的指导内容，让 AI 在当前轮次就能看到
             if content:
@@ -149,7 +137,6 @@ async def activate_skill(
                     "skill_name": skill_name,
                     "already_active": "已经激活" in message,
                     "description": skill.metadata.description,
-                    "allowed_tools": skill.metadata.allowed_tools,
                     "active_skills_count": len(session.get_active_skills())
                 }
             )

@@ -1,11 +1,6 @@
 ---
 name: pixivrank
 description: 获取 Pixiv 日榜图片并发送给用户
-allowed-tools:
-  - "fetch_url"
-  - "store_images"
-  - "read_file"
-user-invocable: true
 disable-model_invocation: false
 ---
 

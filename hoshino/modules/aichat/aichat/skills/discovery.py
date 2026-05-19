@@ -110,9 +110,6 @@ class SkillDiscovery:
         skill_metadata = SkillMetadata(
             name=metadata['name'],
             description=metadata['description'],
-            allowed_tools=metadata.get('allowed-tools', []),
-            user_invocable=metadata.get('user-invocable', True),
-            disable_model_invocation=metadata.get('disable-model-invocation', False),
             source=extra_meta.get('source', 'local'),
             version=extra_meta.get('version', metadata.get('version', '')),
             enabled=extra_meta.get('enabled', True),
