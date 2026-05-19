@@ -238,6 +238,7 @@ write_file(path=f"aichat/preferences/{user_id}.md", content="...")
 
 ## 注意事项
 
+- **⛔ 禁止使用 write_memory / read_memory**——画像文件必须通过 `write_file` / `read_file` 操作，路径为 `aichat/preferences/{user_id}.md`
 - 每次分析必须覆盖8个核心维度
 - **核心审美画像必须是叙事段落，不是标签列表**
 - 低信号不支撑高评级：样本<3 → 初步信号，评级≤⭐⭐⭐

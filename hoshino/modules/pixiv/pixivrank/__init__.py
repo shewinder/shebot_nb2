@@ -501,7 +501,7 @@ def _get_superuser_id() -> str:
 
 async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
     today = datetime.date.today()
-    yesterday = today - datetime.timedelta(days=2)
+    yesterday = today - datetime.timedelta(days=1)
     date = f"{yesterday}"
 
     logger.info("正在下载日榜")

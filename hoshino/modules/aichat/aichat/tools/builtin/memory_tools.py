@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 @tool_registry.register(
     name="read_memory",
-    description="""读取当前用户的记忆笔记。在修改记忆前，请先调用此工具查看现有内容。
+    description="""读取当前用户的通用记忆笔记。不要用于读取图片偏好/画像文件——图片偏好请用 read_file(path="aichat/preferences/{user_id}.md")。
 
 返回该用户的完整 Markdown 格式记忆文件内容。如果这是首次读取，你会看到默认模板。
 
@@ -53,7 +53,9 @@ async def read_memory(session: Optional["Session"] = None) -> Dict[str, Any]:
 
 @tool_registry.register(
     name="write_memory",
-    description="""覆盖写入当前用户的完整记忆笔记。
+    description="""覆盖写入当前用户的通用记忆笔记（对话上下文、个人信息、偏好声明等）。
+
+⛔ 禁止：不要用此工具存储图片偏好/画像分析结果。图片偏好请用 write_file 写入 aichat/preferences/{user_id}.md。
 
 ⚠️ 重要规则：
 1. 必须先调用 read_memory 读取现有内容
@@ -68,7 +70,8 @@ async def read_memory(session: Optional["Session"] = None) -> Dict[str, Any]:
 
 错误示例（不要这样做）：
 - 没有调用 read_memory 就直接 write_memory（可能导致历史记忆丢失）
-- 只写入新内容，遗漏了旧记忆""",
+- 只写入新内容，遗漏了旧记忆
+- 用 write_memory 写入图片偏好分析结果（应用 write_file）""",
     parameters={
         "type": "object",
         "properties": {
