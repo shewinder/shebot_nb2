@@ -158,7 +158,7 @@ async def _call_vision_batch(
     print(f"    POST {api_base}/chat/completions")
     print(f"    Model: {conf.vision_model}, 图片: {len(batch_images)}张, 用户: {len(user_preferences)}人")
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{api_base}/chat/completions",
             headers={"Authorization": f"Bearer {conf.vision_api_key}", "Content-Type": "application/json"},

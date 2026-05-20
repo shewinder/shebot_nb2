@@ -34,7 +34,7 @@ from hoshino.modules.aichat.aichat.persona import persona_manager
 from hoshino.modules.aichat.aichat.chat_executor import ChatExecutor
 
 from .config import Config
-from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic, read_group_preferences
+from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic, read_group_preferences, not_sent_in_3_days
 from .vision_filter import vision_filter_multi_group
 from .score import score_data, save_score_data, load_score_data
 from hoshino.util import _strip_cmd
@@ -376,9 +376,11 @@ async def send_rank(sv: Service, raw_pics: List[RankPic], gids: List[int] = None
                 group_prefs[gid] = prefs
 
         if group_prefs:
+            deduped = list(filter(not_sent_in_3_days, raw_pics))
+            sv.logger.info(f"跨群 Vision 去重: {len(raw_pics)} → {len(deduped)} 张")
             images = [
                 {"pid": p.pid, "title": p.title, "author": p.author, "tags": p.tags, "url": p.url}
-                for p in raw_pics
+                for p in deduped
             ]
             try:
                 group_pids = await vision_filter_multi_group(images, group_prefs)

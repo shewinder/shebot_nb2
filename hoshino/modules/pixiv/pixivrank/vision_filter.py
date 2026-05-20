@@ -129,7 +129,7 @@ async def _call_vision_batch(
     api_key = conf.vision_api_key
     model = conf.vision_model
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{api_base}/chat/completions",
             headers={
