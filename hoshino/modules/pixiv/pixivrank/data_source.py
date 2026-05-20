@@ -219,7 +219,8 @@ async def filter_rank_ai(
     pics: List[RankPic],
     group_id: int,
     bot=None,
-    target_count: int = 15
+    target_count: int = 15,
+    pre_selected_pids: Optional[List[int]] = None,
 ) -> Tuple[List[RankPic], Optional[Dict]]:
     """
     智能图片筛选：优先 AI 根据群内所有用户画像筛选，剩余用原逻辑补齐
@@ -229,6 +230,7 @@ async def filter_rank_ai(
         group_id: 群号，用于读取该群成员画像
         bot: Bot 实例，获取群成员列表需要
         target_count: 目标返回数量（默认15张）
+        pre_selected_pids: 预选 PID 列表（跨群合并时由外部传入），跳过 AI 筛选
 
     Returns:
         (筛选后的 RankPic 列表, 筛选日志 dict 或 None)
@@ -241,64 +243,77 @@ async def filter_rank_ai(
     candidates = list(filter(not_sent_in_3_days, pics))
     logger.info(f"群 {group_id} 基础过滤: 原始 {len(pics)} 张 -> 去重后 {len(candidates)} 张")
 
-    # 准备 AI 筛选所需数据
-    images = [
-        {
-            "pid": p.pid,
-            "title": p.title,
-            "author": p.author,
-            "tags": p.tags
-        }
-        for p in candidates
-    ]
-
     result = []
     remaining_candidates = candidates.copy()
 
     log = None  # 筛选日志，仅 AI 筛选启用时有值
 
-    # 尝试读取群内多用户画像并调用 AI 筛选
-    if bot is not None and conf.ai_api_key:
-        user_preferences = await read_group_preferences(group_id, bot)
-        if user_preferences:
-            ai_count = min(conf.ai_select_count, target_count)
-            selected_pids, vote_details, user_reasons = await ai_filter_images_multi_user(
-                images=images,
-                user_preferences=user_preferences,
-                api_base=conf.ai_api_base,
-                api_key=conf.ai_api_key,
-                model=conf.ai_model,
-                select_count=ai_count,
-            )
-            if selected_pids:
-                pid_map = {p.pid: p for p in candidates}
-                for pid in selected_pids:
-                    if pid in pid_map:
-                        result.append(pid_map[pid])
-                        remaining_candidates = [p for p in remaining_candidates if p.pid != pid]
-                logger.info(f"群 {group_id} AI 多用户筛选选中 {len(result)} 张")
+    # 外部预选 PID（跨群合并时由 send_rank 传入）
+    if pre_selected_pids is not None:
+        pid_map = {p.pid: p for p in candidates}
+        for pid in pre_selected_pids:
+            if pid in pid_map:
+                result.append(pid_map[pid])
+                remaining_candidates = [p for p in remaining_candidates if p.pid != pid]
+        logger.info(f"群 {group_id} 使用预选 PID {len(result)} 张")
+        if result:
+            log = {
+                "ai_selected_count": len(result),
+                "users": [],
+                "vote_details": {},
+            }
+    else:
+        # 独立筛选：文本 AI（tag 模式）
+        images = [
+            {
+                "pid": p.pid,
+                "title": p.title,
+                "author": p.author,
+                "tags": p.tags,
+            }
+            for p in candidates
+        ]
 
-                log = {
-                    "ai_selected_count": len(result),
-                    "users": [],
-                    "vote_details": {},
-                }
-                for i, (pref, is_su, uid) in enumerate(user_preferences):
-                    if not pref:
-                        continue
-                    log["users"].append({
-                        "user_id": uid,
-                        "is_superuser": is_su,
-                        "summary": _extract_profile_summary(pref),
-                        "quota": min(ai_count // len(user_preferences) + (2 if is_su else 0), len(images)),
-                        "selected_pids": [pid for pid in selected_pids
-                                         if pid in vote_details and any(v[0] == i for v in vote_details[pid])],
-                        "reason": user_reasons[i] if i < len(user_reasons) else "",
-                    })
-                for pid, voters in vote_details.items():
-                    log["vote_details"][str(pid)] = [
-                        {"user_idx": idx, "is_superuser": su} for idx, su in voters
-                    ]
+        if bot is not None and conf.ai_api_key:
+            user_preferences = await read_group_preferences(group_id, bot)
+            if user_preferences:
+                ai_count = min(conf.ai_select_count, target_count)
+                selected_pids, vote_details, user_reasons = await ai_filter_images_multi_user(
+                    images=images,
+                    user_preferences=user_preferences,
+                    api_base=conf.ai_api_base,
+                    api_key=conf.ai_api_key,
+                    model=conf.ai_model,
+                    select_count=ai_count,
+                )
+                if selected_pids:
+                    pid_map = {p.pid: p for p in candidates}
+                    for pid in selected_pids:
+                        if pid in pid_map:
+                            result.append(pid_map[pid])
+                            remaining_candidates = [p for p in remaining_candidates if p.pid != pid]
+                    logger.info(f"群 {group_id} 文本 AI 筛选选中 {len(result)} 张")
+
+                    log = {
+                        "ai_selected_count": len(result),
+                        "users": [],
+                        "vote_details": {},
+                    }
+                    for i, (pref, is_su, uid) in enumerate(user_preferences):
+                        if not pref:
+                            continue
+                        log["users"].append({
+                            "user_id": uid,
+                            "is_superuser": is_su,
+                            "summary": _extract_profile_summary(pref),
+                            "selected_pids": [pid for pid in (selected_pids or [])
+                                             if pid in vote_details and any(v[0] == i for v in vote_details[pid])],
+                            "reason": user_reasons[i] if i < len(user_reasons) else "",
+                        })
+                    for pid, voters in vote_details.items():
+                        log["vote_details"][str(pid)] = [
+                            {"user_idx": idx, "is_superuser": su} for idx, su in voters
+                        ]
 
     # 如果 AI 未选中或数量不足，用原逻辑补齐
     current_count = len(result)

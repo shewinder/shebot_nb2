@@ -34,7 +34,8 @@ from hoshino.modules.aichat.aichat.persona import persona_manager
 from hoshino.modules.aichat.aichat.chat_executor import ChatExecutor
 
 from .config import Config
-from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic
+from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic, read_group_preferences
+from .vision_filter import vision_filter_multi_group
 from .score import score_data, save_score_data, load_score_data
 from hoshino.util import _strip_cmd
 
@@ -365,9 +366,33 @@ async def send_rank(sv: Service, raw_pics: List[RankPic], gids: List[int] = None
 
     sent_pids: List[int] = []
 
+    # 跨群合并：提前汇总所有群的用户画像，一次 vision 调用
+    group_pids: Dict[int, List[int]] = {}
+    if conf.vision_filter_enabled and conf.vision_api_key and conf.ai_filter_enabled:
+        group_prefs: Dict[int, List] = {}
+        for gid in gids:
+            prefs = await read_group_preferences(gid, bot)
+            if prefs:
+                group_prefs[gid] = prefs
+
+        if group_prefs:
+            images = [
+                {"pid": p.pid, "title": p.title, "author": p.author, "tags": p.tags, "url": p.url}
+                for p in raw_pics
+            ]
+            try:
+                group_pids = await vision_filter_multi_group(images, group_prefs)
+                sv.logger.info(
+                    f"跨群 Vision 合并完成: {len(group_pids)}/{len(gids)} 个群有结果, "
+                    f"覆盖 {sum(len(v) for v in group_pids.values())} 个作品"
+                )
+            except Exception as e:
+                sv.logger.warning(f"跨群 Vision 合并失败: {e}，退回独立筛选")
+
     for gid in gids:
-        # 每个群独立筛选
-        pics, filter_log = await filter_rank_ai(raw_pics, group_id=gid, bot=bot)
+        # 每个群筛选（跨群合并时传入预选 PID）
+        pre_selected = group_pids.get(gid)
+        pics, filter_log = await filter_rank_ai(raw_pics, group_id=gid, bot=bot, pre_selected_pids=pre_selected)
 
         if not pics:
             sv.logger.warning(f"群{gid} 筛选结果为空，跳过发送")
