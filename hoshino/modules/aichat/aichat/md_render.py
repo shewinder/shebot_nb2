@@ -15,7 +15,7 @@ except ImportError:
 
 try:
     import markdown
-    from markdown.extensions import fenced_code, tables, nl2br
+    from markdown.extensions import fenced_code, tables
     MARKDOWN_AVAILABLE = True
 except ImportError:
     MARKDOWN_AVAILABLE = False
@@ -90,7 +90,6 @@ def markdown_to_html(md_text: str) -> str:
     md = markdown.Markdown(extensions=[
         'fenced_code',      # 代码块 ```
         'tables',           # 表格
-        'nl2br',           # 换行转 <br>
         'toc',             # 标题锚点（可选）
     ])
     
@@ -119,6 +118,7 @@ HTML_TEMPLATE = """
             color: #24292f;
             background: #ffffff;
             padding: 24px 32px;
+            white-space: pre-line;
         }
         
         .content {
