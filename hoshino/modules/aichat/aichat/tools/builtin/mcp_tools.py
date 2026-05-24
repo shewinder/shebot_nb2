@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     description="""激活 MCP server 以使用其工具（浏览器自动化、文件系统等）。
 
 当用户请求的功能需要 MCP server 时调用。激活后其工具在当前会话中可用，最多激活 3 个。
+部分 MCP server 已默认激活（default_active），无需再次调用此工具。
 """,
     parameters={
         "type": "object",

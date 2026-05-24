@@ -48,6 +48,9 @@ async def get_available_tools(session: Optional[Any] = None) -> List[Dict[str, A
                 return tools
             
             if session:
+                # 确保 default_active 的 server 在新会话中自动激活
+                await mcp_session_manager.ensure_default_servers_activated(session.session_id)
+
                 # 渐进式加载：只获取会话中已激活的 MCP 工具
                 active_servers = mcp_session_manager.get_active_servers(session.session_id)
                 if active_servers:

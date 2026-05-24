@@ -56,6 +56,29 @@ class MCPSessionManager:
         if session_id not in self._session_states:
             self._session_states[session_id] = SessionMCPState()
         return self._session_states[session_id]
+
+    def is_new_session(self, session_id: str) -> bool:
+        """检查是否为新会话（尚未创建状态）"""
+        return session_id not in self._session_states
+
+    async def ensure_default_servers_activated(self, session_id: str) -> None:
+        """确保 default_active 的 server 在新会话中自动激活
+
+        只在会话首次访问时执行，已存在的会话不会重复激活。
+        """
+        if not self.is_new_session(session_id):
+            return
+
+        # 先创建会话状态（避免并发重复激活）
+        self._get_session_state(session_id)
+
+        for server_id, config in self.server_manager._configs.items():
+            if config.default_active and config.enabled:
+                success, msg = await self.activate_server(session_id, server_id)
+                if success:
+                    logger.info(f"Session {session_id} 默认激活 MCP server: {server_id}")
+                else:
+                    logger.warning(f"Session {session_id} 默认激活 {server_id} 失败: {msg}")
     
     async def activate_server(self, session_id: str, server_id: str) -> Tuple[bool, str]:
         """激活指定 MCP server
@@ -82,8 +105,12 @@ class MCPSessionManager:
         if server_id in state.active_servers:
             return True, f"MCP server '{server_id}' 已经激活"
         
-        # 检查数量限制
-        if len(state.active_servers) >= self.MAX_SERVERS_PER_SESSION:
+        # 检查数量限制（default_active 的 server 不计入限额）
+        manual_active_count = sum(
+            1 for sid in state.active_servers
+            if not (self.server_manager.get_server_config(sid) and self.server_manager.get_server_config(sid).default_active)
+        )
+        if not config.default_active and manual_active_count >= self.MAX_SERVERS_PER_SESSION:
             return False, f"单个会话最多激活 {self.MAX_SERVERS_PER_SESSION} 个 MCP server"
         
         # 确保 server 已连接

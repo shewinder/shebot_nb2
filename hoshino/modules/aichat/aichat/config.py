@@ -19,6 +19,7 @@ class MCPServerConfig(BaseModel):
     # === 渐进式加载相关配置 ===
     description: str = ""             # server 功能描述（用于 AI 选择）
     auto_trigger: bool = True         # 是否允许 AI 自动激活
+    default_active: bool = False      # 是否默认激活（会话创建时自动激活，无需 AI 调用 activate_mcp_server）
     keywords: List[str] = []          # 触发关键词列表（可选，用于匹配用户意图）
 
 

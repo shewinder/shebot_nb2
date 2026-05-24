@@ -93,6 +93,7 @@ class MCPServerManager:
                 "description": config.description,
                 "enabled": config.enabled,
                 "auto_trigger": config.auto_trigger,
+                "default_active": config.default_active,
                 "keywords": config.keywords,
                 "connected": server_id in self._clients and self._clients[server_id].is_connected
             })
