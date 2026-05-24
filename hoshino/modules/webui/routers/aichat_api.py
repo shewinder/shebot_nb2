@@ -14,6 +14,7 @@ from hoshino import Bot
 from hoshino.config import get_plugin_config_by_name
 from hoshino.modules.aichat.aichat import api_manager, persona_manager, conf, session_manager
 from hoshino.modules.aichat.aichat.skills import skill_manager
+from hoshino.modules.aichat.aichat.tools import get_available_tools as _get_available_tools
 from hoshino.modules.aichat.aichat.config import ApiEntry
 from hoshino.modules.aichat.aichat.character_import import parse_character_png, CharacterCard
 import json
@@ -1004,15 +1005,32 @@ async def cleanup_expired_sessions():
         return {"status": 500, "data": f"清理失败: {str(e)}"}
 
 
+@router.get("/tools/schemas")
+async def get_tool_schemas(session_id: str | None = None):
+    """获取工具 Schema 列表（含内置工具和会话激活的 MCP 工具）"""
+    try:
+        session = None
+        if session_id:
+            session = session_manager.sessions.get(session_id)
+        schemas = await _get_available_tools(session=session)
+        return {
+            "status": 200,
+            "data": {
+                "total": len(schemas),
+                "schemas": schemas
+            }
+        }
+    except Exception as e:
+        logger.exception(f"获取工具 Schema 失败: {e}")
+        return {"status": 500, "data": f"获取失败: {str(e)}"}
+
+
 # ========== SKILL 管理 API ==========
 
 class SkillInfo(BaseModel):
     """SKILL 信息"""
     name: str
     description: str
-    allowed_tools: List[str]
-    user_invocable: bool
-    disable_model_invocation: bool
     source: str
     version: str
     enabled: bool
@@ -1041,9 +1059,6 @@ async def get_skills():
             SkillInfo(
                 name=skill.metadata.name,
                 description=skill.metadata.description,
-                allowed_tools=skill.metadata.allowed_tools,
-                user_invocable=skill.metadata.user_invocable,
-                disable_model_invocation=skill.metadata.disable_model_invocation,
                 source=skill.metadata.source,
                 version=skill.metadata.version,
                 enabled=skill.metadata.enabled

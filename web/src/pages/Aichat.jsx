@@ -129,6 +129,8 @@ function Aichat() {
   const [sessionDetail, setSessionDetail] = useState(null)
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false)
   const [expandedMessageIdx, setExpandedMessageIdx] = useState(null)
+  const [toolSchemas, setToolSchemas] = useState(null)
+  const [toolSchemasLoading, setToolSchemasLoading] = useState(false)
 
   // SKILL 管理相关
   const [skills, setSkills] = useState([])
@@ -612,9 +614,16 @@ function Aichat() {
   const handleViewSessionDetail = async (sessionId) => {
     setSessionDetailLoading(true)
     setSessionDetailVisible(true)
+    setToolSchemas(null)
     try {
-      const res = await aichatApi.getSessionDetail(sessionId)
-      setSessionDetail(res)
+      const [detailRes, schemasRes] = await Promise.all([
+        aichatApi.getSessionDetail(sessionId),
+        aichatApi.getToolSchemas(sessionId).catch(() => null)
+      ])
+      setSessionDetail(detailRes)
+      if (schemasRes) {
+        setToolSchemas(schemasRes)
+      }
     } catch (error) {
       message.error('获取 Session 详情失败: ' + error.message)
       setSessionDetailVisible(false)
@@ -1631,20 +1640,6 @@ function Aichat() {
                       >
                         <Space direction="vertical" style={{ width: '100%' }}>
                           <Text>{skill.description}</Text>
-                          {skill.allowed_tools.length > 0 && (
-                            <div>
-                              <Text type="secondary" style={{ fontSize: 12 }}>允许的工具:</Text>
-                              <div style={{ marginTop: 4 }}>
-                                {skill.allowed_tools.map(tool => (
-                                  <Tag key={tool} size="small" style={{ margin: 2 }}>{tool}</Tag>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          <Space size="small">
-                            {skill.user_invocable && <Tag color="green" size="small">用户可触发</Tag>}
-                            {!skill.disable_model_invocation && <Tag color="blue" size="small">AI 自动触发</Tag>}
-                          </Space>
                         </Space>
                       </Card>
                     </List.Item>
@@ -2005,6 +2000,62 @@ function Aichat() {
                     )
                   }}
                 />
+
+                {/* 工具 Schema */}
+                <Divider />
+                <div>
+                  <Text strong style={{ fontSize: 13 }}>
+                    <ToolOutlined /> 可用工具 Schema
+                    {toolSchemas && (
+                      <Tag style={{ marginLeft: 8 }}>
+                        {toolSchemas?.schemas?.length ?? toolSchemas?.total ?? 0} 个工具
+                      </Tag>
+                    )}
+                  </Text>
+                  {(() => {
+                    const schemas = toolSchemas?.schemas ?? toolSchemas?.data?.schemas
+                    if (!schemas && toolSchemas?.total === undefined && !toolSchemas?.schemas) {
+                      return <div style={{ marginTop: 8 }}><Text type="secondary">加载工具 Schema 失败</Text></div>
+                    }
+                    if (!schemas || schemas.length === 0) {
+                      return <div style={{ marginTop: 8 }}><Text type="secondary">暂无可用的工具 Schema</Text></div>
+                    }
+                    return (
+                      <div style={{ marginTop: 8, maxHeight: 400, overflow: 'auto' }}>
+                        {schemas.map((tool, tidx) => (
+                          <div
+                            key={tidx}
+                            style={{
+                              marginBottom: 8,
+                              padding: 8,
+                              border: '1px solid var(--ant-color-border)',
+                              borderRadius: 4,
+                              background: 'var(--ant-color-bg-elevated)'
+                            }}
+                          >
+                            <Text strong style={{ fontSize: 12, color: 'var(--ant-color-primary)' }}>
+                              {tool.function?.name}
+                            </Text>
+                            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 2 }}>
+                              {tool.function?.description}
+                            </Text>
+                            <TextArea
+                              value={JSON.stringify(tool.function?.parameters, null, 2)}
+                              readOnly
+                              autoSize={{ minRows: 2, maxRows: 20 }}
+                              style={{
+                                marginTop: 4,
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                                background: 'transparent'
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                </div>
               </Space>
             ) : null}
           </Modal>

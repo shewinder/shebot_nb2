@@ -195,6 +195,12 @@ export const deleteSession = (sessionId) => request.delete(`/aichat/sessions/${s
 export const cleanupExpiredSessions = () => request.post('/aichat/sessions/cleanup-expired')
 
 
+// 获取工具 Schema 列表（可选 session_id 参数获取会话特定工具）
+export const getToolSchemas = (sessionId) => {
+  const params = sessionId ? { session_id: sessionId } : {}
+  return request.get('/aichat/tools/schemas', { params })
+}
+
 // ===== SKILL 管理 API =====
 // 获取所有可用 SKILL 列表
 export const getSkills = () => request.get('/aichat/skills')
