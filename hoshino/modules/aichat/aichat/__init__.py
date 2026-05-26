@@ -133,7 +133,7 @@ sv = Service('aichat', help_='''AI聊天插件
   退出对话模式/结束对话模式  退出连续对话模式
   查看对话模式  查看当前模式状态
 对话管理：
-  清除对话/清空对话/重置对话  清除当前对话历史
+  清除对话/清空对话/重置对话/清除上下文/清空上下文  清除当前对话历史
   回溯/回退 [N]  回溯N条对话
   查询token/token查询  查询当前会话的 Token 使用情况
 人格设置：
@@ -167,10 +167,6 @@ SKILL 系统：
   #当前技能  查看已激活的 SKILL
   #停用技能 <skill名称>  停用指定 SKILL
   #停用所有技能  停用所有 SKILL
-记忆系统：
-  查看记忆  查看AI记录的个人记忆笔记
-  记住 [内容]  手动添加一条记忆
-  清除记忆  清空所有个人记忆
 ''')
 
 sv.on_message(priority=10, block=False, only_group=False).handle()(handle_ai_chat)
@@ -229,7 +225,7 @@ async def check_chat_mode(bot: Bot, event: Event):
         await check_chat_mode_cmd.finish("当前处于「普通模式」，需要使用 # 前缀触发AI对话\n发送「进入对话模式」开启免#触发")
 
 
-clear_cmd = sv.on_command('清除对话', aliases=('清空对话', '重置对话'), only_group=False)
+clear_cmd = sv.on_command('清除对话', aliases=('清空对话', '重置对话', '清除上下文', '清空上下文'), only_group=False)
 
 @clear_cmd.handle()
 async def clear_session(bot: Bot, event: Event):
@@ -1157,66 +1153,4 @@ async def query_token(bot: Bot, event: Event):
     await query_token_cmd.finish("\n".join(lines))
 
 
-# ========== 记忆管理命令 ==========
 
-view_memory_cmd = sv.on_command('查看记忆', aliases=('我的记忆',), only_group=False)
-
-@view_memory_cmd.handle()
-async def view_memory(bot: Bot, event: Event):
-    """查看用户的记忆笔记"""
-    user_id = event.user_id
-    from .memory import memory_store
-    content = await memory_store.read(user_id)
-    default = memory_store.default_template()
-
-    if content.strip() == default.strip():
-        await view_memory_cmd.finish(
-            "你还没有记忆记录。\n"
-            "在对话中我会自动记录重要信息，你也可以发送「记住 内容」手动添加。"
-        )
-        return
-
-    header = f"📖 你的记忆笔记（共 {len(content)} 字符）：\n\n"
-    max_len = 2000
-    if len(content) > max_len:
-        content = content[:max_len] + f"\n\n...（已截断，剩余 {len(content) - max_len} 字符）"
-
-    await view_memory_cmd.finish(header + content)
-
-
-clear_memory_cmd = sv.on_command('清除记忆', aliases=('清空记忆', '删除记忆'), only_group=False)
-
-@clear_memory_cmd.handle()
-async def clear_memory(bot: Bot, event: Event):
-    """清空用户记忆"""
-    user_id = event.user_id
-    from .memory import memory_store
-    success = await memory_store.clear(user_id)
-    if success:
-        await clear_memory_cmd.finish("✅ 记忆已清空")
-    else:
-        await clear_memory_cmd.finish("没有找到记忆记录")
-
-
-remember_cmd = sv.on_command('记住', aliases=('记下来',), only_group=False)
-
-@remember_cmd.handle()
-async def remember(bot: Bot, event: Event):
-    """手动添加记忆"""
-    args = str(event.message).strip().split(maxsplit=1)
-    if len(args) < 2:
-        await remember_cmd.finish("请提供要记住的内容，例如：记住 我喜欢喝美式咖啡")
-        return
-
-    text = args[1].strip()
-    if not text:
-        await remember_cmd.finish("内容不能为空")
-        return
-
-    user_id = event.user_id
-    from .memory import memory_store
-    success = await memory_store.append(user_id, text)
-    if success:
-        await remember_cmd.finish(f"✅ 已记住：{text}")
-    else:
-        await remember_cmd.finish("记录失败，请稍后重试")
