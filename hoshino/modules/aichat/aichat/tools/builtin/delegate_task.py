@@ -3,12 +3,18 @@
 为 AI 提供 delegate_task 工具，可将复杂子任务委托给独立的子 Agent 执行。
 子 Agent 拥有独立 Session、受限工具集和任务专用 system prompt，
 执行完毕后返回摘要，不污染主对话上下文。
+
+子 Agent 类型（代码写死）：
+- search: 搜索汇总（web_search, fetch_url, get_current_time, weather）
+- vision: 视觉分析（fetch_url）
+
+模型配置、工具白名单覆盖、max_rounds 覆盖在 SubAgentProfile 中配置。
 """
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 
-from ..._agent_runner import run_agent
+from ..._agent_runner import run_agent, SUBAGENT_TYPES
 from ...config import Config
 from ..registry import tool_registry, ok, fail
 
@@ -17,26 +23,11 @@ if TYPE_CHECKING:
 
 conf = Config.get_instance('aichat')
 
-# 子 Agent 系统提示
-_SUBAGENT_SYSTEM_PROMPT = """【子任务执行模式】
-你是主 Agent 派出的子 Agent，负责独立完成一个具体任务并汇报结果。
 
-执行规则：
-- 直接执行任务，不要反问或等待用户确认
-- 如果用户消息中包含图片，你可以直接看到并分析（你具有多模态视觉能力）
-- 如果需要额外信息，使用可用工具（web_search、fetch_url 等）收集
-- 完成后返回清晰的结构化结果摘要
-- 简洁直接，不添加无关评论或角色扮演
-- 如果任务无法完成，明确说明原因及已尝试的步骤"""
-
-# 子 Agent 可用工具白名单（只读、非破坏性）
-_SUBAGENT_TOOL_NAMES = {"web_search", "fetch_url", "get_current_time", "weather"}
-
-
-def _build_whitelist_tools() -> List[Dict[str, Any]]:
+def _build_whitelist_tools(tool_names: set) -> List[Dict[str, Any]]:
     """构建子 Agent 工具列表（白名单过滤）"""
     tools = []
-    for name in _SUBAGENT_TOOL_NAMES:
+    for name in tool_names:
         tool_info = tool_registry.get_tool_info(name)
         if tool_info:
             tools.append({
@@ -50,17 +41,24 @@ def _build_whitelist_tools() -> List[Dict[str, Any]]:
     return tools
 
 
+def _build_type_descriptions() -> str:
+    """构建子 Agent 类型描述列表（注入主 Agent 提示）"""
+    lines = []
+    for t in SUBAGENT_TYPES.values():
+        lines.append(f"  · {t.name}: {t.description}")
+    return "\n".join(lines)
+
+
 @tool_registry.register(
     name="delegate_task",
     description="""【同步委托】将子任务交给独立的子 Agent 执行，等待完成后返回结果。
 
-子 Agent 拥有独立的对话上下文和受限工具集（web_search、fetch_url、get_current_time、weather），
-执行过程不污染你的主对话上下文。适合需要多轮搜索、信息收集、分析的复杂查询。
+子 Agent 拥有独立的对话上下文和受限工具集，执行过程不污染你的主对话上下文。
+适合需要多轮搜索、信息收集、分析的复杂查询，以及图片/视觉内容分析。
 
 ## 何时使用
-- 需要深入搜索多个关键词收集信息
-- 需要抓取多个网页并综合内容
-- 需要独立完成一个信息收集/分析子任务
+- 需要深入搜索多个关键词收集信息 → type="search"
+- 需要分析图片/视觉内容 → type="vision"
 - 多个独立的子任务（可在同一轮并行调用多个 delegate_task）
 
 ## 何时不用
@@ -71,8 +69,7 @@ def _build_whitelist_tools() -> List[Dict[str, Any]]:
 ## 使用技巧
 - 任务描述要具体明确，包含预期产出
 - 多个独立查询可以并行委托（同一轮中调用本工具多次）
-- 子 Agent 返回后，你基于摘要合成最终回复
-- 系统提示中如果列出了可用的子 Agent 模型配置，可根据任务类型选择对应的 profile""",
+- 子 Agent 返回后，你基于摘要合成最终回复""",
     parameters={
         "type": "object",
         "properties": {
@@ -80,9 +77,9 @@ def _build_whitelist_tools() -> List[Dict[str, Any]]:
                 "type": "string",
                 "description": "子任务的详细描述，说明要研究/分析/收集什么，期望的产出格式"
             },
-            "profile": {
+            "type": {
                 "type": "string",
-                "description": "子 Agent 模型配置名。根据系统提示中的可用配置选择，不传则使用默认"
+                "description": "子 Agent 类型，从系统提示中列出的可用类型中选择。如 'search'（搜索汇总）、'vision'（视觉分析）"
             },
             "image_identifiers": {
                 "type": "array",
@@ -96,7 +93,7 @@ def _build_whitelist_tools() -> List[Dict[str, Any]]:
 async def delegate_task(
     task: str,
     session: Optional["Session"] = None,
-    profile: str = "",
+    type: str = "search",
     image_identifiers: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """同步委托子 Agent 执行任务"""
@@ -107,21 +104,52 @@ async def delegate_task(
         return fail("任务描述不能为空")
 
     task = task.strip()
-    profile_name = profile.strip() if profile else ""
+    agent_type = type.strip() if type else "search"
 
-    logger.info(f"[SubAgent] 开始执行子任务，长度: {len(task)}，profile: {profile_name or '默认'}，图片: {len(image_identifiers) if image_identifiers else 0}")
+    # 解析类型定义
+    type_def = SUBAGENT_TYPES.get(agent_type)
+    if not type_def:
+        available = ", ".join(SUBAGENT_TYPES.keys())
+        return fail(f"未知的子 Agent 类型: {agent_type}，可用类型: {available}")
+
+    # 查找匹配的配置 profile（按名称匹配，用于覆盖模型/工具/轮数）
+    config_profile = None
+    for p in conf.subagent_profiles:
+        if p.name == agent_type:
+            config_profile = p
+            break
+
+    # 工具白名单：配置覆盖 > 类型默认
+    if config_profile and config_profile.tool_names:
+        tool_names = set(config_profile.tool_names)
+    else:
+        tool_names = set(type_def.tool_names)
+
+    # max_rounds：配置覆盖 > 全局默认
+    max_rounds = None
+    if config_profile and config_profile.max_rounds is not None:
+        max_rounds = config_profile.max_rounds
+    else:
+        max_rounds = getattr(conf, 'subagent_max_rounds', 5)
+
+    tools = _build_whitelist_tools(tool_names)
+
+    logger.info(
+        f"[SubAgent] 开始子任务，type={agent_type}，"
+        f"任务长度: {len(task)}，工具: {tool_names}，max_rounds: {max_rounds}"
+    )
 
     try:
         result = await run_agent(
             task=task,
-            system_prompt=_SUBAGENT_SYSTEM_PROMPT,
+            system_prompt=type_def.system_prompt,
             user_id=session.user_id,
             group_id=session.group_id,
-            tools=_build_whitelist_tools(),
-            max_rounds=getattr(conf, 'subagent_max_rounds', 5),
+            tools=tools,
+            max_rounds=max_rounds,
             locked_tools=True,
             session_prefix=f"subagent_{session.session_id}",
-            profile=profile_name or None,
+            profile=agent_type,
             parent_session=session,
             image_identifiers=image_identifiers,
         )
@@ -140,6 +168,7 @@ async def delegate_task(
         return ok(
             content,
             metadata={
+                "type": agent_type,
                 "rounds": rounds,
                 "task": task[:100],
                 "partial": bool(result.error),

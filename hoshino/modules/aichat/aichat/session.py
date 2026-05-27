@@ -362,13 +362,14 @@ class Session:
             active_mcp_servers = mcp_sm.get_active_servers(self.session_id) if mcp_sm else []
             logger.info(f"{self._tag} [MCP] 当前会话已激活 MCP server: {active_mcp_servers if active_mcp_servers else '无'}")
 
-        # 子 Agent 模型配置注入（仅主 Agent 可见，子 Agent 不需要知道）
-        if conf.subagent_profiles and self.agent_label == "main":
-            lines = ["【可用的子 Agent 模型配置】", "使用 delegate_task 工具时，可通过 profile 参数选择合适的模型："]
-            for p in conf.subagent_profiles:
-                model_name = p.model or (conf.get_api_by_name(p.api).model if p.api and conf.get_api_by_name(p.api) else "默认")
-                lines.append(f"  · {p.name}: {p.description}（{model_name}）")
-            context_parts.append("\n".join(lines))
+        # 子 Agent 类型注入（仅主 Agent 可见，子 Agent 不需要知道）
+        if self.agent_label == "main":
+            from ._agent_runner import SUBAGENT_TYPES
+            if SUBAGENT_TYPES:
+                lines = ["【可用的子 Agent 类型】", "使用 delegate_task 工具时，通过 type 参数选择类型："]
+                for t in SUBAGENT_TYPES.values():
+                    lines.append(f"  · {t.name}: {t.description}")
+                context_parts.append("\n".join(lines))
 
         # 记忆注入
         if conf.enable_memory and self.user_id:

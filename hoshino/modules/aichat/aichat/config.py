@@ -42,6 +42,8 @@ class SubAgentProfile(BaseModel):
     model: str = ""     # 模型名，空=使用 API 厂商默认模型
     supports_multimodal: Optional[bool] = None  # 覆盖 API 厂商的多模态设置
     description: str = ""  # 用途描述（注入提示让 AI 选择）
+    tool_names: List[str] = []           # 工具白名单，空=使用类型默认
+    max_rounds: Optional[int] = None     # 覆盖全局 subagent_max_rounds
 
 
 @configuration('aichat')
