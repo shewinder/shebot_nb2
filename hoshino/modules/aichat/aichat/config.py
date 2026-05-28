@@ -89,12 +89,11 @@ class Config(BaseConfig):
     enable_skills: bool = True         # SKILL 系统总开关
     # 用户自定义 SKILL 搜索路径（这些路径的 skill 不会被 git 跟踪）
     skill_user_paths: List[str] = ["data/skills"]
-    skill_default_tools: List[str] = ["Read", "Bash"]  # SKILL 默认允许的工具
     skill_max_per_session: int = 5     # 单个会话最大激活 SKILL 数量
 
     # 工具调用配置
-    max_tool_rounds: int = 10           # 单次对话最大工具调用轮数
-    subagent_max_rounds: int = 5        # 子 Agent 最大工具调用轮数
+    max_tool_rounds: int = 20           # 单次对话最大工具调用轮数
+    subagent_max_rounds: int = 10       # 子 Agent 最大工具调用轮数
     subagent_profiles: List[SubAgentProfile] = []  # 子 Agent 模型配置
 
     # 记忆系统配置
