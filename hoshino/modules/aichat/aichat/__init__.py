@@ -648,6 +648,174 @@ async def current_model(bot: Bot, event: Event):
     await current_model_cmd.finish("\n".join(lines))
 
 
+# ========== SubAgent 管理命令 ==========
+
+subapi_cmd = sv.on_command('切换subapi', permission=SUPERUSER, only_group=False)
+
+@subapi_cmd.handle()
+async def subapi(bot: Bot, event: Event):
+    """切换子Agent的API厂商"""
+    if not conf.subagent_profiles:
+        await subapi_cmd.finish("当前没有子Agent 配置")
+
+    args = str(event.message).strip().split(maxsplit=2)
+    apis = conf.get_apis()
+
+    if len(args) < 2:
+        # 无参数：列出所有 profile 及当前 API
+        lines = ["📦 子Agent 配置："]
+        for p in conf.subagent_profiles:
+            lines.append(f"  · {p.name}: API={p.api or '(继承主API)'}")
+        lines.append(f"\n使用「切换subapi <name> [api]」切换")
+        await subapi_cmd.finish("\n".join(lines))
+        return
+
+    name = args[1].strip()
+
+    # 查找 profile
+    target = None
+    for p in conf.subagent_profiles:
+        if p.name == name:
+            target = p
+            break
+
+    if not target:
+        available = ", ".join(p.name for p in conf.subagent_profiles)
+        await subapi_cmd.finish(f"未找到名为 '{name}' 的子Agent 配置\n当前可用：{available}")
+        return
+
+    if len(args) < 3:
+        # 只给了 name：列出可选 API
+        lines = [f"子Agent「{name}」当前 API：{target.api or '(继承主API)'}"]
+        lines.append(f"\n可用 API 厂商：")
+        for i, a in enumerate(apis, 1):
+            mark = " ★当前" if a.api == target.api else ""
+            lines.append(f"  {i}. {a.api}{mark} - {a.model}")
+        lines.append(f"\n使用「切换subapi {name} <api>」切换")
+        await subapi_cmd.finish("\n".join(lines))
+        return
+
+    api_input = args[2].strip()
+
+    # 校验厂商
+    entry = None
+    for a in apis:
+        if a.api.lower() == api_input.lower():
+            entry = a
+            break
+
+    if not entry:
+        try:
+            idx = int(api_input) - 1
+            if 0 <= idx < len(apis):
+                entry = apis[idx]
+        except ValueError:
+            pass
+
+    if not entry:
+        available = ", ".join(a.api for a in apis)
+        await subapi_cmd.finish(f"未找到 API 厂商「{api_input}」\n可用：{available}")
+        return
+
+    old_api = target.api
+    target.api = entry.api
+    target.model = entry.model  # 切 API 时自动跟进默认 model
+
+    from hoshino.config import save_plugin_config
+    save_plugin_config("aichat", conf)
+
+    await subapi_cmd.finish(
+        f"子Agent「{name}」API 已切换：{old_api or '(默认)'} → {entry.api}\n"
+        f"模型自动切换为：{entry.model}"
+    )
+
+
+submodel_cmd = sv.on_command('切换submodel', permission=SUPERUSER, only_group=False)
+
+@submodel_cmd.handle()
+async def submodel_handle(bot: Bot, event: Event, state: T_State):
+    """切换子Agent的模型"""
+    if not conf.subagent_profiles:
+        await submodel_cmd.finish("当前没有子Agent 配置")
+
+    args = str(event.message).strip().split(maxsplit=2)
+
+    if len(args) < 2:
+        lines = ["📦 子Agent 配置："]
+        for p in conf.subagent_profiles:
+            model_display = p.model
+            if not model_display and p.api:
+                entry = conf.get_api_by_name(p.api)
+                model_display = f"(继承: {entry.model})" if entry else "(继承主API)"
+            elif not model_display:
+                model_display = "(继承主API)"
+            lines.append(f"  · {p.name}: {model_display}")
+        lines.append(f"\n使用「切换submodel <name> [model]」切换")
+        await submodel_cmd.finish("\n".join(lines))
+        return
+
+    name = args[1].strip()
+
+    target = None
+    for p in conf.subagent_profiles:
+        if p.name == name:
+            target = p
+            break
+
+    if not target:
+        available = ", ".join(p.name for p in conf.subagent_profiles)
+        await submodel_cmd.finish(f"未找到名为 '{name}' 的子Agent 配置\n当前可用：{available}")
+        return
+
+    if len(args) >= 3:
+        # 有 model 参数：直接设置
+        model_name = args[2].strip()
+        old_model = target.model or "(继承)"
+        target.model = model_name
+
+        from hoshino.config import save_plugin_config
+        save_plugin_config("aichat", conf)
+
+        await submodel_cmd.finish(f"子Agent「{name}」模型已切换：{old_model} → {model_name}")
+        return
+
+    # 无 model 参数：进入交互流程
+    state['sub_name'] = name
+    current = target.model
+    if not current and target.api:
+        entry = conf.get_api_by_name(target.api)
+        current = entry.model if entry else "(继承主API)"
+    elif not current:
+        current = "(继承主API)"
+    await submodel_cmd.send(f"子Agent「{name}」当前模型：{current}\n请发送要切换的模型名称（发送「取消」退出）")
+
+
+@submodel_cmd.got('model_name')
+async def submodel_got(bot: Bot, event: Event, state: T_State):
+    model_name: str = str(state['model_name']).strip()
+
+    if model_name in ['取消', 'cancel', 'q']:
+        await submodel_cmd.finish("已取消")
+
+    name = state.get('sub_name', '')
+
+    target = None
+    for p in conf.subagent_profiles:
+        if p.name == name:
+            target = p
+            break
+
+    if not target:
+        await submodel_cmd.finish("配置已变更，请重新操作")
+
+    old_model = target.model or "(继承)"
+    target.model = model_name
+
+    from hoshino.config import save_plugin_config
+    save_plugin_config("aichat", conf)
+
+    await submodel_cmd.finish(f"子Agent「{name}」模型已切换：{old_model} → {model_name}")
+
 
 add_preset_cmd = sv.on_command('预设人格', aliases=('添加预设人格', '全局预设人格'), permission=SUPERUSER, only_group=False)
 
