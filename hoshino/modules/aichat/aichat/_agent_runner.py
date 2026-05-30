@@ -99,7 +99,9 @@ async def _copy_images(
     for ident in identifiers:
         data_url = parent_session._image_store.get_data_url(ident)
         if data_url:
-            new_id = await sub_session.store_user_image(data_url)
+            entry = parent_session._image_store.get(ident)
+            source_url = entry.url if entry else None
+            new_id = await sub_session.store_user_image(data_url, url=source_url)
             new_ids.append(new_id)
     return new_ids
 

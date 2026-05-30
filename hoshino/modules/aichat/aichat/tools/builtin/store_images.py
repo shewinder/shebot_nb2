@@ -237,7 +237,7 @@ async def store_images(
         logger.debug(f"下载第 {i}/{len(urls)} 张图片: {url[:80]}...")
         image_data = await _download_image_to_base64(url)
         if image_data:
-            identifier = await session.store_ai_image(image_data)
+            identifier = await session.store_ai_image(image_data, url=url)
             identifiers.append(identifier)
             logger.info(f"URL 图片 {i} 下载成功: {identifier}")
         else:

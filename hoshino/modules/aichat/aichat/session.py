@@ -107,13 +107,13 @@ class Session:
         """添加完整 API 格式消息（支持 tool_calls、tool 等）"""
         self._append_message(message)
     
-    async def store_user_image(self, image_data: str) -> str:
-        entry = await self._image_store.store(image_data, "user")
+    async def store_user_image(self, image_data: str, url: Optional[str] = None) -> str:
+        entry = await self._image_store.store(image_data, "user", url=url)
         self.last_active = time.time()
         return entry.identifier
-    
-    async def store_ai_image(self, image_data: str) -> str:
-        entry = await self._image_store.store(image_data, "ai")
+
+    async def store_ai_image(self, image_data: str, url: Optional[str] = None) -> str:
+        entry = await self._image_store.store(image_data, "ai", url=url)
         self.last_active = time.time()
         return entry.identifier
     
@@ -177,7 +177,10 @@ class Session:
         
         for img in images:
             meta = f"{img.width}x{img.height}" if img.width and img.height else "未知尺寸"
-            lines.append(f"{img.identifier} ({img.source}, {img.format}, {meta})")
+            line = f"{img.identifier} ({img.source}, {img.format}, {meta})"
+            if img.url:
+                line += f"\n  url: {img.url}"
+            lines.append(line)
         
         lines.extend([
             "=" * 40,

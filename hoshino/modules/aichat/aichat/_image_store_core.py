@@ -43,6 +43,7 @@ class ImageEntry:
     size_bytes: int
     created_at: float
     file_path: Path          # 绝对路径
+    url: Optional[str] = None  # 原始来源 URL（QQ 图片、工具下载等），无 URL 时为空
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典（file_path 转为字符串）"""
@@ -127,7 +128,7 @@ class ImageStoreCore:
                 pass
         return fmt or "png", width, height
 
-    def store_bytes(self, data: bytes, source: str, ext: str = "png") -> ImageEntry:
+    def store_bytes(self, data: bytes, source: str, ext: str = "png", url: Optional[str] = None) -> ImageEntry:
         """存储图像字节数据
 
         Args:
@@ -169,6 +170,7 @@ class ImageStoreCore:
                 size_bytes=len(data),
                 created_at=time.time(),
                 file_path=Path(""),
+                url=url,
             )
 
         # 更新元数据
@@ -183,6 +185,7 @@ class ImageStoreCore:
             size_bytes=len(data),
             created_at=time.time(),
             file_path=file_path.resolve(),
+            url=url,
         )
         self._meta[entry.identifier.lstrip("<").rstrip(">")] = entry.to_dict()
         self._save_meta()

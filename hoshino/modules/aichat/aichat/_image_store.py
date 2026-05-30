@@ -49,7 +49,7 @@ class ImageStore:
         mime = header[len("data:"):].split(";")[0].strip()
         return mime, b64
 
-    async def store(self, image_data: str, source: str) -> ImageEntry:
+    async def store(self, image_data: str, source: str, url: Optional[str] = None) -> ImageEntry:
         """存储图像（支持 base64 data URL / http URL / 纯 base64）
 
         Args:
@@ -86,7 +86,7 @@ class ImageStore:
             # 降级：让 core 存储空数据（会生成一个空文件，但至少不崩溃）
             raw_bytes = b""
 
-        return self._core.store_bytes(raw_bytes, source, ext)
+        return self._core.store_bytes(raw_bytes, source, ext, url=url)
 
     def get(self, identifier: str) -> Optional[ImageEntry]:
         return self._core.get(identifier)
