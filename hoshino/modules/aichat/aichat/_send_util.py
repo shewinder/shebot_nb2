@@ -52,7 +52,10 @@ async def build_response_messages(
       <user_image_N> / <ai_image_N> → 图片
       <@QQ号> → @用户
     """
+    # 无 session 时跳过媒体标识符解析，但不影响 markdown 渲染
     if not session:
+        if enable_markdown and len(content) >= markdown_min_length:
+            return await _build_markdown_only(content, markdown_min_length)
         return [Message(MessageSegment.text(content))]
 
     tokens = _MEDIA_PATTERN.split(content)
@@ -111,6 +114,19 @@ async def _build_plain_messages(
         if msg:
             messages.append(msg)
         return messages if messages else []
+
+
+async def _build_markdown_only(content: str, markdown_min_length: int) -> List[Message]:
+    """纯文本 Markdown 渲染（无 session / 无媒体标识符时用）"""
+    if len(content) < markdown_min_length:
+        return [Message(MessageSegment.text(content))]
+    try:
+        img_bytes = await render_text_if_markdown(content, min_length=markdown_min_length)
+        if img_bytes:
+            return [Message(MessageSegment.image(file=img_bytes))]
+    except Exception:
+        pass
+    return [Message(MessageSegment.text(content))]
 
 
 async def _build_markdown_messages(
