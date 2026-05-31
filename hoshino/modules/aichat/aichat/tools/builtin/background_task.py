@@ -3,7 +3,7 @@
 为 AI 提供 run_background_task 和 schedule_continuation 两个工具。
 """
 from datetime import datetime
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 
@@ -107,6 +107,11 @@ task_description 应该详细描述完整的任务链，包括所有步骤。AI 
             "task_id": {
                 "type": "string",
                 "description": "任务ID，cancel 时必需。从 list 结果中获取。"
+            },
+            "preactivate_skills": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "预激活的 SKILL 名称列表。传入 sub agent 执行任务需要用到的 SKILL，避免首轮再调 activate_skill。"
             }
         },
         "required": ["action"]
@@ -116,6 +121,7 @@ async def run_background_task(
     action: str,
     task_description: str = "",
     task_id: str = "",
+    preactivate_skills: Optional[List[str]] = None,
     session: Optional["Session"] = None,
     event: Optional["Event"] = None,
 ) -> Dict[str, Any]:
@@ -146,7 +152,7 @@ async def run_background_task(
                 return fail("请提供任务描述，说明要后台执行什么操作")
 
             try:
-                task = bg_task_manager.create_task(user_id, group_id, task_description)
+                task = bg_task_manager.create_task(user_id, group_id, task_description, preactivate_skills)
             except RuntimeError as e:
                 existing = bg_task_manager.get_running_task(user_id)
                 status_text = f"状态: {existing.status}" if existing else ""

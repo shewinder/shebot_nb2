@@ -86,6 +86,11 @@ def _build_type_descriptions() -> str:
                 "items": {"type": "string"},
                 "description": "需传递给子 Agent 的图片标识符列表，如 [\"user_image_1\", \"ai_image_3\"]。需要子 Agent 分析图片时传入"
             },
+            "preactivate_skills": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "预激活的 SKILL 名称列表。传入 sub agent 执行任务需要用到的 SKILL，避免首轮再调 activate_skill。"
+            },
         },
         "required": ["task"]
     },
@@ -95,6 +100,7 @@ async def delegate_task(
     session: Optional["Session"] = None,
     type: str = "search",
     image_identifiers: Optional[List[str]] = None,
+    preactivate_skills: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """同步委托子 Agent 执行任务"""
     if not session:
@@ -152,6 +158,8 @@ async def delegate_task(
             profile=agent_type,
             parent_session=session,
             image_identifiers=image_identifiers,
+            blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
+            preactivate_skills=preactivate_skills,
         )
 
         content = result.content or ""

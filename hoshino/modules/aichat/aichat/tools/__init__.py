@@ -75,6 +75,15 @@ async def get_available_tools(session: Optional[Any] = None) -> List[Dict[str, A
         if t["function"]["name"] != "schedule_continuation" or is_bg
     ]
 
+    # 过滤 blocked_tools：sub agent 禁止使用的工具
+    if session is not None:
+        blocked = getattr(session, '_blocked_tools', None)
+        if blocked:
+            tools = [
+                t for t in tools
+                if t["function"]["name"] not in blocked
+            ]
+
     return tools
 
 

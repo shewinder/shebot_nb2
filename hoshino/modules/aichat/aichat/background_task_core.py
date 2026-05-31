@@ -52,6 +52,7 @@ class BackgroundTask(BaseModel):
     max_continuations: int = 10
     next_run_at: Optional[datetime] = None
     context: str = ""
+    preactivate_skills: List[str] = []
 
 
 class BackgroundTaskManager:
@@ -76,6 +77,7 @@ class BackgroundTaskManager:
         user_id: int,
         group_id: Optional[int],
         task_description: str,
+        preactivate_skills: Optional[List[str]] = None,
     ) -> BackgroundTask:
         running_count = self._count_running(user_id)
         if running_count > 0:
@@ -92,6 +94,7 @@ class BackgroundTaskManager:
             task_description=task_description,
             status="pending",
             created_at=datetime.now(),
+            preactivate_skills=preactivate_skills or [],
         )
 
         self.tasks[task.id] = task
@@ -170,6 +173,8 @@ class BackgroundTaskManager:
                     persona=persona,
                     session_prefix=f"bg_task_{task.id}",
                     api_config=api_config,
+                    blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
+                    preactivate_skills=task.preactivate_skills or None,
                 )
 
                 cont = self._check_continuation(result)

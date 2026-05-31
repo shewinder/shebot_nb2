@@ -135,6 +135,8 @@ async def run_agent(
     persona: Optional[str] = None,
     max_rounds: int = 5,
     locked_tools: bool = False,
+    blocked_tools: frozenset = frozenset(),
+    preactivate_skills: Optional[List[str]] = None,
     session_prefix: str = "agent",
     api_config: Optional[Dict[str, Any]] = None,
     profile: Optional[str] = None,
@@ -147,6 +149,8 @@ async def run_agent(
         profile: 子 Agent 模型配置名
         parent_session: 父 Session（用于传递图片等资源）
         image_identifiers: 需传递给子 Agent 的图片标识符列表
+        blocked_tools: 禁止 sub agent 使用的工具名集合
+        preactivate_skills: 预激活的 SKILL 名称列表，省去首轮 activate_skill 调用
     """
     from .chat_executor import ChatExecutor, ChatResult
 
@@ -168,6 +172,16 @@ async def run_agent(
     session.agent_label = label
     if locked_tools:
         session._subagent_locked_tools = True
+    session._blocked_tools = blocked_tools
+
+    # 预激活 SKILL，省去 sub agent 首轮调 activate_skill
+    if preactivate_skills:
+        for skill_name in preactivate_skills:
+            ok_flag, msg, _ = session.activate_skill(skill_name)
+            if ok_flag:
+                logger.info(f"[Agent:sub] 预激活 SKILL: {skill_name}")
+            else:
+                logger.warning(f"[Agent:sub] 预激活 SKILL 失败: {skill_name} — {msg}")
 
     session.add_message("system", system_prompt)
 

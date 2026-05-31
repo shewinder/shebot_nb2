@@ -46,6 +46,8 @@ class ScheduledTask(BaseModel):
     execute_at: Optional[datetime] = None     # 执行时间（一次性任务用）
     # @ 提醒字段
     mention_user: bool = False                # 执行时是否 @ 任务创建者
+    # 预激活 SKILL
+    preactivate_skills: List[str] = []
 
 
 class TaskManager:
@@ -192,6 +194,8 @@ class TaskManager:
                 persona=persona,
                 session_prefix=f"agent_task_{task.id}_{uuid.uuid4().hex[:6]}",
                 api_config=api_config,
+                blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
+                preactivate_skills=task.preactivate_skills or None,
             )
             
             task.execution_count += 1
@@ -239,7 +243,8 @@ class TaskManager:
         silent: bool = False,
         is_one_time: bool = False,
         execute_at: Optional[datetime] = None,
-        mention_user: bool = False
+        mention_user: bool = False,
+        preactivate_skills: Optional[List[str]] = None,
     ) -> ScheduledTask:
         now = datetime.now()
         task = ScheduledTask(
@@ -255,7 +260,8 @@ class TaskManager:
             updated_at=now,
             is_one_time=is_one_time,
             execute_at=execute_at,
-            mention_user=mention_user
+            mention_user=mention_user,
+            preactivate_skills=preactivate_skills or [],
         )
         
         self.tasks[task.id] = task

@@ -2,7 +2,7 @@
 AI Tool: 定时任务管理
 支持创建、查看、删除、暂停/恢复定时任务
 """
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from loguru import logger
 
 from ..registry import tool_registry, ok, fail
@@ -144,6 +144,11 @@ if TYPE_CHECKING:
             "mention_user": {
                 "type": "boolean",
                 "description": "执行时是否 @ 任务创建者。适合提醒类任务，如'30分钟后提醒我'时设为 true，会在消息开头 @ 创建者。仅在群聊中有效。"
+            },
+            "preactivate_skills": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "预激活的 SKILL 名称列表。传入任务执行需要用到的 SKILL，避免首轮再调 activate_skill。"
             }
         },
         "required": ["action"]
@@ -163,6 +168,7 @@ async def schedule_task(
     execute_at: str = "",
     delay_minutes: int = 0,
     mention_user: Optional[bool] = None,
+    preactivate_skills: Optional[List[str]] = None,
     session: Optional["Session"] = None,
     event: Optional["Event"] = None,
 ) -> Dict[str, Any]:
@@ -221,7 +227,8 @@ async def schedule_task(
                 one_time=one_time,
                 execute_at=execute_at,
                 delay_minutes=delay_minutes,
-                mention_user=mention_user
+                mention_user=mention_user,
+                preactivate_skills=preactivate_skills,
             )
         
         elif action == "list":
@@ -257,7 +264,8 @@ async def _create_task(
     one_time: Optional[bool],
     execute_at: str,
     delay_minutes: int,
-    mention_user: Optional[bool]
+    mention_user: Optional[bool],
+    preactivate_skills: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """创建新任务"""
     
@@ -341,7 +349,8 @@ async def _create_task(
         silent=silent,
         is_one_time=is_one_time,
         execute_at=execute_datetime,
-        mention_user=should_mention
+        mention_user=should_mention,
+        preactivate_skills=preactivate_skills,
     )
     
     # 构建返回消息
