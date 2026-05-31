@@ -3,10 +3,10 @@
 qBittorrent 任务列表查看脚本
 用法: python qb_list.py [--json]
 """
+import os
 import sys
 import json
 import argparse
-from pathlib import Path
 from typing import Dict, Any, List
 
 try:
@@ -18,10 +18,6 @@ except ImportError as e:
         "error": f"缺少依赖: {e}. 请安装: uv pip install aiohttp"
     }, ensure_ascii=False))
     sys.exit(1)
-
-# 添加 skill 目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import get_qb_config
 
 
 class QBittorrentClient:
@@ -199,19 +195,16 @@ def format_torrents(data: List[Dict[str, Any]]) -> str:
 
 async def list_torrents() -> Dict[str, Any]:
     """获取并格式化任务列表"""
-    
-    config = get_qb_config()
-    if not config.enabled:
-        return {
-            "success": False,
-            "error": "qBittorrent 未启用，请在 config.json 中配置"
-        }
-    
+
+    base_url = os.environ.get("PT_QB_URL", "http://localhost:8080")
+    username = os.environ.get("PT_QB_USERNAME", "admin")
+    password = os.environ.get("PT_QB_PASSWORD", "")
+
     client = QBittorrentClient(
-        base_url=config.base_url,
-        username=config.username,
-        password=config.password,
-        verify_ssl=config.verify_ssl
+        base_url=base_url,
+        username=username,
+        password=password,
+        verify_ssl=False,
     )
     
     async with aiohttp.ClientSession() as session:
