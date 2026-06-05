@@ -232,21 +232,30 @@ async def download_torrent(download_url_or_id: str) -> Optional[bytes]:
         return None
 
 
-async def add_and_download(download_url: str, category: str = "") -> Dict[str, Any]:
-    """下载种子并提交到 qBittorrent"""
-    torrent_data = await download_torrent(download_url)
-    if not torrent_data:
-        return {"success": False, "error": "下载种子文件失败"}
-
+async def add_and_download(ids: list[str], category: str = "") -> Dict[str, Any]:
+    """批量下载种子并提交到 qBittorrent"""
     from qb_add import add as qb_add
-    return await qb_add(torrent_data, category)
+
+    success = 0
+    failed = 0
+    for tid in ids:
+        torrent_data = await download_torrent(tid)
+        if not torrent_data:
+            failed += 1
+            continue
+        result = await qb_add(torrent_data, category)
+        if result["success"]:
+            success += 1
+        else:
+            failed += 1
+    return {"success": failed == 0, "count": len(ids), "ok": success, "failed": failed}
 
 
 def main():
     parser = argparse.ArgumentParser(description="M-Team 搜索与下载")
     parser.add_argument("keyword", nargs="?", default="", help="搜索关键词（可留空）")
     parser.add_argument("--free", action="store_true", help="仅免费种")
-    parser.add_argument("--add", help="下载种子并添加到 qBittorrent（传入下载链接或种子ID）")
+    parser.add_argument("--add", nargs="*", help="下载种子并添加到 qBittorrent（传入种子 ID，可多个）")
     parser.add_argument("--category", default="", help="qb 分类（如 电影/动漫/R18）")
     parser.add_argument("--json", action="store_true", help="输出 JSON 格式")
 
@@ -260,7 +269,8 @@ def main():
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.add:
-        print(f"✅ 已添加: {result.get('title', '')}" if result["success"] else f"❌ 失败: {result.get('error', '')}")
+        label = f" [{args.category}]" if args.category else ""
+        print(f"✅ {result.get('ok', 0)}/{result.get('count', 0)} 已添加{label}" if result["success"] else f"❌ {result.get('ok', 0)}/{result.get('count', 0)} 成功{label}")
     else:
         print(format_results(result))
 

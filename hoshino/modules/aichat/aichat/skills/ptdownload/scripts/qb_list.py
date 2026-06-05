@@ -140,32 +140,33 @@ def state_text(state: str) -> str:
     return texts.get(state, state)
 
 
-def format_torrents(data: List[Dict[str, Any]]) -> str:
+def format_torrents(data: List[Dict[str, Any]], search: str = "") -> str:
     """格式化任务列表"""
-    
+
     if not data:
         return "📭 当前没有下载任务"
-    
-    lines = [f"📥 qBittorrent 任务列表（共 {len(data)} 个）\n"]
-    
+
+    # 按名称过滤
+    if search:
+        data = [t for t in data if search.lower() in t.get('name', '').lower()]
+        if not data:
+            return f"📭 未找到包含「{search}」的任务"
+
+    total = len(data)
+    lines = [f"📥 qBittorrent 任务列表（共 {total} 个{f', 筛选: {search}' if search else ''}）\n"]
+
     # 按状态排序：下载中 -> 队列中 -> 做种中 -> 其他
     def sort_key(t):
-        state = t.get('state', '')
         priority = {
-            'downloading': 0,
-            'forcedDL': 0,
-            'stalledDL': 1,
-            'queuedDL': 2,
-            'checkingDL': 3,
-            'uploading': 4,
-            'forcedUP': 4,
-            'stalledUP': 5,
+            'downloading': 0, 'forcedDL': 0,
+            'stalledDL': 1, 'queuedDL': 2, 'checkingDL': 3,
+            'uploading': 4, 'forcedUP': 4, 'stalledUP': 5,
         }
-        return priority.get(state, 10)
-    
+        return priority.get(t.get('state', ''), 10)
+
     sorted_torrents = sorted(data, key=sort_key)
-    
-    for i, t in enumerate(sorted_torrents[:20], 1):  # 最多显示 20 个
+
+    for i, t in enumerate(sorted_torrents, 1):
         name = t.get('name', '未知')[:40]
         state = t.get('state', 'unknown')
         progress = t.get('progress', 0)
@@ -173,23 +174,20 @@ def format_torrents(data: List[Dict[str, Any]]) -> str:
         downloaded = format_size(t.get('completed', 0))
         dlspeed = format_speed(t.get('dlspeed', 0))
         upspeed = format_speed(t.get('upspeed', 0))
-        
+
         icon = state_icon(state)
         status = state_text(state)
-        
+
         lines.append(f"{i}. {icon} {name}")
         lines.append(f"   状态: {status} | 进度: {format_progress(progress)} | 大小: {size}")
-        
+
         if state in ['downloading', 'forcedDL', 'stalledDL']:
             lines.append(f"   下载: {downloaded} | 速度: {dlspeed}")
         elif state in ['uploading', 'forcedUP', 'stalledUP']:
             lines.append(f"   上传速度: {upspeed}")
-        
+
         lines.append("")
-    
-    if len(data) > 20:
-        lines.append(f"... 还有 {len(data) - 20} 个任务")
-    
+
     return "\n".join(lines)
 
 
@@ -222,19 +220,19 @@ async def list_torrents() -> Dict[str, Any]:
 
 def main():
     parser = argparse.ArgumentParser(description='qBittorrent 任务列表')
+    parser.add_argument('--search', help='按名称过滤（子串匹配）')
     parser.add_argument('--json', action='store_true', help='输出 JSON 格式')
-    
+
     args = parser.parse_args()
-    
+
     result = asyncio.run(list_torrents())
-    
+
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif result.get('success'):
+        print(format_torrents(result.get('torrents', []), search=args.search or ""))
     else:
-        if result.get('success'):
-            print(format_torrents(result.get('torrents', [])))
-        else:
-            print(f"❌ 获取失败: {result.get('error')}")
+        print(f"❌ 获取失败: {result.get('error')}")
     
     sys.exit(0 if result.get('success') else 1)
 

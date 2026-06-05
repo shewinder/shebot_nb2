@@ -48,8 +48,8 @@ execute_script(skill_name="pt-download", script_path="scripts/search_audiences.p
 ### 添加下载
 
 ```python
-# 站点脚本一步完成（下载种子 + 提交 qb）
-execute_script(skill_name="pt-download", script_path="scripts/search_mteam.py", args=["--add", "下载链接或种子ID", "--category", "电影"])
+# 站点脚本一步完成（下载种子 + 提交 qb，支持批量）
+execute_script(skill_name="pt-download", script_path="scripts/search_mteam.py", args=["--add", "123", "456", "--category", "电影"])
 execute_script(skill_name="pt-download", script_path="scripts/search_tjupt.py", args=["--add", "下载链接", "--category", "电影"])
 
 # 已有本地种子文件
@@ -59,7 +59,11 @@ execute_script(skill_name="pt-download", script_path="scripts/qb_add.py", args=[
 ### 查看下载进度
 
 ```python
+# 查看全部（最多 50 条）
 execute_script(skill_name="pt-download", script_path="scripts/qb_list.py")
+
+# 按名称搜索
+execute_script(skill_name="pt-download", script_path="scripts/qb_list.py", args=["--search", "关键词"])
 ```
 
 ## 注意事项

@@ -40,7 +40,7 @@ class QBittorrentClient:
             print(f"qBittorrent 登录失败: {e}", file=sys.stderr)
             return False
 
-    async def add_torrent(self, session: aiohttp.ClientSession, torrent_data: bytes, category: str = "") -> Dict[str, Any]:
+    async def add_torrent(self, session: aiohttp.ClientSession, torrent_data: bytes, category: str = "", save_path: str = "") -> Dict[str, Any]:
         if not self._cookie and not await self.login(session):
             return {"success": False, "error": "qBittorrent 登录失败"}
 
@@ -48,14 +48,16 @@ class QBittorrentClient:
         data.add_field("torrents", torrent_data, filename="file.torrent", content_type="application/x-bittorrent")
         if category:
             data.add_field("category", category)
+        if save_path:
+            data.add_field("savepath", save_path)
         data.add_field("autoTMM", "false")
 
         headers = {"Cookie": self._cookie}
         async with session.post(f"{self.base_url}/api/v2/torrents/add", headers=headers, data=data) as resp:
-            if resp.status in (200, 201):
-                text = await resp.text()
-                return {"success": text.strip() == "" or "Ok" in text}
-            return {"success": False, "error": f"HTTP {resp.status}"}
+            text = await resp.text()
+            if resp.status in (200, 201) and (text.strip() == "" or "Ok" in text):
+                return {"success": True}
+            return {"success": False, "error": text.strip()}
 
 
 async def add(torrent_data: bytes, category: str = "") -> Dict[str, Any]:
@@ -65,7 +67,13 @@ async def add(torrent_data: bytes, category: str = "") -> Dict[str, Any]:
 
     client = QBittorrentClient(base_url, username, password)
     async with aiohttp.ClientSession() as session:
-        return await client.add_torrent(session, torrent_data, category)
+        # 查询分类获取对应路径
+        save_path = ""
+        cats = await list_categories()
+        if cats.get("success"):
+            cat_info = cats["categories"].get(category, {})
+            save_path = cat_info.get("savePath", "")
+        return await client.add_torrent(session, torrent_data, category, save_path)
 
 
 async def list_categories() -> Dict[str, Any]:
