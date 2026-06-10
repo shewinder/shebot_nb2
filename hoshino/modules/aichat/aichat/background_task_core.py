@@ -31,11 +31,17 @@ _BG_SYSTEM_PROMPT = """【后台执行模式】
 
 执行规则：
 - 直接动手执行，不要问用户任何确认问题
-- 优先使用已有的工具和 SKILL 完成任务，不要凭空构造 shell 命令或猜测文件路径
-- 如果任务需要等待（下载中、处理中、文件生成中），调用 schedule_continuation 安排后续检查
-- 如果任务已完成，直接返回完整结果，不要调用 schedule_continuation
+- 优先使用已有的工具和 SKILL 完成任务
+
+⚠️ 等待/轮询规则（重要）：
+- 后台任务中，等待后继续执行的唯一正确方式是调用 wait_and_resume
+- ❌ 禁止用命令行写轮询脚本（sleep、while 循环、watch、重复 curl）来监控进度——任何执行环境都不行
+- ❌ 禁止在多轮中反复调用同一个查询工具来"持续监控"——那是浪费轮数
+- ✅ 正确做法：查询一次当前状态 → wait_and_resume(delay_minutes=2, context="当前进度...") → 下一轮自动恢复继续查
+- 任务完成后直接返回完整结果，不要调用 wait_and_resume
+
 - 不要让用户"稍后再来"——后台任务的价值就是自己持续跟进直到完成
-- 不要创建新的定时任务来追踪进度——schedule_continuation 就是为此设计的"""
+- 不要创建新的定时任务来追踪进度——wait_and_resume 就是为此设计的"""
 
 
 class BackgroundTask(BaseModel):
@@ -131,7 +137,7 @@ class BackgroundTaskManager:
             f"\n【上轮进展】\n{task.context}\n\n"
             f"【注意】本轮是第 {task.continuation_count + 1} 次续查，"
             f"最多 {task.max_continuations} 次。"
-            f"如果任务已完成，直接返回结果，不要调用 schedule_continuation。"
+            f"如果任务已完成，直接返回结果，不要调用 wait_and_resume。"
         )
 
     def _check_continuation(self, result: "ChatResult") -> Optional[dict]:

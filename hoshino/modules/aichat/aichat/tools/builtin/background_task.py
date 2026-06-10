@@ -1,6 +1,6 @@
 """后台任务工具
 
-为 AI 提供 run_background_task 和 schedule_continuation 两个工具。
+为 AI 提供 run_background_task 和 wait_and_resume 两个工具。
 """
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -80,7 +80,7 @@ def _format_task_list(tasks: list) -> str:
 - cancel: 取消一个 pending 状态的任务（已开始执行的任务无法取消）。
 
 ## start 时 task_description 填写规范
-task_description 应该详细描述完整的任务链，包括所有步骤。AI 在后台可以调用 schedule_continuation 定时检查进度。
+task_description 应该详细描述完整的任务链，包括所有步骤。AI 在后台可以调用 wait_and_resume 定时检查进度。
 示例:
 - "监控 qBittorrent 中xx电影的下载进度，下载完成后汇报文件信息（文件名、大小、路径）"
 - "监控 qBittorrent 中「Oppenheimer.2023.1080p」的下载进度，完成后汇报"
@@ -198,8 +198,12 @@ async def run_background_task(
 
 
 @tool_registry.register(
-    name="schedule_continuation",
-    description="""【后台任务专用】暂停当前执行并安排后续检查。
+    name="wait_and_resume",
+    description="""【后台任务专用】等待一段时间后自动恢复执行。
+
+## ⚠️ 后台任务中，这是"等待 + 后续检查"的唯一正确方式
+当你需要等待下载完成、文件生成、外部处理结果时，唯一可用的等待工具就是 wait_and_resume。
+禁止用命令行写轮询脚本（sleep/while 循环/watch/重复 curl）来模拟等待——那会浪费工具调用轮数且不必要。
 
 ## 使用场景
 - 提交了一个需要时间完成的操作（下载、转码、文件生成），需要定时检查进度
@@ -220,7 +224,7 @@ async def run_background_task(
         "properties": {
             "delay_minutes": {
                 "type": "integer",
-                "description": "多少分钟后继续执行（1-60）",
+                "description": "多少分钟后恢复执行（1-60）",
                 "minimum": 1,
                 "maximum": 60
             },
@@ -236,7 +240,7 @@ async def run_background_task(
         "required": ["delay_minutes", "why"]
     }
 )
-async def schedule_continuation(
+async def wait_and_resume(
     delay_minutes: int,
     why: str,
     context: str = "",
@@ -244,7 +248,7 @@ async def schedule_continuation(
     delay_minutes = max(1, min(delay_minutes, 60))
 
     return ok(
-        f"已安排 {delay_minutes} 分钟后继续: {why}",
+        f"已安排 {delay_minutes} 分钟后恢复: {why}",
         metadata={
             "continuation": True,
             "delay_minutes": delay_minutes,

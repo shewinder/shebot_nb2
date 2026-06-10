@@ -68,11 +68,11 @@ async def get_available_tools(session: Optional[Any] = None) -> List[Dict[str, A
     except Exception as e:
         logger.exception(f"[MCP] 获取 MCP 工具失败: {e}")
 
-    # 过滤 schedule_continuation：仅后台 session 可见
+    # 过滤 wait_and_resume：仅后台 session 可见
     is_bg = session is not None and session.session_id.startswith("bg_task_")
     tools = [
         t for t in tools
-        if t["function"]["name"] != "schedule_continuation" or is_bg
+        if t["function"]["name"] != "wait_and_resume" or is_bg
     ]
 
     # 过滤 blocked_tools：sub agent 禁止使用的工具
