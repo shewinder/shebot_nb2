@@ -212,7 +212,7 @@ async def execute_script(
         stderr_str = stderr.decode('utf-8', errors='replace').strip()
         
         # 限制输出长度（防止 Token 爆炸）
-        max_output = 10000
+        max_output = 100000
         if len(stdout_str) > max_output:
             stdout_str = stdout_str[:max_output] + "\n... (输出已截断)"
         if len(stderr_str) > max_output:
