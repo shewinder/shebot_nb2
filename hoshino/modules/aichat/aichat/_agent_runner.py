@@ -146,6 +146,7 @@ async def run_agent(
     """在独立 Session 中运行一个 Agent 任务
 
     Args:
+        max_rounds: 最大工具调用轮数
         profile: 子 Agent 模型配置名
         parent_session: 父 Session（用于传递图片等资源）
         image_identifiers: 需传递给子 Agent 的图片标识符列表

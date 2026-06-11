@@ -194,6 +194,7 @@ class TaskManager:
                 persona=persona,
                 session_prefix=f"agent_task_{task.id}_{uuid.uuid4().hex[:6]}",
                 api_config=api_config,
+                max_rounds=conf.subagent_max_rounds,
                 blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
                 preactivate_skills=task.preactivate_skills or None,
             )

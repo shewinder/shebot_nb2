@@ -179,6 +179,7 @@ class BackgroundTaskManager:
                     persona=persona,
                     session_prefix=f"bg_task_{task.id}",
                     api_config=api_config,
+                    max_rounds=conf.subagent_max_rounds,
                     blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
                     preactivate_skills=task.preactivate_skills or None,
                 )
