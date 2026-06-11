@@ -59,7 +59,7 @@ execute_script(skill_name="pt-download", script_path="scripts/qb_add.py", args=[
 ### 查看下载进度
 
 ```python
-# 查看全部（最多 50 条）
+# 查看全部
 execute_script(skill_name="pt-download", script_path="scripts/qb_list.py")
 
 # 按名称搜索

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 qBittorrent 任务列表查看脚本
-用法: python qb_list.py [--json]
+用法: python qb_list.py [--search 关键词]
 """
 import os
 import sys
@@ -177,6 +177,7 @@ def format_torrents(data: List[Dict[str, Any]], search: str = "") -> str:
 
         icon = state_icon(state)
         status = state_text(state)
+        save_path = t.get('save_path', '') or ''
 
         lines.append(f"{i}. {icon} {name}")
         lines.append(f"   状态: {status} | 进度: {format_progress(progress)} | 大小: {size}")
@@ -186,6 +187,7 @@ def format_torrents(data: List[Dict[str, Any]], search: str = "") -> str:
         elif state in ['uploading', 'forcedUP', 'stalledUP']:
             lines.append(f"   上传速度: {upspeed}")
 
+        lines.append(f"   路径: {save_path}")
         lines.append("")
 
     return "\n".join(lines)
@@ -221,15 +223,12 @@ async def list_torrents() -> Dict[str, Any]:
 def main():
     parser = argparse.ArgumentParser(description='qBittorrent 任务列表')
     parser.add_argument('--search', help='按名称过滤（子串匹配）')
-    parser.add_argument('--json', action='store_true', help='输出 JSON 格式')
 
     args = parser.parse_args()
 
     result = asyncio.run(list_torrents())
 
-    if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-    elif result.get('success'):
+    if result.get('success'):
         print(format_torrents(result.get('torrents', []), search=args.search or ""))
     else:
         print(f"❌ 获取失败: {result.get('error')}")
