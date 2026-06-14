@@ -132,11 +132,6 @@ function Aichat() {
   const [toolSchemas, setToolSchemas] = useState(null)
   const [toolSchemasLoading, setToolSchemasLoading] = useState(false)
 
-  // SKILL 管理相关
-  const [skills, setSkills] = useState([])
-  const [skillsLoading, setSkillsLoading] = useState(false)
-  const [skillsConfig, setSkillsConfig] = useState({ enable_skills: false, skill_user_paths: [] })
-
   useEffect(() => {
     fetchInitialData()
   }, [])
@@ -150,8 +145,7 @@ function Aichat() {
         fetchConfig(),
         fetchSuperusers(),
         fetchGroups(),
-        fetchGlobalPresets(),
-        fetchSkillsConfig()
+        fetchGlobalPresets()
       ])
     } catch (error) {
       message.error('加载数据失败: ' + error.message)
@@ -649,50 +643,6 @@ function Aichat() {
       await fetchSessions()
     } catch (error) {
       message.error('清理失败: ' + error.message)
-    }
-  }
-
-  // ===== SKILL 管理相关函数 =====
-  const fetchSkillsConfig = async () => {
-    try {
-      const res = await aichatApi.getSkillsConfig()
-      // 响应拦截器已解包，res 直接是对象 {enable_skills, skill_user_paths}
-      if (res) {
-        setSkillsConfig(res)
-        // 如果 SKILL 系统启用，同时获取 SKILL 列表
-        if (res.enable_skills) {
-          await fetchSkills()
-        }
-      }
-    } catch (error) {
-      // 静默处理，可能旧版本后端没有这些接口
-    }
-  }
-
-  const fetchSkills = async () => {
-    setSkillsLoading(true)
-    try {
-      const res = await aichatApi.getSkills()
-      // 响应拦截器已解包，res 直接是数组
-      setSkills(res || [])
-    } catch (error) {
-      message.error('获取 SKILL 列表失败: ' + error.message)
-    } finally {
-      setSkillsLoading(false)
-    }
-  }
-
-  const handleUpdateSkillsConfig = async (values) => {
-    try {
-      const result = await aichatApi.updateSkillsConfig(values)
-      message.success(result.data || '配置更新成功')
-      setSkillsConfig(values)
-      // 如果启用了 SKILL 系统，刷新列表
-      if (values.enable_skills) {
-        await fetchSkills()
-      }
-    } catch (error) {
-      message.error('配置更新失败: ' + error.message)
     }
   }
 
@@ -1567,89 +1517,6 @@ function Aichat() {
               )}
             </Space>
           </Card>
-        </TabPane>
-
-        <TabPane
-          tab={<span><ToolOutlined /> SKILL 管理</span>}
-          key="skills"
-        >
-          <Card
-            title="SKILL 系统配置"
-            extra={
-              <Space>
-                <Button icon={<ReloadOutlined />} onClick={fetchSkills} loading={skillsLoading}>
-                  刷新
-                </Button>
-              </Space>
-            }
-          >
-            <Alert
-              message="SKILL 系统"
-              description="SKILL 是 AI 的能力扩展机制。启用后，AI 会根据对话内容自动激活合适的 SKILL 来辅助回答。用户无需手动管理，通过自然语言与 AI 交互即可。"
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Card size="small" title="系统开关">
-                <Space>
-                  <Switch
-                    checked={skillsConfig.enable_skills}
-                    onChange={(checked) => handleUpdateSkillsConfig({ ...skillsConfig, enable_skills: checked })}
-                  />
-                  <span>{skillsConfig.enable_skills ? 'SKILL 系统已启用' : 'SKILL 系统已禁用'}</span>
-                </Space>
-              </Card>
-              
-              {skillsConfig.enable_skills && (
-                <>
-                  <Card size="small" title="用户 SKILL 路径">
-                    {skillsConfig.skill_user_paths.length > 0 ? (
-                      <List
-                        size="small"
-                        bordered
-                        dataSource={skillsConfig.skill_user_paths}
-                        renderItem={path => <List.Item>{path}</List.Item>}
-                      />
-                    ) : (
-                      <Text type="secondary">未配置用户 SKILL 路径</Text>
-                    )}
-                  </Card>
-                </>
-              )}
-            </Space>
-          </Card>
-
-          {skillsConfig.enable_skills && (
-            <Card title="可用 SKILL 列表" style={{ marginTop: 16 }}>
-              {skills.length > 0 ? (
-                <List
-                  grid={{ gutter: 16, column: 2 }}
-                  dataSource={skills}
-                  renderItem={skill => (
-                    <List.Item>
-                      <Card
-                        size="small"
-                        title={
-                          <Space>
-                            <span>{skill.name}</span>
-                            {skill.source !== 'local' && <Tag>{skill.source}</Tag>}
-                            {skill.version && <Tag color="blue">v{skill.version}</Tag>}
-                          </Space>
-                        }
-                      >
-                        <Space direction="vertical" style={{ width: '100%' }}>
-                          <Text>{skill.description}</Text>
-                        </Space>
-                      </Card>
-                    </List.Item>
-                  )}
-                />
-              ) : (
-                <Empty description="暂无可用的 SKILL" />
-              )}
-            </Card>
-          )}
         </TabPane>
 
         <TabPane

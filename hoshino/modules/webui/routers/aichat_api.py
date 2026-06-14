@@ -13,7 +13,6 @@ import nonebot
 from hoshino import Bot
 from hoshino.config import get_plugin_config_by_name
 from hoshino.modules.aichat.aichat import api_manager, persona_manager, conf, session_manager
-from hoshino.modules.aichat.aichat.skills import skill_manager
 from hoshino.modules.aichat.aichat.tools import get_available_tools as _get_available_tools
 from hoshino.modules.aichat.aichat.config import ApiEntry
 from hoshino.modules.aichat.aichat.character_import import parse_character_png, CharacterCard
@@ -1024,88 +1023,3 @@ async def get_tool_schemas(session_id: str | None = None):
         logger.exception(f"获取工具 Schema 失败: {e}")
         return {"status": 500, "data": f"获取失败: {str(e)}"}
 
-
-# ========== SKILL 管理 API ==========
-
-class SkillInfo(BaseModel):
-    """SKILL 信息"""
-    name: str
-    description: str
-    source: str
-    version: str
-    enabled: bool
-
-
-class SkillConfig(BaseModel):
-    """SKILL 配置"""
-    enable_skills: bool
-    skill_user_paths: List[str]
-
-
-@router.get("/skills")
-async def get_skills():
-    """获取所有可用 SKILL 列表"""
-    try:
-        if not conf.enable_skills:
-            return {"status": 200, "data": [], "message": "SKILL 系统未启用"}
-        
-        # 确保 skill_manager 已初始化
-        if not skill_manager._initialized:
-            skill_manager.user_paths = conf.skill_user_paths
-            skill_manager.initialize()
-        
-        skills = skill_manager.list_skills()
-        result = [
-            SkillInfo(
-                name=skill.metadata.name,
-                description=skill.metadata.description,
-                source=skill.metadata.source,
-                version=skill.metadata.version,
-                enabled=skill.metadata.enabled
-            )
-            for skill in skills
-        ]
-        return {"status": 200, "data": result}
-    except Exception as e:
-        logger.exception(f"获取 SKILL 列表失败: {e}")
-        return {"status": 500, "data": f"获取失败: {str(e)}"}
-
-
-
-@router.get("/config/skills")
-async def get_skills_config():
-    """获取 SKILL 系统配置"""
-    try:
-        return {
-            "status": 200,
-            "data": {
-                "enable_skills": conf.enable_skills,
-                "skill_user_paths": conf.skill_user_paths
-            }
-        }
-    except Exception as e:
-        logger.exception(f"获取 SKILL 配置失败: {e}")
-        return {"status": 500, "data": f"获取失败: {str(e)}"}
-
-
-@router.post("/config/skills")
-async def update_skills_config(config_update: SkillConfig):
-    """更新 SKILL 系统配置"""
-    try:
-        # 更新配置
-        conf.enable_skills = config_update.enable_skills
-        conf.skill_user_paths = config_update.skill_user_paths
-        
-        # 保存配置
-        from hoshino.config import save_plugin_config
-        save_plugin_config("aichat", conf)
-        
-        # 如果 SKILL 系统被启用，重新初始化 skill_manager
-        if conf.enable_skills:
-            skill_manager.user_paths = conf.skill_user_paths
-            skill_manager.reload()
-        
-        return {"status": 200, "data": "SKILL 配置更新成功"}
-    except Exception as e:
-        logger.exception(f"更新 SKILL 配置失败: {e}")
-        return {"status": 500, "data": f"更新失败: {str(e)}"}

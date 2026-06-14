@@ -200,13 +200,3 @@ export const getToolSchemas = (sessionId) => {
   const params = sessionId ? { session_id: sessionId } : {}
   return request.get('/aichat/tools/schemas', { params })
 }
-
-// ===== SKILL 管理 API =====
-// 获取所有可用 SKILL 列表
-export const getSkills = () => request.get('/aichat/skills')
-
-// 获取 SKILL 系统配置
-export const getSkillsConfig = () => request.get('/aichat/config/skills')
-
-// 更新 SKILL 系统配置
-export const updateSkillsConfig = (config) => request.post('/aichat/config/skills', config)
