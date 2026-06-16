@@ -25,25 +25,25 @@ execute_script(skill_name="manga_translate",
   args=["ocr", "--image", "<user_image_1>"])
 ```
 
-返回每个文字区域的位置和原文：`{"success": true, "results": [{bbox_id, text, x, y, w, h, polygon}, ...]}`。
+返回 `{"success": true, "results": [...], "data_id": "abc123"}`。**记住 data_id，Step 4 要用。**
 
-把返回的 results 保存为 bbox 文件，后续渲染要用：
+## Step 2：交叉验证
 
-```python
-write_file(path="data/aichat/images/<session_id>/bboxes.json",
-           content='<results JSON>')
-```
+优先级依次尝试：
 
-## Step 2：大模型交叉验证
+1. **自身有多模态能力** → 直接观察原图中每个 bbox 区域，和本地OCR结果交叉验证
+2. **无多模态能力 → delegate_task type="vision"** → 把原图和 bbox 列表发给 vision subagent，让它逐框复核原文
+3. **vision subagent 不可用 → 跳过交叉验证** → 直接使用本地OCR结果。本地OCR对日文漫画识别精度已经很高
 
-用多模态能力观察原图中每个 bbox 区域，也读一遍原文。结合本地OCR结果交叉验证：
+**无论哪种方式，多模态模型必须同时完成两件事：**
 
+1. **描述画面** — 场景、角色表情、动作、情绪氛围、对话气泡的形态。这是翻译时判断语气的关键语境
+2. **复核原文** — 逐框对比本地OCR结果，纠正可能的错误
+
+交叉验证规则：
 - **一致** → 高置信，直接采用
 - **差异小**（假名/汉字替换）→ 结合上下文选更合理者
-- **差异大** → 大模型再细看一次，综合决定
-- **本地空/大的有** → 互补采用
-
-**最终得到经交叉验证的精确原文，用于翻译。**
+- **差异大** → 再细看一次，综合决定
 
 ## Step 3：分析 + 翻译
 
@@ -62,10 +62,15 @@ write_file(path="data/aichat/images/<session_id>/bboxes.json",
 
 ### 3.3 翻译
 - 基于交叉验证后的精确原文
-- **结合原图语境：** 观察画面场景、角色表情、对话气泡的形态，判断说话人的情绪和语气
-- 对话翻译要口语化、符合角色性格（傲娇、吐槽、解释等），旁白/说明文保持正式
+- **结合 Step 2 的画面描述：** 场景情绪、角色表情、动作氛围决定每句台词的语气和措辞
+- 对话口语化、符合角色性格（傲娇、吐槽、慌张、冷漠等），旁白/说明文保持正式
 - 拟声词用合适的中文拟声
 - 日文汉字适当转中文习惯用字
+
+**标点与符号保留规则：**
+- 全角数字（１０：２３）→ 保留不译，或转半角数字（10:23）
+- 省略号（．．．）→ 保留为 …
+- 纯标点/数字/时间的文字区域 → 跳过，不擦除也不嵌入
 
 ### 3.4 渲染参数
 
@@ -81,17 +86,12 @@ write_file(path="data/aichat/images/<session_id>/bboxes.json",
 
 ## Step 4：擦除 + 嵌字
 
-把翻译结果和bbox都写入文件，调用渲染：
-
 ```python
-write_file(path="data/aichat/images/<session_id>/translations.json",
-           content='<翻译JSON>')
-
 execute_script(skill_name="manga_translate",
   script_path="scripts/manga_service.py",
   args=["inpaint_render", "--image", "<user_image_1>",
-        "--translations-file", "data/aichat/images/<session_id>/translations.json",
-        "--bboxes-file", "data/aichat/images/<session_id>/bboxes.json"])
+        "--data-id", "<Step 1 的 data_id>",
+        "--translations", '<翻译JSON字符串>'])
 ```
 
 **translations.json 格式：**
@@ -99,8 +99,8 @@ execute_script(skill_name="manga_translate",
 [
   {
     "bbox_id": 0,
-    "text": "6月9日是69之日！（色情之日）",
-    "font": "heiti",
+    "text": "翻译后的中文文本",
+    "font": "sans",
     "color": "#000000",
     "direction": "horizontal",
     "outline": true,
@@ -108,18 +108,16 @@ execute_script(skill_name="manga_translate",
   },
   {
     "bbox_id": 2,
-    "bbox_ids": [2, 3, 4],
-    "text": "为了教大家69是啥需要实际演示一下",
-    "font": "sans",
-    "color": "#000000",
+    "bbox_ids": [2, 3],
+    "text": "合并多个碎片的译文",
+    "font": "heiti",
+    "color": "#ff5588",
     "direction": "vertical",
-    "outline": true,
+    "outline": false,
     "outline_color": "#ffffff"
   }
 ]
 ```
-
-**必须传入 bbox 数据（--bboxes-file），否则服务端重复检测可能不一致。**
 
 ## 回复用户
 
