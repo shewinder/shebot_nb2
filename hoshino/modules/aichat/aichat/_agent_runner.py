@@ -54,7 +54,7 @@ SUBAGENT_TYPES: Dict[str, SubAgentTypeDef] = {
 - 完成后返回清晰的结构化分析结果
 - 简洁直接，不添加无关评论或角色扮演
 - 如果任务无法完成，明确说明原因及已尝试的步骤""",
-        tool_names=frozenset({"fetch_url"}),
+        tool_names=frozenset({}),
     ),
 }
 
