@@ -83,6 +83,8 @@ def cmd_inpaint_render(args):
     data = {"translations": args.translations}
     if args.data_id:
         data["data_id"] = args.data_id
+    if args.debug:
+        data["debug"] = args.debug
 
     with open(img_path, "rb") as f:
         r = requests.post(f"{GPU_SERVICE}/inpaint_and_render",
@@ -125,6 +127,7 @@ def main():
     p.add_argument("--image", required=True)
     p.add_argument("--translations", default="")
     p.add_argument("--data-id", default="")
+    p.add_argument("--debug", default="")
     p.set_defaults(func=cmd_inpaint_render)
 
     args = parser.parse_args()

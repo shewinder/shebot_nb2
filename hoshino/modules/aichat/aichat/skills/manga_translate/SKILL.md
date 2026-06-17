@@ -29,11 +29,13 @@ execute_script(skill_name="manga_translate",
 
 ## Step 2：交叉验证
 
-优先级依次尝试：
+**⚠️ 纯文本模型（如 DeepSeek）不具备多模态能力，禁止假装看图。**
 
-1. **自身有多模态能力** → 直接观察原图中每个 bbox 区域，和本地OCR结果交叉验证
-2. **无多模态能力 → delegate_task type="vision"** → 把原图和 bbox 列表发给 vision subagent，让它逐框复核原文
-3. **vision subagent 不可用 → 跳过交叉验证** → 直接使用本地OCR结果。本地OCR对日文漫画识别精度已经很高
+优先级：
+
+1. **有多模态能力** → 直接观察原图，交叉验证
+2. **纯文本模型 → delegate_task type="vision"** → 把原图和 bbox 列表发给 vision subagent，让它做画面描述 + 原文复核 + 样式记录
+3. **vision subagent 不可用 → 跳过交叉验证** → 直接用本地OCR结果
 
 **无论哪种方式，多模态模型必须同时完成两件事：**
 
@@ -56,10 +58,11 @@ execute_script(skill_name="manga_translate",
 - 框内是logo、花纹、网点，不是文字
 
 ### 3.2 合并碎片
-手写体/拟声词被切成多个框，用 `bbox_ids` 合并：
+**竖排相邻的框如果 OCR 文本能连成一句话，必须合并成一个 translation**，否则单独渲染每框字太小。用 `bbox_ids` 合并：
 ```json
-{"bbox_id": 2, "bbox_ids": [2, 3, 4], "text": "合并译文", ...}
+{"bbox_id": 2, "bbox_ids": [2, 3, 4, 5], "text": "Ruby在演艺圈迅速走红", ...}
 ```
+横排框如果重叠也合并。单字/拟声词不需要合并。
 
 ### 3.3 翻译
 - 基于交叉验证后的精确原文
@@ -67,6 +70,7 @@ execute_script(skill_name="manga_translate",
 - 对话口语化、符合角色性格（傲娇、吐槽、慌张、冷漠等），旁白/说明文保持正式
 - 拟声词用合适的中文拟声
 - 日文汉字适当转中文习惯用字
+- **禁止使用 emoji/特殊符号（❤️♡♪☆等）**——嵌字字体渲染效果差，用中文拟声词或标点代替
 
 **标点与符号保留规则：**
 - 全角数字（１０：２３）→ 保留不译，或转半角数字（10:23）
