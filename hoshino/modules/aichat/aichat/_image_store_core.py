@@ -102,14 +102,14 @@ class ImageStoreCore:
             logger.error(f"[ImageStoreCore] 保存 .meta.json 失败: {e}")
 
     def _next_index(self, source: str) -> int:
-        """计算下一个序号"""
+        """计算下一个序号——每次从 .meta.json 读取，保证跨进程一致"""
+        self._load_meta()
         prefix = f"{source}_image_"
         max_idx = 0
         for key in self._meta.keys():
             if key.startswith(prefix):
                 try:
-                    idx = int(key[len(prefix):])
-                    max_idx = max(max_idx, idx)
+                    max_idx = max(max_idx, int(key[len(prefix):]))
                 except ValueError:
                     pass
         return max_idx + 1
