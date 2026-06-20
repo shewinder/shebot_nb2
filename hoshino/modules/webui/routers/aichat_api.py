@@ -399,8 +399,8 @@ class AddApiRequest(BaseModel):
     api_base: str
     api_key: str
     model: str
-    max_tokens: int = 8192
-    temperature: float = 0.7
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
     supports_multimodal: Optional[bool] = None
     supports_tools: Optional[bool] = True
 

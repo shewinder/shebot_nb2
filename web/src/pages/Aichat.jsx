@@ -513,9 +513,7 @@ function Aichat() {
     // 设置默认值
     modelForm.setFieldsValue({
       supports_multimodal: false,
-      supports_tools: true,
-      max_tokens: 8192,
-      temperature: 0.7
+      supports_tools: true
     })
     setModelModalVisible(true)
   }
