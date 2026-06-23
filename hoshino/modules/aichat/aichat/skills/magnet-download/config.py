@@ -1,51 +1,29 @@
 """磁力下载 Skill 配置管理
 
-复用 ptdownload Skill 的 qBittorrent 连接配置。
-配置文件路径: data/config/ptdownload.json
+从环境变量读取 qBittorrent 连接配置，与 ptdownload/qb_add.py 保持一致。
 """
-import json
 import os
-from pathlib import Path
 from typing import Optional
 
 
-def get_project_root() -> Path:
-    if project_root := os.environ.get("PROJECT_ROOT"):
-        return Path(project_root)
-    return Path("").resolve()
-
-
-def get_config_path() -> Path:
-    return get_project_root() / "data" / "config" / "ptdownload.json"
-
-
 def get_qb_config() -> Optional[dict]:
-    """读取 qBittorrent 连接配置"""
-    config_path = get_config_path()
-    if not config_path.exists():
+    """读取 qBittorrent 连接配置（仅环境变量）"""
+    base_url = os.environ.get("PT_QB_URL", "")
+    if not base_url:
         return None
-
-    try:
-        data = json.loads(config_path.read_text(encoding='utf-8'))
-        qb = data.get("qbittorrent", {})
-        if not qb.get("enabled"):
-            return None
-        return {
-            "base_url": qb.get("base_url", "http://localhost:8080"),
-            "username": qb.get("username", "admin"),
-            "password": qb.get("password", ""),
-            "default_save_path": qb.get("default_save_path", "/downloads"),
-            "verify_ssl": qb.get("verify_ssl", False),
-            "save_paths": data.get("save_paths", {}),
-        }
-    except Exception:
-        return None
+    return {
+        "base_url": base_url,
+        "username": os.environ.get("PT_QB_USERNAME", "admin"),
+        "password": os.environ.get("PT_QB_PASSWORD", ""),
+        "default_save_path": os.environ.get("PT_QB_SAVE_PATH", "/downloads"),
+        "verify_ssl": False,
+    }
 
 
 def get_save_path(category: str) -> str:
-    """根据分类获取保存路径，优先 category 映射，否则默认路径"""
+    """根据分类拼接保存路径"""
     config = get_qb_config()
     if not config:
         return "/downloads"
-    save_paths = config.get("save_paths", {})
-    return save_paths.get(category, config.get("default_save_path", "/downloads"))
+    base = config["default_save_path"].rstrip("/")
+    return f"{base}/{category}" if category else base

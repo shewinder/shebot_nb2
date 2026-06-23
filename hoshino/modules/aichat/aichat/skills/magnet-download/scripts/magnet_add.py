@@ -171,7 +171,7 @@ async def cmd_add(args) -> dict:
     if not config:
         return {
             "success": False,
-            "error": "qBittorrent 未启用，请在 data/config/ptdownload.json 中配置 qbittorrent 连接信息"
+            "error": "qBittorrent 未配置，请设置 PT_QB_URL 等环境变量或 data/config/ptdownload.json"
         }
 
     client = QBittorrentClient(
