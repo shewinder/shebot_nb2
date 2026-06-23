@@ -236,19 +236,42 @@ async def add_and_download(ids: list[str], category: str = "") -> Dict[str, Any]
     """批量下载种子并提交到 qBittorrent"""
     from qb_add import add as qb_add
 
-    success = 0
+    ok = 0
     failed = 0
+    skipped = 0  # 重复/已存在
+    details: list[str] = []
+
     for tid in ids:
         torrent_data = await download_torrent(tid)
         if not torrent_data:
             failed += 1
+            details.append(f"  [{tid}] 下载失败")
             continue
         result = await qb_add(torrent_data, category)
         if result["success"]:
-            success += 1
+            ok += 1
+            details.append(f"  [{tid}] ✅ 已添加")
         else:
-            failed += 1
-    return {"success": failed == 0, "count": len(ids), "ok": success, "failed": failed}
+            error_msg = result.get("error", "")
+            # qBittorrent 重复种子视为跳过而非失败
+            if any(kw in error_msg.lower() for kw in ("already", "exist", "duplicate", "已存在")):
+                skipped += 1
+                details.append(f"  [{tid}] ⏭ 已存在，跳过")
+            else:
+                failed += 1
+                details.append(f"  [{tid}] ❌ {error_msg}")
+
+    # 打印详情到 stderr，方便 AI 排查
+    if details:
+        print("\n".join(details), file=sys.stderr)
+
+    return {
+        "success": failed == 0,
+        "count": len(ids),
+        "ok": ok,
+        "failed": failed,
+        "skipped": skipped,
+    }
 
 
 def main():
@@ -270,7 +293,22 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.add:
         label = f" [{args.category}]" if args.category else ""
-        print(f"✅ {result.get('ok', 0)}/{result.get('count', 0)} 已添加{label}" if result["success"] else f"❌ {result.get('ok', 0)}/{result.get('count', 0)} 成功{label}")
+        ok = result.get("ok", 0)
+        failed = result.get("failed", 0)
+        skipped = result.get("skipped", 0)
+        total = result.get("count", 0)
+        parts = [f"{ok}/{total} 已添加"]
+        if skipped:
+            parts.append(f"{skipped} 跳过(已存在)")
+        if failed:
+            parts.append(f"{failed} 失败")
+        detail = "，".join(parts)
+        if failed == total:
+            print(f"❌ {detail}{label}")
+        elif failed > 0:
+            print(f"⚠️ {detail}{label}")
+        else:
+            print(f"✅ {detail}{label}")
     else:
         print(format_results(result))
 

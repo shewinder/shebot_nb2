@@ -34,7 +34,10 @@ class QBittorrentClient:
                 if resp.status == 200:
                     raw = resp.headers.get("Set-Cookie", "")
                     self._cookie = raw.split(";")[0] if raw else ""
+                    if not self._cookie:
+                        print(f"qBittorrent 登录失败: Set-Cookie 为空", file=sys.stderr)
                     return bool(self._cookie)
+                print(f"qBittorrent 登录失败: HTTP {resp.status}", file=sys.stderr)
                 return False
         except Exception as e:
             print(f"qBittorrent 登录失败: {e}", file=sys.stderr)
@@ -57,7 +60,9 @@ class QBittorrentClient:
             text = await resp.text()
             if resp.status in (200, 201) and (text.strip() == "" or "Ok" in text):
                 return {"success": True}
-            return {"success": False, "error": text.strip()}
+            error_msg = text.strip() or f"HTTP {resp.status}"
+            print(f"qBittorrent 添加失败: {error_msg}", file=sys.stderr)
+            return {"success": False, "error": error_msg}
 
 
 async def add(torrent_data: bytes, category: str = "") -> Dict[str, Any]:

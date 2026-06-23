@@ -59,11 +59,8 @@ execute_script(skill_name="pt-download", script_path="scripts/qb_add.py", args=[
 ### 查看下载进度
 
 ```python
-# 查看全部
+# 查看全部任务（AI 自行从结果中筛选，不要用 --search）
 execute_script(skill_name="pt-download", script_path="scripts/qb_list.py")
-
-# 按名称搜索
-execute_script(skill_name="pt-download", script_path="scripts/qb_list.py", args=["--search", "关键词"])
 ```
 
 ## 注意事项

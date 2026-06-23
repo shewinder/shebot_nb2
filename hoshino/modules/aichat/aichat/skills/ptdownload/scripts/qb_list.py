@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 qBittorrent 任务列表查看脚本
-用法: python qb_list.py [--search 关键词]
+用法: python qb_list.py
 """
 import os
 import sys
@@ -140,22 +140,14 @@ def state_text(state: str) -> str:
     return texts.get(state, state)
 
 
-def format_torrents(data: List[Dict[str, Any]], search: str = "") -> str:
-    """格式化任务列表"""
+def format_torrents(data: List[Dict[str, Any]]) -> str:
+    """格式化任务列表（紧凑单行模式）"""
 
     if not data:
         return "📭 当前没有下载任务"
 
-    # 按名称过滤
-    if search:
-        data = [t for t in data if search.lower() in t.get('name', '').lower()]
-        if not data:
-            return f"📭 未找到包含「{search}」的任务"
-
     total = len(data)
-    lines = [f"📥 qBittorrent 任务列表（共 {total} 个{f', 筛选: {search}' if search else ''}）\n"]
 
-    # 按状态排序：下载中 -> 队列中 -> 做种中 -> 其他
     def sort_key(t):
         priority = {
             'downloading': 0, 'forcedDL': 0,
@@ -166,29 +158,30 @@ def format_torrents(data: List[Dict[str, Any]], search: str = "") -> str:
 
     sorted_torrents = sorted(data, key=sort_key)
 
+    lines = [f"📥 qBittorrent 任务列表（共 {total} 个）\n"]
+
     for i, t in enumerate(sorted_torrents, 1):
-        name = t.get('name', '未知')[:40]
+        name = t.get('name', '未知')
         state = t.get('state', 'unknown')
         progress = t.get('progress', 0)
         size = format_size(t.get('total_size', 0))
-        downloaded = format_size(t.get('completed', 0))
-        dlspeed = format_speed(t.get('dlspeed', 0))
-        upspeed = format_speed(t.get('upspeed', 0))
 
         icon = state_icon(state)
         status = state_text(state)
-        save_path = t.get('save_path', '') or ''
+        path = t.get('save_path', '') or ''
 
-        lines.append(f"{i}. {icon} {name}")
-        lines.append(f"   状态: {status} | 进度: {format_progress(progress)} | 大小: {size}")
+        # 构建单行: 序号 name | 状态 进度 | 大小 [速度] | 路径
+        parts = [f"{icon} {status} {format_progress(progress)}", size]
 
-        if state in ['downloading', 'forcedDL', 'stalledDL']:
-            lines.append(f"   下载: {downloaded} | 速度: {dlspeed}")
-        elif state in ['uploading', 'forcedUP', 'stalledUP']:
-            lines.append(f"   上传速度: {upspeed}")
+        if state in ('downloading', 'forcedDL'):
+            parts.append(f"↓{format_speed(t.get('dlspeed', 0))}")
+        elif state in ('uploading', 'forcedUP'):
+            ups = format_speed(t.get('upspeed', 0))
+            if t.get('upspeed', 0) > 0:
+                parts.append(f"↑{ups}")
 
-        lines.append(f"   路径: {save_path}")
-        lines.append("")
+        parts.append(path)
+        lines.append(f"{i}. {name} | {' | '.join(parts)}")
 
     return "\n".join(lines)
 
@@ -222,17 +215,15 @@ async def list_torrents() -> Dict[str, Any]:
 
 def main():
     parser = argparse.ArgumentParser(description='qBittorrent 任务列表')
-    parser.add_argument('--search', help='按名称过滤（子串匹配）')
-
     args = parser.parse_args()
 
     result = asyncio.run(list_torrents())
 
     if result.get('success'):
-        print(format_torrents(result.get('torrents', []), search=args.search or ""))
+        print(format_torrents(result.get('torrents', [])))
     else:
         print(f"❌ 获取失败: {result.get('error')}")
-    
+
     sys.exit(0 if result.get('success') else 1)
 
 
