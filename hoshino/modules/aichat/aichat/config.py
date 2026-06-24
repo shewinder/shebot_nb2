@@ -62,6 +62,9 @@ class Config(BaseConfig):
     # 当前选择
     current_api: str = ""  # 当前厂商（空或无效则使用 apis[0]）
 
+    # 搜索提供商
+    search_provider: str = "youcom"  # youcom | iqs
+
     # Session 配置
     max_history: int = 100
     session_timeout: int = 3600  # 秒，0 表示永不过期
