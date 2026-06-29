@@ -6,9 +6,8 @@
 任务仅存在于内存中，重启后不恢复。
 """
 import asyncio
-import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
@@ -37,7 +36,7 @@ _BG_SYSTEM_PROMPT = """【后台执行模式】
 - 后台任务中，等待后继续执行的唯一正确方式是调用 wait_and_resume
 - ❌ 禁止用命令行写轮询脚本（sleep、while 循环、watch、重复 curl）来监控进度——任何执行环境都不行
 - ❌ 禁止在多轮中反复调用同一个查询工具来"持续监控"——那是浪费轮数
-- ✅ 正确做法：查询一次当前状态 → wait_and_resume(delay_minutes=2, context="当前进度...") → 下一轮自动恢复继续查
+- ✅ 正确做法：查询一次当前状态 → wait_and_resume(delay_minutes=2) → 自动恢复继续查
 - 任务完成后直接返回完整结果，不要调用 wait_and_resume
 
 - 不要让用户"稍后再来"——后台任务的价值就是自己持续跟进直到完成
@@ -49,15 +48,11 @@ class BackgroundTask(BaseModel):
     user_id: int
     group_id: Optional[int] = None
     task_description: str
-    status: str = "pending"  # pending | running | waiting | done | failed | cancelled
+    status: str = "pending"  # pending | running | done | failed | cancelled
     created_at: datetime
     completed_at: Optional[datetime] = None
     result_summary: Optional[str] = None
     error: Optional[str] = None
-    continuation_count: int = 0
-    max_continuations: int = 10
-    next_run_at: Optional[datetime] = None
-    context: str = ""
     preactivate_skills: List[str] = []
 
 
@@ -68,13 +63,13 @@ class BackgroundTaskManager:
     def _count_running(self, user_id: int) -> int:
         count = 0
         for task in self.tasks.values():
-            if task.user_id == user_id and task.status in ('pending', 'running', 'waiting'):
+            if task.user_id == user_id and task.status in ('pending', 'running'):
                 count += 1
         return count
 
     def get_running_task(self, user_id: int) -> Optional[BackgroundTask]:
         for task in self.tasks.values():
-            if task.user_id == user_id and task.status in ('pending', 'running', 'waiting'):
+            if task.user_id == user_id and task.status in ('pending', 'running'):
                 return task
         return None
 
@@ -130,28 +125,6 @@ class BackgroundTaskManager:
         result.sort(key=lambda t: t.created_at, reverse=True)
         return result
 
-    def _build_continuation_prompt(self, task: BackgroundTask) -> str:
-        if not task.context:
-            return ""
-        return (
-            f"\n【上轮进展】\n{task.context}\n\n"
-            f"【注意】本轮是第 {task.continuation_count + 1} 次续查，"
-            f"最多 {task.max_continuations} 次。"
-            f"如果任务已完成，直接返回结果，不要调用 wait_and_resume。"
-        )
-
-    def _check_continuation(self, result: "ChatResult") -> Optional[dict]:
-        for tr in result.tool_results:
-            try:
-                parsed = json.loads(tr["result"]["content"])
-                if isinstance(parsed, dict):
-                    meta = parsed.get("metadata", {})
-                    if isinstance(meta, dict) and meta.get("continuation"):
-                        return meta
-            except (json.JSONDecodeError, KeyError, TypeError):
-                pass
-        return None
-
     async def _run_task_loop(self, task: BackgroundTask):
         try:
             api_config = api_manager.get_api_config()
@@ -162,53 +135,26 @@ class BackgroundTaskManager:
                 await self._send_result(task, "任务执行失败：API 未配置", None)
                 return
 
+            task.status = "running"
             persona = persona_manager.get_persona(task.user_id, task.group_id)
 
-            while task.continuation_count < task.max_continuations:
-                if task.status == "waiting":
-                    task.status = "running"
-                else:
-                    task.status = "running"
+            result = await run_agent(
+                task=f"请执行以下任务：{task.task_description}",
+                system_prompt=_BG_SYSTEM_PROMPT,
+                user_id=task.user_id,
+                group_id=task.group_id,
+                persona=persona,
+                session_prefix=f"bg_task_{task.id}",
+                api_config=api_config,
+                max_rounds=conf.subagent_max_rounds,
+                blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
+                preactivate_skills=task.preactivate_skills or None,
+            )
 
-                hint = self._build_continuation_prompt(task)
-                result = await run_agent(
-                    task=f"请执行以下任务：{task.task_description}\n{hint}",
-                    system_prompt=_BG_SYSTEM_PROMPT,
-                    user_id=task.user_id,
-                    group_id=task.group_id,
-                    persona=persona,
-                    session_prefix=f"bg_task_{task.id}",
-                    api_config=api_config,
-                    max_rounds=conf.subagent_max_rounds,
-                    blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
-                    preactivate_skills=task.preactivate_skills or None,
-                )
-
-                cont = self._check_continuation(result)
-                if not cont:
-                    task.status = "done"
-                    task.completed_at = datetime.now()
-                    task.result_summary = (result.content or "")[:500]
-                    await self._send_result(task, result.content or "任务执行完成，但没有返回内容", None)
-                    return
-
-                delay = cont.get("delay_minutes", 5)
-                task.status = "waiting"
-                task.continuation_count += 1
-                task.next_run_at = datetime.now() + timedelta(minutes=delay)
-                task.context = cont.get("context", "")
-
-                logger.info(
-                    f"后台任务 {task.id} 进入 waiting，"
-                    f"第 {task.continuation_count} 次续查，"
-                    f"delay={delay}min"
-                )
-                await asyncio.sleep(delay * 60)
-
-            task.status = "failed"
-            task.error = f"达到最大续查次数 ({task.max_continuations})"
+            task.status = "done"
             task.completed_at = datetime.now()
-            await self._send_result(task, "任务超时：达到最大续查次数，请手动检查状态。", None)
+            task.result_summary = (result.content or "")[:500]
+            await self._send_result(task, result.content or "任务执行完成，但没有返回内容", None)
 
         except Exception as e:
             logger.exception(f"后台任务 {task.id} 执行异常: {e}")

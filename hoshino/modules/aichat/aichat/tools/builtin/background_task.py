@@ -2,6 +2,7 @@
 
 为 AI 提供 run_background_task 和 wait_and_resume 两个工具。
 """
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -24,14 +25,12 @@ def _format_task_list(tasks: list) -> str:
     status_emoji = {
         "pending": "⏳",
         "running": "🔄",
-        "waiting": "⏸️",
         "done": "✅",
         "failed": "❌",
     }
 
     for i, task in enumerate(tasks, 1):
         emoji = status_emoji.get(task.status, "❓")
-        location = f"群{task.group_id}" if task.group_id else "私聊"
 
         desc = task.task_description[:30]
         if len(task.task_description) > 30:
@@ -40,13 +39,7 @@ def _format_task_list(tasks: list) -> str:
         lines.append(f"{i}. {emoji} {desc}")
         lines.append(f"   ID: {task.id} | 状态: {task.status}")
 
-        if task.status == "waiting" and task.next_run_at:
-            remaining = task.next_run_at - datetime.now()
-            minutes = max(0, int(remaining.total_seconds() / 60))
-            lines.append(f"   预计 {minutes} 分钟后继续（第 {task.continuation_count}/{task.max_continuations} 轮）")
-        elif task.status in ("running", "pending"):
-            pass
-        else:
+        if task.status == "done" or task.status == "failed":
             lines.append(f"   完成时间: {task.completed_at.strftime('%m-%d %H:%M') if task.completed_at else 'N/A'}")
 
         if task.result_summary:
@@ -214,11 +207,7 @@ async def run_background_task(
 - 等待文件处理完成：5-10 分钟
 - 图像生成任务：1-2 分钟
 
-## context 填写指南
-记录本轮关键进展和下一轮需要做什么，格式自由。下一轮执行时会作为【上轮进展】注入。
-建议包含：已完成哪些步骤、当前进度、下一步要检查什么。
-
-调用此工具后，任务会在指定时间后自动恢复，继续执行。""",
+调用此工具后，会在指定时间后自动恢复，继续执行。""",
     parameters={
         "type": "object",
         "properties": {
@@ -227,32 +216,16 @@ async def run_background_task(
                 "description": "多少分钟后恢复执行（1-60）",
                 "minimum": 1,
                 "maximum": 60
-            },
-            "why": {
-                "type": "string",
-                "description": "为什么需要等待（简要说明当前状态）"
-            },
-            "context": {
-                "type": "string",
-                "description": "本轮进展和下一轮要做什么，下一轮作为上下文注入"
             }
         },
-        "required": ["delay_minutes", "why"]
+        "required": ["delay_minutes"]
     }
 )
 async def wait_and_resume(
     delay_minutes: int,
-    why: str,
-    context: str = "",
 ) -> Dict[str, Any]:
     delay_minutes = max(1, min(delay_minutes, 60))
 
-    return ok(
-        f"已安排 {delay_minutes} 分钟后恢复: {why}",
-        metadata={
-            "continuation": True,
-            "delay_minutes": delay_minutes,
-            "why": why,
-            "context": context,
-        }
-    )
+    await asyncio.sleep(delay_minutes * 60)
+
+    return ok(f"已等待 {delay_minutes} 分钟，继续执行")

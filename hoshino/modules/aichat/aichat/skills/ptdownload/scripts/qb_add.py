@@ -72,11 +72,18 @@ async def add(torrent_data: bytes, category: str = "") -> Dict[str, Any]:
 
     client = QBittorrentClient(base_url, username, password)
     async with aiohttp.ClientSession() as session:
-        # 查询分类获取对应路径
         save_path = ""
-        cats = await list_categories()
-        if cats.get("success"):
-            cat_info = cats["categories"].get(category, {})
+        if category:
+            cats = await list_categories()
+            if not cats.get("success"):
+                return {"success": False, "error": "获取分类列表失败，无法验证分类"}
+            cat_info = cats["categories"].get(category)
+            if not cat_info:
+                available = list(cats["categories"].keys())
+                return {
+                    "success": False,
+                    "error": f"分类「{category}」不存在。可用分类: {', '.join(available)}"
+                }
             save_path = cat_info.get("savePath", "")
         return await client.add_torrent(session, torrent_data, category, save_path)
 
