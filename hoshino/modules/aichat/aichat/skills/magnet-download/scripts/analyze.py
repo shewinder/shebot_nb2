@@ -11,11 +11,14 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import sys
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
 import httpx
+from PIL import Image, ImageFilter
 
 API_BASE = "https://whatslink.info"
 API_PATH = "/api/v1/link"
@@ -25,6 +28,10 @@ HEADERS = {
 }
 MAX_RETRIES = 10
 RETRY_DELAY = 2
+DEFAULT_SCREENSHOT_BLUR_RADIUS = 6.0
+SCREENSHOT_BLUR_RADIUS_ENV = "MAGNET_SCREENSHOT_BLUR_RADIUS"
+EDGE_NOISE_PIXEL_COUNT = 12
+EDGE_NOISE_BORDER_WIDTH = 2
 
 # ---- ImageStoreCore 动态加载 ----
 _project_root = Path(os.environ.get("PROJECT_ROOT", "."))
@@ -36,6 +43,76 @@ if _core_path.exists():
     ImageStoreCore = _mod.ImageStoreCore
 else:
     ImageStoreCore = None
+
+
+def parse_blur_radius(value: str) -> float:
+    try:
+        radius = float(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError("模糊半径必须是数字") from e
+    if radius < 0:
+        raise argparse.ArgumentTypeError("模糊半径不能小于 0")
+    return radius
+
+
+def get_default_blur_radius() -> float:
+    raw_value = os.environ.get(SCREENSHOT_BLUR_RADIUS_ENV)
+    if raw_value is None or raw_value.strip() == "":
+        return DEFAULT_SCREENSHOT_BLUR_RADIUS
+    try:
+        return parse_blur_radius(raw_value)
+    except argparse.ArgumentTypeError:
+        print(f"{SCREENSHOT_BLUR_RADIUS_ENV} 无效，使用默认模糊半径 {DEFAULT_SCREENSHOT_BLUR_RADIUS}", file=sys.stderr)
+        return DEFAULT_SCREENSHOT_BLUR_RADIUS
+
+
+def random_edge_position(width: int, height: int) -> tuple[int, int]:
+    border_width = max(1, min(EDGE_NOISE_BORDER_WIDTH, width, height))
+    side = secrets.randbelow(4)
+    if side == 0:
+        return secrets.randbelow(width), secrets.randbelow(border_width)
+    if side == 1:
+        return secrets.randbelow(width), height - 1 - secrets.randbelow(border_width)
+    if side == 2:
+        return secrets.randbelow(border_width), secrets.randbelow(height)
+    return width - 1 - secrets.randbelow(border_width), secrets.randbelow(height)
+
+
+def random_rgb_except(current: tuple[int, int, int]) -> tuple[int, int, int]:
+    color = (
+        secrets.randbelow(256),
+        secrets.randbelow(256),
+        secrets.randbelow(256),
+    )
+    if color == current:
+        return ((color[0] + 1) % 256, color[1], color[2])
+    return color
+
+
+def add_edge_noise(image: Image.Image) -> Image.Image:
+    noisy = image.copy()
+    pixels = noisy.load()
+    width, height = noisy.size
+    count = min(EDGE_NOISE_PIXEL_COUNT, width * height)
+    for _ in range(count):
+        x, y = random_edge_position(width, height)
+        pixels[x, y] = random_rgb_except(pixels[x, y])
+    return noisy
+
+
+def process_image_bytes(image_bytes: bytes, radius: float) -> bytes:
+    try:
+        with Image.open(BytesIO(image_bytes)) as img:
+            image = img.convert("RGB")
+            if radius > 0:
+                image = image.filter(ImageFilter.GaussianBlur(radius=radius))
+            image = add_edge_noise(image)
+            output = BytesIO()
+            image.save(output, format="JPEG", quality=92)
+            return output.getvalue()
+    except Exception as e:
+        print(f"截图处理失败: {e}", file=sys.stderr)
+        return image_bytes
 
 
 def store_screenshot(image_bytes: bytes) -> Optional[dict]:
@@ -75,7 +152,7 @@ def hum_size(value: int) -> str:
     return f"{value:.2f} PB"
 
 
-async def analyze(infohash: str) -> dict:
+async def analyze(infohash: str, blur_radius: float) -> dict:
     """调 whatslink.info 获取种子信息"""
     magnet_url = f"magnet:?xt=urn:btih:{infohash}"
     url = f"{API_BASE}{API_PATH}?url={magnet_url}"
@@ -108,7 +185,8 @@ async def analyze(infohash: str) -> dict:
                         async with httpx.AsyncClient(timeout=15) as img_client:
                             img_resp = await img_client.get(img_url, headers=HEADERS)
                             if img_resp.status_code == 200:
-                                stored = store_screenshot(img_resp.content)
+                                processed_content = process_image_bytes(img_resp.content, blur_radius)
+                                stored = store_screenshot(processed_content)
                                 if stored:
                                     screenshots.append(stored)
                     except Exception as e:
@@ -125,6 +203,7 @@ async def analyze(infohash: str) -> dict:
                     "file_type": data.get("file_type", ""),
                     "screenshots": screenshots,
                     "screenshot_urls": screenshot_urls,
+                    "screenshot_blur_radius": blur_radius,
                 }
         except Exception as e:
             last_error = str(e)
@@ -157,13 +236,19 @@ def main():
     parser = argparse.ArgumentParser(description="磁力链接验车")
     parser.add_argument("link", help="磁力链接或种子 hash")
     parser.add_argument("--json", action="store_true", help="JSON 输出")
+    parser.add_argument(
+        "--blur-radius",
+        type=parse_blur_radius,
+        default=get_default_blur_radius(),
+        help="截图高斯模糊半径，0 表示不模糊，默认 %(default)s",
+    )
     args = parser.parse_args()
 
     infohash = parse_magnet(args.link)
     if not infohash:
         result = {"success": False, "error": "无法解析磁力链接或 hash"}
     else:
-        result = asyncio.run(analyze(infohash))
+        result = asyncio.run(analyze(infohash, args.blur_radius))
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

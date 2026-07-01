@@ -10,7 +10,7 @@ description: 下载磁力链接到 NAS 的 qBittorrent。用户发送 magnet 链
 ## 工作流程
 
 1. 用户发送 magnet 链接/hash 或要求下载磁力
-2. **先调用 `analyze.py` 验车**，脚本会自动下载截图并存入 ImageStore，返回 `<ai_image_N>` 标识符
+2. **先调用 `analyze.py` 验车**，脚本会自动下载截图、应用默认中等模糊、在边缘加入少量随机像素扰动并存入 ImageStore，返回 `<ai_image_N>` 标识符
 3. 向用户展示验车结果（文字信息 + 截图标识符），等用户确认是否下载
 4. 用户确认后，**调用 `magnet_add.py` 添加下载任务**
 5. 添加成功后，提交后台监控任务（通过 `run_background_task`）
@@ -26,6 +26,13 @@ execute_script(skill_name="magnet-download", script_path="scripts/analyze.py",
 ```
 
 返回种子名称、大小、文件数、类型，以及 `screenshots` 数组（含 `<ai_image_N>` 标识符，图片已自动存储好，可直接引用）。
+
+截图默认使用中等模糊半径 `6.0`，并在边缘加入少量随机像素扰动，确保每次处理后的文件哈希变化。可通过环境变量 `MAGNET_SCREENSHOT_BLUR_RADIUS` 调整默认值。单次验车可用 `--blur-radius` 覆盖，传 `0` 表示关闭模糊：
+
+```python
+execute_script(skill_name="magnet-download", script_path="scripts/analyze.py",
+               args=["magnet:?xt=urn:btih:xxx", "--blur-radius", "12"])
+```
 
 ### 添加磁力下载
 
@@ -72,6 +79,7 @@ AI：[调用 magnet_add.py 添加任务]
 ## 注意事项
 
 - **必须先验车再下载**，让用户看到种子内容后确认
+- 验车截图默认会进行中等模糊处理，按需使用 `--blur-radius` 调整模糊等级
 - 磁力链接以 `magnet:?xt=` 开头，长度可能超过 2000 字符，需要完整传递
 - 如果脚本返回 "qBittorrent 未配置"，告知用户检查 PT_QB_URL 等环境变量
 - 下载路径默认为 qBittorrent 配置中的默认路径，可通过 `--save-path` 覆盖
