@@ -155,6 +155,18 @@ def _safe_image_meta(img: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _format_candidate_meta(candidates: List[Dict[str, Any]]) -> str:
+    lines: List[str] = []
+    for img in candidates:
+        pid = img.get("pid")
+        title = str(img.get("title", ""))[:80]
+        author = str(img.get("author", ""))[:40]
+        tags = [str(tag)[:40] for tag in img.get("tags", [])[:12] if tag]
+        tags_text = ", ".join(tags) if tags else "无"
+        lines.append(f"PID:{pid} | 标题:{title} | 作者:{author} | 标签:{tags_text}")
+    return "\n".join(lines)
+
+
 def _normalize_string_list(value: Any) -> List[str]:
     if not isinstance(value, list):
         return []
@@ -200,6 +212,38 @@ def _parse_score_item(item: Any) -> Tuple[Optional[int], Optional[ScoreItem]]:
         "matched": _normalize_string_list(item.get("matched", [])),
         "risks": _normalize_risk_list(item.get("risks", [])),
     }
+
+
+def _build_vision_system_prompt(user_keys: str) -> str:
+    return f"""你是图片推荐评分助手。根据每位用户的画像，为每张候选图片给出 0-100 的匹配分。
+
+必须遵守：
+- 只返回 JSON，不要输出隐藏推理或长篇解释。
+- 返回键必须是这些用户键：{user_keys}
+- 每个用户数组必须覆盖本批全部 PID，即使不喜欢也要给低分，不要省略。
+- score 是 0-100 数字：90+ 强匹配，70-89 明确喜欢，50-69 尚可，30-49 弱匹配，0-29 明确不适合。
+- confidence 只能是 high / medium / low。
+- reason 写可审计的简短理由，matched 写命中的画像点，risks 写触发的回避或风险点。
+
+评分顺序：
+1. 先判断整张图为什么吸引或劝退用户：整体美感、完成度、角色/主体设计、构图、氛围是否成立。
+2. 再判断题材与关系语义：图片、标题、标签若显示高负载/粗暴/猎奇/非合意/不适元素堆叠等内容，必须评估它是否破坏用户画像里的审美距离。
+3. 最后才看发色、瞳色、服装、IP、道具、单个姿势等浅层线索。除非画像明确把它们写成强偏好，否则只能作为弱到中等证据。
+4. 如果画像明确说某类线索“不作为约束”或“只是视觉线索”，不得因为候选图缺少这些线索而降分，也不得因为命中这些线索而高分。
+5. IP、标题和 tags 是识别题材语义的辅助信息，不能代替对图片整体美感和用户画像的判断。
+
+matched / risks 规则：
+- matched 优先写综合审美点，例如“高完成度”“角色设计精致”“构图有美学距离”“关系氛围匹配”“美学化身体线条”，不要默认写成发色/服装/IP 标签列表。
+- risks 只写与该用户画像中的回避项、降权项或边界条件冲突的内容。
+- 不要把候选池本身的成人/R18属性当作风险，除非画像明确回避相应表达方式。
+- 不喜欢但没有明确回避冲突时 risks 必须为 []，不要写“无匹配”“低匹配”“数据不足”。
+
+返回格式：
+{{
+  "user_0": [
+    {{"pid": 123, "score": 82, "confidence": "medium", "reason": "整体完成度高，角色设计和构图有美学距离，成人表达未压过角色魅力", "matched": ["高完成度", "角色整体美感", "构图有美学距离"], "risks": []}}
+  ]
+}}"""
 
 
 def _redact_api_key(api_key: str) -> str:
@@ -368,12 +412,16 @@ async def _call_vision_score_batch(
 
     users_block = "\n\n".join(user_texts)
     pid_labels = [f"PID:{pid}" for pid, _ in batch_images]
+    candidate_meta = _format_candidate_meta(candidates)
     content_parts = [
         {
             "type": "text",
             "text": (
                 f"候选图片 PID: {', '.join(pid_labels)}\n\n"
                 f"【用户画像】\n{users_block}\n\n"
+                f"【候选元数据】\n"
+                f"标题和标签只作为识别题材语义的辅助线索，不要用它们替代图片整体判断。\n"
+                f"{candidate_meta}\n\n"
                 f"以下是 {len(batch_images)} 张候选图片，每张图上方有 PID 标签。"
             )
         }
@@ -383,25 +431,7 @@ async def _call_vision_score_batch(
         content_parts.append({"type": "image_url", "image_url": {"url": b64_url}})
 
     user_keys = ", ".join(f"user_{idx}" for idx, _pref, _is_su, _uid in user_entries)
-    system_prompt = f"""你是图片推荐评分助手。根据每位用户的画像，为每张候选图片给出 0-100 的匹配分。
-
-必须遵守：
-- 只返回 JSON，不要输出隐藏推理或长篇解释。
-- 返回键必须是这些用户键：{user_keys}
-- 每个用户数组必须覆盖本批全部 PID，即使不喜欢也要给低分，不要省略。
-- score 是 0-100 数字：90+ 强匹配，70-89 明确喜欢，50-69 尚可，30-49 弱匹配，0-29 明确不适合。
-- confidence 只能是 high / medium / low。
-- reason 写可审计的简短理由，matched 写命中的画像点，risks 写触发的回避或风险点。
-- risks 只写与该用户画像中的回避项或限制冲突的内容，不要把候选池本身的成人/R18属性当作风险，除非画像明确回避。
-- 不喜欢但没有明确回避冲突时 risks 必须为 []，不要写“无匹配”“低匹配”“数据不足”。
-- 先依据用户画像的推荐摘要和核心审美画像评分，不要只按作品题材标签泛泛判断。
-
-返回格式：
-{{
-  "user_0": [
-    {{"pid": 123, "score": 82, "confidence": "medium", "reason": "命中浅色发、泳装、精致完成度", "matched": ["浅色发", "泳装"], "risks": []}}
-  ]
-}}"""
+    system_prompt = _build_vision_system_prompt(user_keys)
 
     api_base = conf.vision_api_base.rstrip("/")
     request_url = f"{api_base}/chat/completions"
