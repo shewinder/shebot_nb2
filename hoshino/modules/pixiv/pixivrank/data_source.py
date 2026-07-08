@@ -10,6 +10,7 @@ from .._model import Illust, PixivIllust
 from .score import score_data
 from .ai_filter import ai_filter_images, ai_filter_images_multi_user
 from .config import Config
+from .profile_utils import extract_profile_summary
 
 
 conf = Config.get_instance("pixivrank")
@@ -106,23 +107,6 @@ def random_select(pics: List[RankPic], count: int) -> List[RankPic]:
     return selected
 
 
-def _extract_profile_summary(pref: str) -> str:
-    """从画像提取核心审美画像首句作为摘要"""
-    in_section = False
-    for line in pref.split("\n"):
-        line = line.strip()
-        if "核心审美画像" in line or "核心偏好摘要" in line:
-            in_section = True
-            continue
-        if in_section and line.startswith("##"):
-            break
-        if in_section and len(line) > 20 and not line.startswith(">"):
-            return line[:120]
-    # fallback: first substantial line after header
-    lines = [l.strip() for l in pref.split("\n") if len(l.strip()) > 30]
-    return lines[0][:120] if lines else ""
-
-
 async def filter_rank(pics: List[RankPic], target_count: int = 15) -> List[RankPic]:
     """基础过滤逻辑：手动选择优先 + 去重 + 随机补齐"""
     # 获取手动选择的图片ID列表
@@ -169,12 +153,7 @@ async def read_group_preferences(group_id: int, bot) -> List[Tuple[str, bool, st
 
     Returns:
         List[Tuple[preference_text, is_superuser, user_id]]
-        超级用户排在前面
     """
-    from hoshino import hsn_config
-
-    superusers = {str(su) for su in getattr(hsn_config, 'superusers', set())}
-
     # 获取群成员列表
     member_ids: set = set()
     try:
@@ -204,14 +183,12 @@ async def read_group_preferences(group_id: int, bot) -> List[Tuple[str, bool, st
         try:
             content = f.read_text(encoding='utf-8').strip()
             if content:
-                is_su = user_id in superusers
-                result.append((content, is_su, user_id))
+                result.append((content, False, user_id))
         except Exception as e:
             logger.warning(f"读取画像文件失败 {f}: {e}")
 
-    # 超级用户排前面
-    result.sort(key=lambda x: (not x[1], x[2]))
-    logger.info(f"群 {group_id} 找到 {len(result)} 个有画像的成员（含超级用户 {sum(1 for _, s, _ in result if s)} 个）")
+    result.sort(key=lambda x: x[2])
+    logger.info(f"群 {group_id} 找到 {len(result)} 个有画像的成员")
     return result
 
 
@@ -305,7 +282,7 @@ async def filter_rank_ai(
                         log["users"].append({
                             "user_id": uid,
                             "is_superuser": is_su,
-                            "summary": _extract_profile_summary(pref),
+                            "summary": extract_profile_summary(pref),
                             "selected_pids": [pid for pid in (selected_pids or [])
                                              if pid in vote_details and any(v[0] == i for v in vote_details[pid])],
                             "reason": user_reasons[i] if i < len(user_reasons) else "",

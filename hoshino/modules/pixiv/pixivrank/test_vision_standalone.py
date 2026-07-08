@@ -9,16 +9,16 @@ Vision 筛选独立测试 —— 零依赖 bot 框架，直接测试核心逻辑
     .venv/bin/python hoshino/modules/pixiv/pixivrank/test_vision_standalone.py --multi-group
 
 数据: data/pixiv/pixiv_rank_r18.json
-API:  data/config/aichat.json → 云雾中转
+API:  data/config/pixivrank.json
 """
 import argparse
 import asyncio
 import base64
 import json
 import os
-import sys
+import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 import httpx
@@ -26,7 +26,7 @@ import httpx
 # ── 配置路径 ──────────────────────────────────────────
 PROJECT = Path(__file__).resolve().parent.parent.parent.parent.parent
 RANK_FILE = PROJECT / "data" / "pixiv" / "pixiv_rank_r18.json"
-AICHAT_CONF = PROJECT / "data" / "config" / "aichat.json"
+PIXIVRANK_CONF = PROJECT / "data" / "config" / "pixivrank.json"
 PREF_DIR = PROJECT / "data" / "aichat" / "preferences"
 CACHE_DIR = PROJECT / "data" / "pixiv" / "vision_cache"
 
@@ -34,7 +34,8 @@ CACHE_DIR = PROJECT / "data" / "pixiv" / "vision_cache"
 class _Config:
     vision_api_base = ""
     vision_api_key = ""
-    vision_model = "gemini-3.1-flash-lite"
+    vision_model = "grok-4.3"
+    vision_source = ""
     vision_batch_size = 10
     vision_select_per_user = 4
 
@@ -103,33 +104,124 @@ async def _download_image_cached(pid: int, url: str) -> Optional[str]:
     return b64
 
 
-def _extract_profile_summary(pref: str) -> str:
-    in_section = False
-    for line in pref.split("\n"):
-        line = line.strip()
-        if "核心审美画像" in line or "核心偏好摘要" in line:
-            in_section = True
+def _extract_markdown_section(text: str, title_keywords: List[str]) -> str:
+    lines = text.splitlines()
+    collecting = False
+    result: List[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## ") and any(keyword in stripped for keyword in title_keywords):
+            collecting = True
             continue
-        if in_section and line.startswith("##"):
+        if collecting and stripped.startswith("## "):
             break
-        if in_section and len(line) > 20 and not line.startswith(">"):
-            return line[:120]
-    lines = [l.strip() for l in pref.split("\n") if len(l.strip()) > 30]
-    return lines[0][:120] if lines else ""
+        if collecting:
+            result.append(line)
+
+    return "\n".join(result).strip()
+
+
+def _extract_profile_for_filter(pref: str, max_chars: int = 1200, fallback_chars: int = 800) -> str:
+    sections = [
+        _extract_markdown_section(pref, ["推荐摘要", "核心偏好摘要"]),
+        _extract_markdown_section(pref, ["核心审美画像"]),
+    ]
+    content = "\n\n".join(section for section in sections if section)
+    if not content:
+        return pref[:fallback_chars].strip()
+    return content[:max_chars].strip()
+
+
+def _extract_profile_summary(pref: str, max_chars: int = 120) -> str:
+    profile = _extract_profile_for_filter(pref, max_chars=max_chars, fallback_chars=max_chars)
+    return " ".join(profile.split())[:max_chars]
+
+
+def _safe_image_meta(img: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "pid": img.get("pid"),
+        "title": img.get("title", ""),
+        "author": img.get("author", ""),
+        "tags": img.get("tags", [])[:10],
+    }
+
+
+def _normalize_string_list(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item)[:80] for item in value if item]
+
+
+def _parse_selection_item(item: Any) -> Tuple[Optional[int], str, List[str], List[str]]:
+    if isinstance(item, dict):
+        raw_pid = item.get("pid")
+        reason = str(item.get("reason", ""))[:300]
+        matched = _normalize_string_list(item.get("matched", []))
+        risks = _normalize_string_list(item.get("risks", []))
+    else:
+        raw_pid = item
+        reason = ""
+        matched = []
+        risks = []
+
+    try:
+        return int(raw_pid), reason, matched, risks
+    except (ValueError, TypeError):
+        return None, reason, matched, risks
+
+
+def _redact_api_key(api_key: str) -> str:
+    if len(api_key) <= 10:
+        return "***" if api_key else ""
+    return f"{api_key[:6]}...{api_key[-4:]}"
+
+
+def _summarize_image_url(url: str) -> str:
+    if not url.startswith("data:image/"):
+        return url
+    mime = url.split(";base64,", 1)[0].replace("data:", "")
+    return f"<{mime};base64 chars={len(url)}>"
+
+
+def _sanitize_api_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        if "image_url" in value and isinstance(value["image_url"], dict):
+            sanitized = dict(value)
+            sanitized["image_url"] = {
+                **value["image_url"],
+                "url": _summarize_image_url(str(value["image_url"].get("url", ""))),
+            }
+            return sanitized
+        return {key: _sanitize_api_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_api_payload(item) for item in value]
+    return value
 
 
 async def _call_vision_batch(
+    batch_index: int,
+    candidates: List[Dict[str, Any]],
     batch_images: List[Tuple[int, str]],
     user_preferences: List[Tuple[str, bool, str]],
     select_per_user: int,
-) -> Optional[Dict[int, List[int]]]:
+) -> Tuple[Dict[int, List[int]], Dict[str, Any]]:
+    batch_log: Dict[str, Any] = {
+        "batch_index": batch_index,
+        "candidates": [_safe_image_meta(img) for img in candidates],
+        "downloaded_pids": [pid for pid, _ in batch_images],
+        "raw_response": "",
+        "parsed": {},
+        "invalid_pids": [],
+        "error": None,
+    }
+
     user_texts = []
-    for i, (pref, is_su, uid) in enumerate(user_preferences):
+    for i, (pref, _is_su, uid) in enumerate(user_preferences):
         if not pref:
             continue
-        summary = _extract_profile_summary(pref)
-        su_tag = "【超级用户】" if is_su else ""
-        user_texts.append(f"【用户{i}】{su_tag} ID:{uid}\n偏好摘要:{summary}\n完整画像:{pref[:800]}")
+        profile = _extract_profile_for_filter(pref)
+        user_texts.append(f"【用户{i}】ID:{uid}\n用户画像:\n{profile}")
 
     users_block = "\n\n".join(user_texts)
     pid_labels = [f"PID:{pid}" for pid, _ in batch_images]
@@ -148,33 +240,53 @@ async def _call_vision_batch(
         content_parts.append({"type": "text", "text": f"\n--- PID:{pid} ---"})
         content_parts.append({"type": "image_url", "image_url": {"url": b64_url}})
 
-    system_prompt = (
-        f"你是图片推荐助手。根据每位用户的审美偏好，从候选图片中为每人选 {select_per_user} 张最符合的。\n"
-        "看构图、色调、风格、主题，匹配画像中的审美偏好。返回 JSON，不要解释：\n"
-        '{"user_0": [pid1, pid2, ...], "user_1": [...], ...}'
-    )
+    system_prompt = f"""你是图片推荐助手。根据每位用户的审美偏好，从候选图片中为每人选 {select_per_user} 张最符合的。
+
+看构图、色调、风格、主题，匹配画像中的审美偏好。
+只返回 JSON，不要输出隐藏推理或长篇思考。reason 写可审计的简短选择理由：
+{{
+  "user_0": [
+    {{"pid": 123, "reason": "命中浅色发、泳装、精致完成度；无明显回避项", "matched": ["浅色发", "泳装"], "risks": []}}
+  ],
+  "user_1": []
+}}"""
 
     api_base = conf.vision_api_base.rstrip("/")
+    request_url = f"{api_base}/chat/completions"
+    headers = {"Authorization": f"Bearer {conf.vision_api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": conf.vision_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content_parts},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 3000,
+    }
+    debug_headers = {
+        "Authorization": f"Bearer {_redact_api_key(conf.vision_api_key)}",
+        "Content-Type": headers["Content-Type"],
+    }
+
     print(f"    POST {api_base}/chat/completions")
     print(f"    Model: {conf.vision_model}, 图片: {len(batch_images)}张, 用户: {len(user_preferences)}人")
+    print("    --- API 请求参数 ---")
+    print(f"    URL: {request_url}")
+    print(f"    Headers: {json.dumps(debug_headers, ensure_ascii=False)}")
+    print(json.dumps(_sanitize_api_payload(payload), ensure_ascii=False, indent=2))
+    print("    --- 请求参数结束 ---")
 
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
-            f"{api_base}/chat/completions",
-            headers={"Authorization": f"Bearer {conf.vision_api_key}", "Content-Type": "application/json"},
-            json={
-                "model": conf.vision_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content_parts},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1000,
-            },
+            request_url,
+            headers=headers,
+            json=payload,
         )
         resp.raise_for_status()
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
+        batch_log["raw_response"] = content
+        batch_log["usage"] = data.get("usage", {})
         print(f"    Token: {json.dumps(data.get('usage', {}))}")
         print(f"    Model: {data.get('model', '?')}")
         print(f"    Finish: {data['choices'][0].get('finish_reason', '?')}")
@@ -187,38 +299,81 @@ async def _call_vision_batch(
         json_str = json_str.split("```json")[1].split("```")[0]
     elif "```" in json_str:
         json_str = json_str.split("```")[1].split("```")[0]
-    result = json.loads(json_str.strip())
+    try:
+        result = json.loads(json_str.strip())
+    except json.JSONDecodeError as e:
+        batch_log["error"] = f"JSON解析失败: {e}"
+        return {}, batch_log
 
     user_selections: Dict[int, List[int]] = {}
     valid_pids = {pid for pid, _ in batch_images}
+    parsed_log: Dict[str, List[Dict[str, Any]]] = {}
     for i in range(len(user_preferences)):
         key = f"user_{i}"
         if key in result:
             pids = []
-            for pid in result[key]:
-                try:
-                    pid_int = int(pid)
-                    if pid_int in valid_pids:
-                        pids.append(pid_int)
-                except (ValueError, TypeError):
-                    pass
+            parsed_log[key] = []
+            if not isinstance(result[key], list):
+                continue
+            for item in result[key]:
+                pid_int, reason, matched, risks = _parse_selection_item(item)
+                if pid_int is None:
+                    continue
+                if pid_int not in valid_pids:
+                    batch_log["invalid_pids"].append(pid_int)
+                    continue
+                pids.append(pid_int)
+                parsed_log[key].append({
+                    "pid": pid_int,
+                    "reason": reason,
+                    "matched": matched,
+                    "risks": risks,
+                })
             if pids:
                 user_selections[i] = pids[:select_per_user]
-    return user_selections
+                parsed_log[key] = parsed_log[key][:select_per_user]
+
+    batch_log["parsed"] = parsed_log
+    return user_selections, batch_log
 
 
 async def vision_filter_images(
     images: List[Dict],
     user_preferences: List[Tuple[str, bool, str]],
-) -> Tuple[Optional[List[int]], Dict[int, List[Tuple[int, bool]]]]:
+) -> Tuple[Optional[List[int]], Dict[int, List[Tuple[int, bool]]], Dict[str, Any]]:
     if not user_preferences or not conf.vision_api_key:
-        return None, {}
+        return None, {}, {"error": "Vision API未配置或无用户画像"}
 
     user_count = len(user_preferences)
     batch_size = conf.vision_batch_size
     select_per_user = conf.vision_select_per_user
+    vision_log: Dict[str, Any] = {
+        "api": {
+            "source": conf.vision_source or "pixivrank.vision",
+            "api_base": conf.vision_api_base,
+            "model": conf.vision_model,
+        },
+        "batch_size": batch_size,
+        "select_per_user": select_per_user,
+        "users": [
+            {
+                "user_idx": idx,
+                "user_id": uid,
+                "is_superuser": is_su,
+                "profile": _extract_profile_for_filter(pref),
+            }
+            for idx, (pref, is_su, uid) in enumerate(user_preferences)
+            if pref
+        ],
+        "batches": [],
+        "vote_reasons": {},
+        "sorted_pids": [],
+    }
 
-    print(f"Vision 筛选: {user_count}用户, {len(images)}张图, 每批{batch_size}张, 每人选{select_per_user}张")
+    print(
+        f"Vision 筛选: model={conf.vision_model}, source={vision_log['api']['source']}, "
+        f"{user_count}用户, {len(images)}张图, 每批{batch_size}张, 每人选{select_per_user}张"
+    )
 
     # 分片
     batches = [images[i:i + batch_size] for i in range(0, len(images), batch_size)]
@@ -245,52 +400,98 @@ async def vision_filter_images(
 
     # 并行调用 API
     print(f"开始 {len(batches)} 批并行 API 调用...")
-    async def call_batch(batch_images):
+    async def call_batch(
+        batch_index: int,
+        batch_images: List[Tuple[int, str]],
+    ) -> Tuple[Dict[int, List[int]], Dict[str, Any]]:
+        candidates = batches[batch_index]
         if not batch_images:
-            return None
+            return {}, {
+                "batch_index": batch_index,
+                "candidates": [_safe_image_meta(img) for img in candidates],
+                "downloaded_pids": [],
+                "raw_response": "",
+                "parsed": {},
+                "invalid_pids": [],
+                "error": "本批图片下载全部失败",
+            }
         try:
-            return await _call_vision_batch(batch_images, user_preferences, select_per_user)
+            return await _call_vision_batch(batch_index, candidates, batch_images, user_preferences, select_per_user)
         except httpx.HTTPStatusError as e:
             print(f"    ✗ HTTP {e.response.status_code}: {e.response.text[:200]}")
-            return None
-        except json.JSONDecodeError as e:
-            print(f"    ✗ JSON解析失败: {e}")
-            return None
+            return {}, {
+                "batch_index": batch_index,
+                "candidates": [_safe_image_meta(img) for img in candidates],
+                "downloaded_pids": [pid for pid, _ in batch_images],
+                "raw_response": e.response.text[:1000],
+                "parsed": {},
+                "invalid_pids": [],
+                "error": f"HTTP {e.response.status_code}",
+            }
         except Exception as e:
             print(f"    ✗ API调用失败: {e}")
-            return None
+            return {}, {
+                "batch_index": batch_index,
+                "candidates": [_safe_image_meta(img) for img in candidates],
+                "downloaded_pids": [pid for pid, _ in batch_images],
+                "raw_response": "",
+                "parsed": {},
+                "invalid_pids": [],
+                "error": str(e),
+            }
 
-    batch_results = await asyncio.gather(*[call_batch(b) for b in downloaded_batches])
+    batch_results = await asyncio.gather(*[
+        call_batch(batch_index, batch_images)
+        for batch_index, batch_images in enumerate(downloaded_batches)
+    ])
 
     vote_details: Dict[int, List[Tuple[int, bool]]] = {}
-    for result in batch_results:
+    vote_reasons: Dict[int, List[Dict[str, Any]]] = {}
+    for result, batch_log in batch_results:
+        vision_log["batches"].append(batch_log)
         if result:
             for user_idx, pids in result.items():
                 is_su = user_preferences[user_idx][1] if user_idx < len(user_preferences) else False
+                uid = user_preferences[user_idx][2] if user_idx < len(user_preferences) else ""
+                parsed_items = {
+                    item["pid"]: item
+                    for item in batch_log.get("parsed", {}).get(f"user_{user_idx}", [])
+                }
                 for pid in pids:
                     vote_details.setdefault(pid, []).append((user_idx, is_su))
+                    item = parsed_items.get(pid, {})
+                    vote_reasons.setdefault(pid, []).append({
+                        "user_idx": user_idx,
+                        "user_id": uid,
+                        "is_superuser": is_su,
+                        "reason": item.get("reason", ""),
+                        "matched": item.get("matched", []),
+                        "risks": item.get("risks", []),
+                    })
 
     if not vote_details:
         print("所有批均未返回有效结果")
-        return None, {}
+        vision_log["vote_reasons"] = {}
+        return None, {}, vision_log
 
     def sort_key(pid):
         details = vote_details[pid]
         count = len(details)
-        has_su = any(is_su for _, is_su in details)
-        first_su_idx = min((idx for idx, is_su in details if is_su), default=999)
-        return (count, has_su, -first_su_idx)
+        first_idx = min((idx for idx, _ in details), default=999)
+        return (count, -first_idx)
 
     sorted_pids = sorted(vote_details.keys(), key=sort_key, reverse=True)
+    vision_log["vote_reasons"] = {str(pid): items for pid, items in vote_reasons.items()}
+    vision_log["sorted_pids"] = sorted_pids
     print(f"汇总: {len(vote_details)} 张作品入选\n")
-    return sorted_pids, vote_details
+    return sorted_pids, vote_details, vision_log
 
 
 async def vision_filter_multi_group(
     images, group_preferences, target_count=15
-) -> Dict[int, List[int]]:
+) -> Tuple[Dict[int, List[int]], Dict[int, Dict[str, Any]]]:
     if not group_preferences:
-        return {}
+        return {}, {}
 
     flat_users = []
     user_group_map = {}
@@ -304,12 +505,12 @@ async def vision_filter_multi_group(
             idx += 1
 
     if not flat_users:
-        return {}
+        return {}, {}
 
     print(f"跨群合并: {len(group_preferences)}群, {len(flat_users)}用户, {len(images)}张图")
-    sorted_pids, vote_details = await vision_filter_images(images, flat_users)
+    sorted_pids, vote_details, vision_log = await vision_filter_images(images, flat_users)
     if not sorted_pids:
-        return {}
+        return {}, {}
 
     group_votes = {gid: {} for gid in group_preferences}
     for pid, voters in vote_details.items():
@@ -320,34 +521,54 @@ async def vision_filter_multi_group(
 
     def sort_key(pid, details):
         count = len(details)
-        has_su = any(is_su for _, is_su in details)
-        first_su_idx = min((idx for idx, is_su in details if is_su), default=999)
-        return (count, has_su, -first_su_idx)
+        first_idx = min((idx for idx, _ in details), default=999)
+        return (count, -first_idx)
 
     results = {}
+    logs = {}
     for gid, votes in group_votes.items():
         if not votes:
             results[gid] = []
+            logs[gid] = {
+                **vision_log,
+                "group_id": gid,
+                "group_sorted_pids": [],
+                "group_vote_details": {},
+            }
             continue
         g_sorted = sorted(votes.keys(), key=lambda pid: sort_key(pid, votes[pid]), reverse=True)
         results[gid] = g_sorted[:target_count]
+        logs[gid] = {
+            **vision_log,
+            "group_id": gid,
+            "group_sorted_pids": results[gid],
+            "group_vote_details": {
+                str(pid): [
+                    {"user_idx": idx, "is_superuser": is_su}
+                    for idx, is_su in details
+                ]
+                for pid, details in votes.items()
+            },
+        }
         print(f"  群{gid}: {len(g_sorted)}张 → 取前{target_count}张")
-    return results
+    return results, logs
 
 
 # ── 测试流程 ──────────────────────────────────────────
 
 def load_config():
-    """从 aichat.json 加载中转站 API 并写入 conf"""
-    data = json.loads(AICHAT_CONF.read_text())
-    for api in data.get("apis", []):
-        if "中转" in api.get("api", ""):
-            conf.vision_api_base = api["api_base"]
-            conf.vision_api_key = api["api_key"]
-            print(f"API : {api['api']} | {conf.vision_api_base}")
-            print(f"Model: {conf.vision_model}")
-            return
-    raise RuntimeError("未找到中转站 API 配置")
+    """从 pixivrank.json 加载 Vision API 配置并写入 conf"""
+    data = json.loads(PIXIVRANK_CONF.read_text())
+    conf.vision_api_base = data.get("vision_api_base", "")
+    conf.vision_api_key = data.get("vision_api_key", "")
+    conf.vision_model = data.get("vision_model", conf.vision_model)
+    conf.vision_batch_size = data.get("vision_batch_size", conf.vision_batch_size)
+    conf.vision_select_per_user = data.get("vision_select_per_user", conf.vision_select_per_user)
+    conf.vision_source = "pixivrank.vision"
+    if not conf.vision_api_key:
+        raise RuntimeError("pixivrank Vision API 未配置")
+    print(f"API : pixivrank.vision | {conf.vision_api_base}")
+    print(f"Model: {conf.vision_model}")
 
 
 def load_images(limit: int) -> List[Dict]:
@@ -371,8 +592,7 @@ def load_preferences(count: int) -> List[Tuple[str, bool, str]]:
         for f in list(PREF_DIR.glob("*.md"))[:count]:
             content = f.read_text(encoding="utf-8").strip()
             if content:
-                is_su = (len(result) == 0)
-                result.append((content, is_su, f.stem))
+                result.append((content, False, f.stem))
     while len(result) < count:
         i = len(result)
         sample = (
@@ -385,7 +605,7 @@ def load_preferences(count: int) -> List[Tuple[str, bool, str]]:
             f"- 主题: 科幻、赛博朋克、机械\n"
             f"- 风格: 写实、半写实、厚涂\n"
         )
-        result.append((sample, len(result) == 0, f"test_{i}"))
+        result.append((sample, False, f"test_{i}"))
     return result
 
 
@@ -409,14 +629,12 @@ async def main():
     user_prefs = load_preferences(args.users)
 
     print(f"测试参数: 图片={len(images)}张, 每批={args.batch}张, 用户={len(user_prefs)}人")
-    for pref, is_su, uid in user_prefs:
+    for pref, _is_su, uid in user_prefs:
         summary = _extract_profile_summary(pref)
-        su = " [SU]" if is_su else ""
-        print(f"  {uid}{su}: {summary[:80]}...")
+        print(f"  {uid}: {summary[:80]}...")
     print()
 
     if args.clear_cache:
-        import shutil
         if CACHE_DIR.exists():
             shutil.rmtree(CACHE_DIR)
             print(f"已清除磁盘缓存: {CACHE_DIR}\n")
@@ -441,25 +659,40 @@ async def main():
     # 单群测试
     _image_cache.clear()
     print("--- 单群 Vision 筛选 ---")
-    selected, votes = await vision_filter_images(images, user_prefs)
+    selected, votes, vision_log = await vision_filter_images(images, user_prefs)
+    selected = selected or []
 
     print(f"结果: {len(selected)} 张入选\n")
     for pid in selected[:10]:
         voters = votes.get(pid, [])
-        info = [f"u{v[0]}" + ("[SU]" if v[1] else "") for v in voters]
+        info = [f"u{v[0]}" for v in voters]
         img = next((i for i in images if i["pid"] == pid), None)
         title = img["title"][:40] if img else "?"
         print(f"  PID:{pid:>10}  [{len(voters)}票]  {title}")
         print(f"               ← {', '.join(info)}")
+        for item in vision_log.get("vote_reasons", {}).get(str(pid), []):
+            reason = item.get("reason", "")
+            matched = ", ".join(item.get("matched", []))
+            risks = ", ".join(item.get("risks", []))
+            print(f"               理由 u{item.get('user_idx')}: {reason}")
+            if matched:
+                print(f"               命中: {matched}")
+            if risks:
+                print(f"               风险: {risks}")
 
     # 跨群合并
     if args.multi_group:
         print(f"\n--- 跨群合并 (2个群) ---")
         _image_cache.clear()
         group_prefs = {10001: user_prefs[:2], 10002: user_prefs[2:]}
-        group_pids = await vision_filter_multi_group(images, group_prefs)
+        group_pids, group_logs = await vision_filter_multi_group(images, group_prefs)
         for gid, pids in group_pids.items():
             print(f"  群{gid}: {len(pids)} 张  {pids[:5]}...")
+            first_pid = pids[0] if pids else None
+            if first_pid:
+                reasons = group_logs.get(gid, {}).get("vote_reasons", {}).get(str(first_pid), [])
+                if reasons:
+                    print(f"    首图理由: {reasons[0].get('reason', '')}")
 
     print(f"\n{'=' * 60}")
     print("测试完成")

@@ -64,9 +64,7 @@ async def _call_ai_filter(
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 500
+                ]
             }
         )
         resp.raise_for_status()
@@ -162,8 +160,8 @@ async def ai_filter_images_multi_user(
     """
     为多个用户分别调用 AI 筛选，每人配额制，给每个人一个机会。
 
-    配额计算: 每人至少 3 张，超级用户额外 +2 张。
-    合并去重后按"多人共同喜欢优先、有超级用户推荐优先"排序，
+    配额计算: 每人至少 3 张。
+    合并去重后按"多人共同喜欢优先"排序，
     超过 select_count 则截取，不足则由调用方补齐。
 
     Args:
@@ -192,7 +190,7 @@ async def ai_filter_images_multi_user(
     user_preferences = user_preferences[:max_users]
     user_count = len(user_preferences)
 
-    # 每人配额：均分，至少 3 张；超级用户额外 +2
+    # 每人配额：均分，至少 3 张
     base_quota = max(3, select_count // user_count)
     logger.info(
         f"开始多用户 AI 筛选: 用户={user_count}人, 基础配额={base_quota}张, "
@@ -207,9 +205,8 @@ async def ai_filter_images_multi_user(
         if not preference:
             continue
 
-        quota = min(base_quota + (2 if is_su else 0), len(images))
-        user_label = "超级用户" if is_su else "普通用户"
-        logger.info(f"第 {i+1}/{user_count} 次 AI 调用 ({user_label}, 配额 {quota} 张), 画像长度 {len(preference)}")
+        quota = min(base_quota, len(images))
+        logger.info(f"第 {i+1}/{user_count} 次 AI 调用 (配额 {quota} 张), 画像长度 {len(preference)}")
 
         try:
             selected, reason = await _call_ai_filter(
@@ -235,16 +232,11 @@ async def ai_filter_images_multi_user(
         logger.info("所有用户 AI 筛选均未返回结果")
         return None, {}, user_reasons
 
-    # 排序规则：
-    # 1. 被推荐次数越多越优先（多人共识）
-    # 2. 有超级用户推荐的优先
-    # 3. 首次被超级用户推荐的优先（用 user_idx 最小值判断）
     def sort_key(pid: int):
         details = vote_details[pid]
         count = len(details)
-        has_su = any(is_su for _, is_su in details)
-        first_su_idx = min((idx for idx, is_su in details if is_su), default=999)
-        return (count, has_su, -first_su_idx)
+        first_idx = min((idx for idx, _ in details), default=999)
+        return (count, -first_idx)
 
     sorted_pids = sorted(vote_details.keys(), key=sort_key, reverse=True)
     logger.info(

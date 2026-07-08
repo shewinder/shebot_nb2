@@ -16,6 +16,6 @@ class Config(BaseConfig):
     vision_filter_enabled: bool = True  # 视觉筛选总开关，关闭时回退纯文本
     vision_api_base: str = ""
     vision_api_key: str = ""
-    vision_model: str = "gemini-2.5-flash"
+    vision_model: str = "grok-4.3"
     vision_batch_size: int = 10  # 每批传给 vision 模型的图片数
     vision_select_per_user: int = 4  # 每批每用户最多选几张

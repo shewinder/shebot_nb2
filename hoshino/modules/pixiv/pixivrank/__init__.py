@@ -16,7 +16,6 @@ from hoshino import (
     Service,
     font_dir,
     get_bot_list,
-    hsn_config,
     scheduled_job,
     sucmd,
     userdata_dir,
@@ -35,7 +34,7 @@ from hoshino.modules.aichat.aichat.chat_executor import ChatExecutor
 
 from .config import Config
 from .data_source import RankPic, filter_rank, filter_rank_ai, get_rank, get_rankpic, read_group_preferences, not_sent_in_3_days
-from .vision_filter import vision_filter_multi_group
+from .vision_filter import is_vision_filter_available, vision_filter_multi_group
 from .score import score_data, save_score_data, load_score_data
 from hoshino.util import _strip_cmd
 
@@ -368,7 +367,8 @@ async def send_rank(sv: Service, raw_pics: List[RankPic], gids: List[int] = None
 
     # 跨群合并：提前汇总所有群的用户画像，一次 vision 调用
     group_pids: Dict[int, List[int]] = {}
-    if conf.vision_filter_enabled and conf.vision_api_key and conf.ai_filter_enabled:
+    group_vision_logs: Dict[int, Dict] = {}
+    if conf.vision_filter_enabled and is_vision_filter_available() and conf.ai_filter_enabled:
         group_prefs: Dict[int, List] = {}
         for gid in gids:
             prefs = await read_group_preferences(gid, bot)
@@ -383,7 +383,7 @@ async def send_rank(sv: Service, raw_pics: List[RankPic], gids: List[int] = None
                 for p in deduped
             ]
             try:
-                group_pids = await vision_filter_multi_group(images, group_prefs)
+                group_pids, group_vision_logs = await vision_filter_multi_group(images, group_prefs)
                 sv.logger.info(
                     f"跨群 Vision 合并完成: {len(group_pids)}/{len(gids)} 个群有结果, "
                     f"覆盖 {sum(len(v) for v in group_pids.values())} 个作品"
@@ -418,6 +418,8 @@ async def send_rank(sv: Service, raw_pics: List[RankPic], gids: List[int] = None
             sent_pids.extend(p.pid for p in pics)
             if filter_log:
                 filter_log["is_r18"] = is_r18
+                if gid in group_vision_logs:
+                    filter_log["vision"] = group_vision_logs[gid]
                 _save_rank_log(gid, filter_log, suffix="_r18" if is_r18 else "")
         except Exception as e:
             sv.logger.exception(e)
@@ -515,15 +517,6 @@ async def pixiv_rank():
 async def pixiv_rank_r18():
     await send_rank(sv_r18, _raw_rank_r18, is_r18=True)
     _save_rank_data()
-
-
-def _get_superuser_id() -> str:
-    """获取第一个 superuser 的 ID"""
-    superusers = getattr(hsn_config, 'superusers', set())
-    if superusers:
-        su_list = list(superusers)
-        return str(su_list[0])
-    return "default"
 
 
 async def update_rank(bot: Bot = None, event: GroupMessageEvent = None):
