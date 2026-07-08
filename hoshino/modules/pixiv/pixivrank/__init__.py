@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import re
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 from hoshino import (
@@ -728,9 +728,13 @@ async def _(bot: Bot, event: GroupMessageEvent):
         log = _read_rank_log(gid, date_str, suffix)
         if not log:
             continue
-        users = log.get("users", [])
-        ai_count = log.get("ai_selected_count", 0)
+        vision = log.get("vision") or {}
+        users = log.get("users", []) or vision.get("users", [])
+        model_count = log.get("model_selected_count", log.get("ai_selected_count", 0))
+        source = log.get("selection_source", "")
+        model_label = "Vision 选中" if source == "vision" or vision.get("mode") == "score_matrix" else "AI 选中"
         random_count = log.get("random_count", 0)
+        fallback_count = log.get("fallback_count", 0)
         final_pids = log.get("final_pids", [])
 
         lines.append(f"📊 {label} | {date_str}")
@@ -738,13 +742,13 @@ async def _(bot: Bot, event: GroupMessageEvent):
         for u in users:
             su_tag = "[SU] " if u.get("is_superuser") else ""
             uid = u.get("user_id", "?")
-            summary = u.get("summary", "")[:80]
+            summary = " ".join(str(u.get("summary") or u.get("profile") or "").split())[:80]
             selected = u.get("selected_pids", [])
             lines.append(f"  - {su_tag}{uid}: {summary}")
             if selected:
                 lines.append(f"    选中: {', '.join(str(p) for p in selected)}")
 
-        lines.append(f"🤖 AI 选中: {ai_count} 张")
+        lines.append(f"🤖 {model_label}: {model_count} 张")
         if log.get("vote_details"):
             lines.append("  投票明细:")
             for pid, voters in log["vote_details"].items():
@@ -752,9 +756,33 @@ async def _(bot: Bot, event: GroupMessageEvent):
                            for v in voters]
                 lines.append(f"    PID:{pid} ← {', '.join(voter_ids)}")
 
+        vision_scores: Dict[str, Any] = vision.get("scores", {})
+        if vision_scores:
+            ranked_pids = vision.get("group_sorted_pids") or vision.get("sorted_pids") or final_pids
+            lines.append("🎯 Vision评分Top:")
+            shown = 0
+            for pid in ranked_pids:
+                info = vision_scores.get(str(pid))
+                if not info:
+                    continue
+                lines.append(
+                    f"    PID:{pid} final={info.get('final_score')} avg={info.get('avg_score')} "
+                    f"高={info.get('high_count')} 低={info.get('low_count')} 风险={info.get('risk_count')}"
+                )
+                per_user = info.get("per_user", [])
+                reason = next((str(item.get("reason", "")) for item in per_user if item.get("reason")), "")
+                if reason:
+                    lines.append(f"      {reason[:80]}")
+                shown += 1
+                if shown >= 5:
+                    break
+
         if random_count:
             random_pids = log.get("random_filled", [])
             lines.append(f"🎲 随机补齐: {random_count} 张 ({', '.join(str(p) for p in random_pids)})")
+        if fallback_count:
+            fallback_pids = log.get("fallback_filled", [])
+            lines.append(f"📌 顺序补齐: {fallback_count} 张 ({', '.join(str(p) for p in fallback_pids)})")
 
         lines.append(f"📋 最终输出 ({len(final_pids)}张): {', '.join(str(p) for p in final_pids)}")
         lines.append("")

@@ -17,5 +17,13 @@ class Config(BaseConfig):
     vision_api_base: str = ""
     vision_api_key: str = ""
     vision_model: str = "grok-4.3"
-    vision_batch_size: int = 10  # 每批传给 vision 模型的图片数
-    vision_select_per_user: int = 4  # 每批每用户最多选几张
+    vision_batch_size: int = 15  # 每批传给 vision 模型的图片数
+    vision_user_batch_size: int = 4  # 每批传给 vision 模型的用户数
+    vision_max_request_chars: int = 4000000
+    vision_max_concurrency: int = 4
+    vision_retry_count: int = 2
+    vision_high_score_threshold: int = 70
+    vision_low_score_threshold: int = 40
+    vision_consensus_bonus: float = 5.0
+    vision_low_penalty: float = 5.0
+    vision_risk_penalty: float = 3.0

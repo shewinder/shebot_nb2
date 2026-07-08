@@ -233,12 +233,13 @@ async def filter_rank_ai(
                 result.append(pid_map[pid])
                 remaining_candidates = [p for p in remaining_candidates if p.pid != pid]
         logger.info(f"群 {group_id} 使用预选 PID {len(result)} 张")
-        if result:
-            log = {
-                "ai_selected_count": len(result),
-                "users": [],
-                "vote_details": {},
-            }
+        log = {
+            "ai_selected_count": len(result),
+            "model_selected_count": len(result),
+            "selection_source": "vision",
+            "users": [],
+            "vote_details": {},
+        }
     else:
         # 独立筛选：文本 AI（tag 模式）
         images = [
@@ -273,6 +274,8 @@ async def filter_rank_ai(
 
                     log = {
                         "ai_selected_count": len(result),
+                        "model_selected_count": len(result),
+                        "selection_source": "text_ai",
                         "users": [],
                         "vote_details": {},
                     }
@@ -292,16 +295,20 @@ async def filter_rank_ai(
                             {"user_idx": idx, "is_superuser": su} for idx, su in voters
                         ]
 
-    # 如果 AI 未选中或数量不足，用原逻辑补齐
+    # 如果 AI 未选中或数量不足，模型路径按榜单顺序补齐，避免随机覆盖模型排序。
     current_count = len(result)
     if current_count < target_count and len(remaining_candidates) > 0:
         need_count = target_count - current_count
-        additional = random_select(remaining_candidates, need_count)
-        result.extend(additional)
-        logger.info(f"群 {group_id} 随机补齐 {len(additional)} 张，共 {len(result)} 张")
         if log:
-            log["random_filled"] = [p.pid for p in additional]
-            log["random_count"] = len(additional)
+            additional = remaining_candidates[:need_count]
+            fill_label = "榜单顺序补齐"
+            log["fallback_filled"] = [p.pid for p in additional]
+            log["fallback_count"] = len(additional)
+        else:
+            additional = random_select(remaining_candidates, need_count)
+            fill_label = "随机补齐"
+        result.extend(additional)
+        logger.info(f"群 {group_id} {fill_label} {len(additional)} 张，共 {len(result)} 张")
 
     if log:
         log["final_pids"] = [p.pid for p in result]

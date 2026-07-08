@@ -1,13 +1,13 @@
 '''
 Author: SheBot
 Date: 2026-05-20
-Description: Vision 视觉筛选 — 分批调用 vision 模型看图筛选图片
+Description: Vision 视觉筛选 - 分批调用 vision 模型为图片打分排序
 '''
 import asyncio
 import base64
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiohttp
 import httpx
@@ -17,6 +17,11 @@ from .config import Config
 from .profile_utils import extract_profile_for_filter
 
 conf = Config.get_instance("pixivrank")
+
+UserPreference = Tuple[str, bool, str]
+UserEntry = Tuple[int, str, bool, str]
+ScoreItem = Dict[str, Any]
+ScoreMatrix = Dict[int, Dict[int, ScoreItem]]
 
 # 图片下载缓存：pid -> base64 data URL，跨群共享
 _image_cache: Dict[int, str] = {}
@@ -90,192 +95,388 @@ def _normalize_string_list(value: Any) -> List[str]:
     return [str(item)[:80] for item in value if item]
 
 
-def _parse_selection_item(item: Any) -> Tuple[Optional[int], str, List[str], List[str]]:
-    if isinstance(item, dict):
-        raw_pid = item.get("pid")
-        reason = str(item.get("reason", ""))[:300]
-        matched = _normalize_string_list(item.get("matched", []))
-        risks = _normalize_string_list(item.get("risks", []))
-    else:
-        raw_pid = item
-        reason = ""
-        matched = []
-        risks = []
+def _normalize_risk_list(value: Any) -> List[str]:
+    ignored_exact = {"无匹配", "不匹配", "低匹配", "数据不足", "无风险", "无明显风险", "none", "n/a"}
+    ignored_prefixes = ("无匹配", "不匹配", "低匹配", "数据不足")
+    risks = []
+    for item in _normalize_string_list(value):
+        normalized = item.strip().lower()
+        if normalized in ignored_exact:
+            continue
+        if normalized.startswith(ignored_prefixes):
+            continue
+        if "无明显风险" in normalized or "无风险" in normalized:
+            continue
+        risks.append(item)
+    return risks
+
+
+def _clamp_score(value: Any) -> float:
+    try:
+        score = float(value)
+    except (ValueError, TypeError):
+        score = 0.0
+    return max(0.0, min(100.0, score))
+
+
+def _parse_score_item(item: Any) -> Tuple[Optional[int], Optional[ScoreItem]]:
+    if not isinstance(item, dict):
+        return None, None
 
     try:
-        return int(raw_pid), reason, matched, risks
+        pid = int(item.get("pid"))
     except (ValueError, TypeError):
-        return None, reason, matched, risks
+        return None, None
+
+    score_item: ScoreItem = {
+        "pid": pid,
+        "score": _clamp_score(item.get("score", 0)),
+        "confidence": str(item.get("confidence", ""))[:40],
+        "reason": str(item.get("reason", ""))[:300],
+        "matched": _normalize_string_list(item.get("matched", [])),
+        "risks": _normalize_risk_list(item.get("risks", [])),
+    }
+    return pid, score_item
 
 
-async def _call_vision_batch(
-    batch_index: int,
+def _chunked(items: List[Any], size: int) -> List[List[Any]]:
+    size = max(1, size)
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _split_downloaded_batch(
+    source_batch_index: int,
     candidates: List[Dict[str, Any]],
-    batch_images: List[Tuple[int, str]],  # [(pid, b64_data_url), ...]
-    user_preferences: List[Tuple[str, bool, str]],  # [(pref_text, is_superuser, user_id), ...]
-    select_per_user: int,
+    batch_images: List[Tuple[int, str]],
+    max_request_chars: int,
+) -> List[Tuple[int, List[Dict[str, Any]], List[Tuple[int, str]], int]]:
+    if not batch_images:
+        return [(source_batch_index, candidates, [], 0)]
+
+    pid_to_candidate = {int(img["pid"]): img for img in candidates if img.get("pid") is not None}
+    result: List[Tuple[int, List[Dict[str, Any]], List[Tuple[int, str]], int]] = []
+    current_candidates: List[Dict[str, Any]] = []
+    current_images: List[Tuple[int, str]] = []
+    current_chars = 0
+
+    for pid, b64_url in batch_images:
+        image_chars = len(b64_url)
+        if current_images and current_chars + image_chars > max_request_chars:
+            result.append((source_batch_index, current_candidates, current_images, current_chars))
+            current_candidates = []
+            current_images = []
+            current_chars = 0
+
+        candidate = pid_to_candidate.get(pid)
+        if candidate is not None:
+            current_candidates.append(candidate)
+        current_images.append((pid, b64_url))
+        current_chars += image_chars
+
+    if current_images:
+        result.append((source_batch_index, current_candidates, current_images, current_chars))
+    return result
+
+
+def _merge_score_matrix(target: ScoreMatrix, source: ScoreMatrix) -> None:
+    for pid, by_user in source.items():
+        if pid not in target:
+            target[pid] = {}
+        target[pid].update(by_user)
+
+
+def _aggregate_score_matrix(
+    score_matrix: ScoreMatrix,
+    candidate_order: Dict[int, int],
+    allowed_user_indices: Optional[Set[int]] = None,
+) -> Tuple[List[int], Dict[int, Dict[str, Any]]]:
+    aggregated: Dict[int, Dict[str, Any]] = {}
+    high_threshold = getattr(conf, "vision_high_score_threshold", 70)
+    low_threshold = getattr(conf, "vision_low_score_threshold", 40)
+    consensus_bonus = getattr(conf, "vision_consensus_bonus", 5.0)
+    low_penalty = getattr(conf, "vision_low_penalty", 5.0)
+    risk_penalty = getattr(conf, "vision_risk_penalty", 3.0)
+
+    for pid, by_user in score_matrix.items():
+        per_user = []
+        for user_idx, item in sorted(by_user.items()):
+            if allowed_user_indices is not None and user_idx not in allowed_user_indices:
+                continue
+            per_user.append({
+                "user_idx": user_idx,
+                "user_id": item.get("user_id", ""),
+                "is_superuser": item.get("is_superuser", False),
+                "score": item.get("score", 0),
+                "confidence": item.get("confidence", ""),
+                "reason": item.get("reason", ""),
+                "matched": item.get("matched", []),
+                "risks": item.get("risks", []),
+            })
+
+        if not per_user:
+            continue
+
+        scores = [float(item["score"]) for item in per_user]
+        avg_score = sum(scores) / len(scores)
+        high_count = sum(1 for score in scores if score >= high_threshold)
+        low_count = sum(1 for score in scores if score <= low_threshold)
+        risk_count = sum(1 for item in per_user if item.get("risks"))
+        final_score = (
+            avg_score
+            + high_count * consensus_bonus
+            - low_count * low_penalty
+            - risk_count * risk_penalty
+        )
+
+        aggregated[pid] = {
+            "pid": pid,
+            "avg_score": round(avg_score, 2),
+            "high_count": high_count,
+            "low_count": low_count,
+            "risk_count": risk_count,
+            "score_count": len(scores),
+            "final_score": round(final_score, 2),
+            "per_user": per_user,
+        }
+
+    def sort_key(pid: int) -> Tuple[float, float, int, int, int, int]:
+        item = aggregated[pid]
+        order = candidate_order.get(pid, 999999)
+        return (
+            item["final_score"],
+            item["avg_score"],
+            item["high_count"],
+            -item["low_count"],
+            -item["risk_count"],
+            -order,
+        )
+
+    sorted_pids = sorted(aggregated.keys(), key=sort_key, reverse=True)
+    return sorted_pids, aggregated
+
+
+async def _call_vision_score_batch(
+    image_batch_index: int,
+    user_batch_index: int,
+    candidates: List[Dict[str, Any]],
+    batch_images: List[Tuple[int, str]],
+    user_entries: List[UserEntry],
     api_config: Dict[str, Any],
-) -> Tuple[Dict[int, List[int]], Dict[str, Any]]:
-    """单批 vision 调用，返回 ({user_idx: [pid, ...]}, batch_log)"""
+) -> Tuple[ScoreMatrix, Dict[str, Any]]:
     batch_log: Dict[str, Any] = {
-        "batch_index": batch_index,
+        "image_batch_index": image_batch_index,
+        "user_batch_index": user_batch_index,
+        "users": [
+            {"user_idx": idx, "user_id": uid, "is_superuser": is_su}
+            for idx, _pref, is_su, uid in user_entries
+        ],
         "candidates": [_safe_image_meta(img) for img in candidates],
         "downloaded_pids": [pid for pid, _ in batch_images],
         "raw_response": "",
-        "parsed": {},
+        "parsed_scores": {},
+        "missing_scores": {},
         "invalid_pids": [],
+        "retry_count": 0,
         "error": None,
     }
 
-    # 构造用户画像文本
     user_texts = []
-    for i, (pref, _is_su, uid) in enumerate(user_preferences):
+    for user_idx, pref, _is_su, uid in user_entries:
         if not pref:
             continue
         profile = extract_profile_for_filter(pref)
-        user_texts.append(
-            f"【用户{i}】ID:{uid}\n用户画像:\n{profile}"
-        )
+        user_texts.append(f"【user_{user_idx}】ID:{uid}\n用户画像:\n{profile}")
 
     users_block = "\n\n".join(user_texts)
-
-    # 构造图片标签列表
     pid_labels = [f"PID:{pid}" for pid, _ in batch_images]
 
-    # 构造 content_parts: 文本说明 + 每张图的标签和图片
     content_parts = [
         {
             "type": "text",
             "text": (
-                f"候选图片标签: {', '.join(pid_labels)}\n\n"
+                f"候选图片 PID: {', '.join(pid_labels)}\n\n"
                 f"【用户画像】\n{users_block}\n\n"
-                f"以下是 {len(batch_images)} 张候选图片，每张图上方有 PID 标签："
+                f"以下是 {len(batch_images)} 张候选图片，每张图上方有 PID 标签。"
             )
         }
     ]
 
     for pid, b64_url in batch_images:
-        content_parts.append({
-            "type": "text",
-            "text": f"\n--- PID:{pid} ---"
-        })
-        content_parts.append({
-            "type": "image_url",
-            "image_url": {"url": b64_url}
-        })
+        content_parts.append({"type": "text", "text": f"\n--- PID:{pid} ---"})
+        content_parts.append({"type": "image_url", "image_url": {"url": b64_url}})
 
-    system_prompt = f"""你是图片推荐助手。根据每位用户的审美偏好，从候选图片中为每人选 {select_per_user} 张最符合的。
+    user_keys = ", ".join(f"user_{idx}" for idx, _pref, _is_su, _uid in user_entries)
+    system_prompt = f"""你是图片推荐评分助手。根据每位用户的画像，为每张候选图片给出 0-100 的匹配分。
 
-看构图、色调、风格、主题，匹配画像中的审美偏好。
-只返回 JSON，不要输出隐藏推理或长篇思考。reason 写可审计的简短选择理由：
+必须遵守：
+- 只返回 JSON，不要输出隐藏推理或长篇解释。
+- 返回键必须是这些用户键：{user_keys}
+- 每个用户数组必须覆盖本批全部 PID，即使不喜欢也要给低分，不要省略。
+- score 是 0-100 数字：90+ 强匹配，70-89 明确喜欢，50-69 尚可，30-49 弱匹配，0-29 明确不适合。
+- confidence 只能是 high / medium / low。
+- reason 写可审计的简短理由，matched 写命中的画像点，risks 写触发的回避或风险点。
+- risks 只写与该用户画像中的回避项或限制冲突的内容，不要把候选池本身的成人/R18属性当作风险，除非画像明确回避。
+- 不喜欢但没有明确回避冲突时 risks 必须为 []，不要写“无匹配”“低匹配”“数据不足”。
+- 先依据用户画像的推荐摘要和核心审美画像评分，不要只按作品题材标签泛泛判断。
+
+返回格式：
 {{
   "user_0": [
-    {{"pid": 123, "reason": "命中浅色发、泳装、精致完成度；无明显回避项", "matched": ["浅色发", "泳装"], "risks": []}}
-  ],
-  "user_1": []
+    {{"pid": 123, "score": 82, "confidence": "medium", "reason": "命中浅色发、泳装、精致完成度", "matched": ["浅色发", "泳装"], "risks": []}}
+  ]
 }}"""
 
     api_base = api_config["api_base"].rstrip("/")
     api_key = api_config["api_key"]
     model = api_config["model"]
+    request_url = f"{api_base}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content_parts},
+        ],
+    }
+    retry_count = max(0, getattr(conf, "vision_retry_count", 2))
 
     async with httpx.AsyncClient(timeout=180.0) as client:
-        resp = await client.post(
-            f"{api_base}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content_parts}
-                ]
-            }
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-        batch_log["raw_response"] = content
-        batch_log["usage"] = data.get("usage", {})
-
-        # 解析 JSON
-        json_str = content.strip()
-        if "```json" in json_str:
-            json_str = json_str.split("```json")[1].split("```")[0]
-        elif "```" in json_str:
-            json_str = json_str.split("```")[1].split("```")[0]
-
-        try:
-            result = json.loads(json_str.strip())
-        except json.JSONDecodeError as e:
-            batch_log["error"] = f"JSON 解析失败: {e}"
-            return {}, batch_log
-
-        # 构建返回: {user_idx: [pid, ...]}，同时记录可审计选择理由
-        user_selections: Dict[int, List[int]] = {}
-        valid_pids = {pid for pid, _ in batch_images}
-        parsed_log: Dict[str, List[Dict[str, Any]]] = {}
-        for i in range(len(user_preferences)):
-            key = f"user_{i}"
-            if key in result:
-                pids = []
-                parsed_log[key] = []
-                if not isinstance(result[key], list):
+        for attempt in range(retry_count + 1):
+            try:
+                resp = await client.post(request_url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                batch_log["raw_response"] = content
+                batch_log["usage"] = data.get("usage", {})
+                batch_log["retry_count"] = attempt
+                break
+            except httpx.HTTPStatusError:
+                raise
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                err = str(e) or type(e).__name__
+                batch_log["error"] = f"{type(e).__name__}: {err[:200]}"
+                batch_log["retry_count"] = attempt
+                if attempt < retry_count:
+                    wait_seconds = min(2 ** attempt, 5)
+                    logger.warning(
+                        f"Vision API 网络错误，准备重试 {attempt + 1}/{retry_count}: "
+                        f"图片批={image_batch_index}, 用户批={user_batch_index}, error={type(e).__name__}"
+                    )
+                    await asyncio.sleep(wait_seconds)
                     continue
-                for item in result[key]:
-                    pid_int, reason, matched, risks = _parse_selection_item(item)
-                    if pid_int is None:
-                        continue
-                    if pid_int not in valid_pids:
-                        batch_log["invalid_pids"].append(pid_int)
-                        continue
-                    pids.append(pid_int)
-                    parsed_log[key].append({
-                        "pid": pid_int,
-                        "reason": reason,
-                        "matched": matched,
-                        "risks": risks,
-                    })
-                if pids:
-                    user_selections[i] = pids[:select_per_user]
-                    parsed_log[key] = parsed_log[key][:select_per_user]
+                logger.warning(
+                    f"Vision API 网络错误，本批放弃: 图片批={image_batch_index}, 用户批={user_batch_index}, "
+                    f"已重试={retry_count}, error={type(e).__name__}: {err[:120]}"
+                )
+                return {}, batch_log
 
-        batch_log["parsed"] = parsed_log
-        return user_selections, batch_log
+    json_str = content.strip()
+    if "```json" in json_str:
+        json_str = json_str.split("```json")[1].split("```")[0]
+    elif "```" in json_str:
+        json_str = json_str.split("```")[1].split("```")[0]
+
+    try:
+        result = json.loads(json_str.strip())
+    except json.JSONDecodeError as e:
+        batch_log["error"] = f"JSON 解析失败: {e}"
+        return {}, batch_log
+
+    if not isinstance(result, dict):
+        batch_log["error"] = "JSON 根对象不是 dict"
+        return {}, batch_log
+
+    score_matrix: ScoreMatrix = {}
+    valid_pids = {pid for pid, _ in batch_images}
+    for user_idx, _pref, is_su, uid in user_entries:
+        key = f"user_{user_idx}"
+        raw_items = result.get(key, [])
+        parsed_items: List[Dict[str, Any]] = []
+        returned_pids: Set[int] = set()
+        if not isinstance(raw_items, list):
+            batch_log["missing_scores"][key] = sorted(valid_pids)
+            continue
+
+        for raw_item in raw_items:
+            pid, score_item = _parse_score_item(raw_item)
+            if pid is None or score_item is None:
+                continue
+            if pid not in valid_pids:
+                batch_log["invalid_pids"].append(pid)
+                continue
+            returned_pids.add(pid)
+            score_item["user_idx"] = user_idx
+            score_item["user_id"] = uid
+            score_item["is_superuser"] = is_su
+            if pid not in score_matrix:
+                score_matrix[pid] = {}
+            score_matrix[pid][user_idx] = score_item
+            parsed_items.append(score_item)
+
+        missing = sorted(valid_pids - returned_pids)
+        if missing:
+            batch_log["missing_scores"][key] = missing
+        batch_log["parsed_scores"][key] = parsed_items
+
+    return score_matrix, batch_log
 
 
 async def vision_filter_images(
     images: List[Dict],
-    user_preferences: List[Tuple[str, bool, str]],
-) -> Tuple[Optional[List[int]], Dict[int, List[Tuple[int, bool]]], Dict[str, Any]]:
+    user_preferences: List[UserPreference],
+) -> Tuple[Optional[List[int]], ScoreMatrix, Dict[str, Any]]:
     """
-    分批调用 vision 模型筛选图片
-
-    Args:
-        images: 候选图片列表 [{"pid", "title", "author", "tags"}, ...]
-        user_preferences: [(preference_text, is_superuser, user_id), ...]
+    分批调用 vision 模型为图片打分排序。
 
     Returns:
-        (排序后的 PID 列表, 投票明细 {pid: [(user_idx, is_superuser), ...]}, Vision 明细日志)
+        (排序后的 PID 列表, 评分矩阵 {pid: {user_idx: score_item}}, Vision 明细日志)
     """
     api_config = _resolve_vision_api_config()
     if not user_preferences or not api_config:
         return None, {}, {"error": "Vision API 未配置或无用户画像"}
 
-    user_count = len(user_preferences)
-    batch_size = conf.vision_batch_size
-    select_per_user = conf.vision_select_per_user
+    user_entries: List[UserEntry] = [
+        (idx, pref, is_su, uid)
+        for idx, (pref, is_su, uid) in enumerate(user_preferences)
+        if pref
+    ]
+    if not user_entries:
+        return None, {}, {"error": "无有效用户画像"}
+
+    batch_size = max(1, conf.vision_batch_size)
+    user_batch_size = max(1, getattr(conf, "vision_user_batch_size", 4))
+    max_request_chars = max(1, getattr(conf, "vision_max_request_chars", 4000000))
+    max_concurrency = max(1, getattr(conf, "vision_max_concurrency", 4))
+    candidate_order = {
+        int(img["pid"]): idx
+        for idx, img in enumerate(images)
+        if img.get("pid") is not None
+    }
     api_log = {
         "source": api_config.get("source", "unknown"),
         "api_base": api_config.get("api_base", ""),
         "model": api_config.get("model", ""),
     }
+    thresholds = {
+        "high_score": getattr(conf, "vision_high_score_threshold", 70),
+        "low_score": getattr(conf, "vision_low_score_threshold", 40),
+        "consensus_bonus": getattr(conf, "vision_consensus_bonus", 5.0),
+        "low_penalty": getattr(conf, "vision_low_penalty", 5.0),
+        "risk_penalty": getattr(conf, "vision_risk_penalty", 3.0),
+    }
     vision_log: Dict[str, Any] = {
+        "mode": "score_matrix",
         "api": api_log,
         "batch_size": batch_size,
-        "select_per_user": select_per_user,
+        "user_batch_size": user_batch_size,
+        "max_request_chars": max_request_chars,
+        "max_concurrency": max_concurrency,
+        "retry_count": getattr(conf, "vision_retry_count", 2),
+        "thresholds": thresholds,
         "users": [
             {
                 "user_idx": idx,
@@ -283,30 +484,26 @@ async def vision_filter_images(
                 "is_superuser": is_su,
                 "profile": extract_profile_for_filter(pref),
             }
-            for idx, (pref, is_su, uid) in enumerate(user_preferences)
-            if pref
+            for idx, pref, is_su, uid in user_entries
         ],
         "batches": [],
-        "vote_reasons": {},
+        "scores": {},
         "sorted_pids": [],
     }
 
     logger.info(
-        f"Vision 筛选开始: model={api_log['model']}, source={api_log['source']}, 用户={user_count}人, 候选={len(images)}张, "
-        f"每批={batch_size}张, 每人选={select_per_user}张"
+        f"Vision 评分开始: model={api_log['model']}, source={api_log['source']}, "
+        f"用户={len(user_entries)}人, 候选={len(images)}张, "
+        f"图片批={batch_size}张, 用户批={user_batch_size}人, "
+        f"请求图像上限={max_request_chars} chars, 并发={max_concurrency}"
     )
 
-    # 分片
-    batches = []
-    for i in range(0, len(images), batch_size):
-        batches.append(images[i:i + batch_size])
+    image_batches = _chunked(images, batch_size)
+    user_batches = _chunked(user_entries, user_batch_size)
+    logger.info(f"分 {len(image_batches)} 个图片批 × {len(user_batches)} 个用户批，开始下载和评分")
 
-    logger.info(f"分 {len(batches)} 批，开始并行下载和筛选")
-
-    # 每批并行下载图片（使用缓存）
     async def download_batch(batch: List[Dict]) -> List[Tuple[int, str]]:
-        """下载一批图片，返回 [(pid, b64_url), ...]"""
-        async def download_one(img: Dict):
+        async def download_one(img: Dict) -> Optional[Tuple[int, str]]:
             url = img.get("url", "")
             if not url:
                 url = f"https://pixiv.shewinder.win/img/{img['pid']}"
@@ -315,209 +512,210 @@ async def vision_filter_images(
             b64 = await _download_image_cached(img["pid"], url)
             if b64:
                 return (img["pid"], b64)
-            else:
-                logger.warning(f"Vision 筛选: 图片下载失败 PID:{img['pid']}")
-                return None
+            logger.warning(f"Vision 评分: 图片下载失败 PID:{img['pid']}")
+            return None
 
-        tasks = [download_one(img) for img in batch]
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*[download_one(img) for img in batch])
         return [r for r in results if r is not None]
 
-    downloaded_batches = await asyncio.gather(*[download_batch(b) for b in batches])
+    downloaded_batches = await asyncio.gather(*[download_batch(batch) for batch in image_batches])
+    image_request_batches: List[Tuple[int, List[Dict[str, Any]], List[Tuple[int, str]], int]] = []
+    for source_batch_index, (candidates, batch_images) in enumerate(zip(image_batches, downloaded_batches)):
+        image_request_batches.extend(
+            _split_downloaded_batch(source_batch_index, candidates, batch_images, max_request_chars)
+        )
+    logger.info(
+        f"Vision 图片批拆分: 原始图片批={len(image_batches)}, 请求图片批={len(image_request_batches)}, "
+        f"max_request_chars={max_request_chars}"
+    )
+    api_semaphore = asyncio.Semaphore(max_concurrency)
 
-    # 每批并行调用 vision API
     async def call_batch(
-        batch_index: int,
+        request_batch_index: int,
+        source_batch_index: int,
+        user_batch_index: int,
+        candidates: List[Dict[str, Any]],
         batch_images: List[Tuple[int, str]],
-    ) -> Tuple[Dict[int, List[int]], Dict[str, Any]]:
-        candidates = batches[batch_index]
-        if len(batch_images) == 0:
+        batch_chars: int,
+        user_batch: List[UserEntry],
+    ) -> Tuple[ScoreMatrix, Dict[str, Any]]:
+        if not batch_images:
             return {}, {
-                "batch_index": batch_index,
+                "image_batch_index": request_batch_index,
+                "source_image_batch_index": source_batch_index,
+                "user_batch_index": user_batch_index,
+                "users": [
+                    {"user_idx": idx, "user_id": uid, "is_superuser": is_su}
+                    for idx, _pref, is_su, uid in user_batch
+                ],
                 "candidates": [_safe_image_meta(img) for img in candidates],
                 "downloaded_pids": [],
+                "image_chars": batch_chars,
+                "max_request_chars": max_request_chars,
                 "raw_response": "",
-                "parsed": {},
+                "parsed_scores": {},
+                "missing_scores": {},
                 "invalid_pids": [],
+                "retry_count": 0,
                 "error": "本批图片下载全部失败",
             }
         try:
-            return await _call_vision_batch(batch_index, candidates, batch_images, user_preferences, select_per_user, api_config)
+            async with api_semaphore:
+                return await _call_vision_score_batch(
+                    request_batch_index,
+                    user_batch_index,
+                    candidates,
+                    batch_images,
+                    user_batch,
+                    api_config,
+                )
         except httpx.HTTPStatusError as e:
             logger.error(f"Vision API HTTP 错误: {e.response.status_code} - {e.response.text[:200]}")
             return {}, {
-                "batch_index": batch_index,
+                "image_batch_index": request_batch_index,
+                "source_image_batch_index": source_batch_index,
+                "user_batch_index": user_batch_index,
+                "users": [
+                    {"user_idx": idx, "user_id": uid, "is_superuser": is_su}
+                    for idx, _pref, is_su, uid in user_batch
+                ],
                 "candidates": [_safe_image_meta(img) for img in candidates],
                 "downloaded_pids": [pid for pid, _ in batch_images],
+                "image_chars": batch_chars,
+                "max_request_chars": max_request_chars,
                 "raw_response": e.response.text[:1000],
-                "parsed": {},
+                "parsed_scores": {},
+                "missing_scores": {},
                 "invalid_pids": [],
+                "retry_count": 0,
                 "error": f"HTTP {e.response.status_code}",
             }
         except Exception as e:
             logger.exception(f"Vision API 调用失败: {e}")
             return {}, {
-                "batch_index": batch_index,
+                "image_batch_index": request_batch_index,
+                "source_image_batch_index": source_batch_index,
+                "user_batch_index": user_batch_index,
+                "users": [
+                    {"user_idx": idx, "user_id": uid, "is_superuser": is_su}
+                    for idx, _pref, is_su, uid in user_batch
+                ],
                 "candidates": [_safe_image_meta(img) for img in candidates],
                 "downloaded_pids": [pid for pid, _ in batch_images],
+                "image_chars": batch_chars,
+                "max_request_chars": max_request_chars,
                 "raw_response": "",
-                "parsed": {},
+                "parsed_scores": {},
+                "missing_scores": {},
                 "invalid_pids": [],
                 "error": str(e),
             }
 
-    batch_results = await asyncio.gather(*[
-        call_batch(batch_index, batch_images)
-        for batch_index, batch_images in enumerate(downloaded_batches)
-    ])
+    tasks = [
+        call_batch(
+            request_batch_index,
+            source_batch_index,
+            user_batch_index,
+            candidates,
+            batch_images,
+            batch_chars,
+            user_batch,
+        )
+        for request_batch_index, (source_batch_index, candidates, batch_images, batch_chars)
+        in enumerate(image_request_batches)
+        for user_batch_index, user_batch in enumerate(user_batches)
+    ]
+    batch_results = await asyncio.gather(*tasks)
 
-    # 汇总投票: pid -> [(user_idx, is_superuser), ...]
-    vote_details: Dict[int, List[Tuple[int, bool]]] = {}
-    vote_reasons: Dict[int, List[Dict[str, Any]]] = {}
-    total_selections = 0
-    for result, batch_log in batch_results:
+    score_matrix: ScoreMatrix = {}
+    total_scores = 0
+    for partial_matrix, batch_log in batch_results:
         vision_log["batches"].append(batch_log)
-        if result:
-            for user_idx, pids in result.items():
-                is_su = user_preferences[user_idx][1] if user_idx < len(user_preferences) else False
-                uid = user_preferences[user_idx][2] if user_idx < len(user_preferences) else ""
-                parsed_items = {
-                    item["pid"]: item
-                    for item in batch_log.get("parsed", {}).get(f"user_{user_idx}", [])
-                }
-                for pid in pids:
-                    if pid not in vote_details:
-                        vote_details[pid] = []
-                    if pid not in vote_reasons:
-                        vote_reasons[pid] = []
-                    vote_details[pid].append((user_idx, is_su))
-                    item = parsed_items.get(pid, {})
-                    vote_reasons[pid].append({
-                        "user_idx": user_idx,
-                        "user_id": uid,
-                        "is_superuser": is_su,
-                        "reason": item.get("reason", ""),
-                        "matched": item.get("matched", []),
-                        "risks": item.get("risks", []),
-                    })
-                total_selections += len(pids)
+        _merge_score_matrix(score_matrix, partial_matrix)
+        total_scores += sum(len(by_user) for by_user in partial_matrix.values())
+    vision_log["call_count"] = len(batch_results)
+    vision_log["total_scores"] = total_scores
 
-    if not vote_details:
-        logger.info("Vision 筛选: 所有批次均未返回有效结果")
-        vision_log["vote_reasons"] = {}
+    sorted_pids, aggregated = _aggregate_score_matrix(score_matrix, candidate_order)
+    if not sorted_pids:
+        logger.info("Vision 评分: 所有批次均未返回有效评分")
         return None, {}, vision_log
 
-    def sort_key(pid: int):
-        details = vote_details[pid]
-        count = len(details)
-        first_idx = min((idx for idx, _ in details), default=999)
-        return (count, -first_idx)
-
-    sorted_pids = sorted(vote_details.keys(), key=sort_key, reverse=True)
-    vision_log["vote_reasons"] = {str(pid): items for pid, items in vote_reasons.items()}
+    vision_log["scores"] = {str(pid): item for pid, item in aggregated.items()}
     vision_log["sorted_pids"] = sorted_pids
 
     logger.info(
-        f"Vision 筛选完成: {len(batches)} 批, {total_selections} 次选择, "
-        f"汇总 {len(vote_details)} 张不同作品"
+        f"Vision 评分完成: {len(batch_results)} 次调用, {total_scores} 条评分, "
+        f"覆盖 {len(score_matrix)} 张作品"
     )
-
-    return sorted_pids, vote_details, vision_log
+    return sorted_pids, score_matrix, vision_log
 
 
 async def vision_filter_multi_group(
     images: List[Dict],
-    group_preferences: Dict[int, List[Tuple[str, bool, str]]],
+    group_preferences: Dict[int, List[UserPreference]],
     target_count: int = 15,
 ) -> Tuple[Dict[int, List[int]], Dict[int, Dict[str, Any]]]:
     """
-    跨群合并 vision 筛选：多个群共享一次图片下载和 API 调用。
-
-    Args:
-        images: 候选图片列表
-        group_preferences: {group_id: [(pref_text, is_superuser, user_id), ...]}
-        target_count: 每个群取前几张
+    跨群合并 vision 评分：多个群共享图片下载和 API 调用。
 
     Returns:
-        ({group_id: [pid, ...]}, {group_id: vision_log})  — 每个群筛选后的 PID 列表及日志
+        ({group_id: [pid, ...]}, {group_id: vision_log})
     """
     if not group_preferences:
         return {}, {}
 
-    # 将所有群的用户平铺，记录 user_idx → group_id 映射
-    flat_users: List[Tuple[str, bool, str]] = []
-    user_group_map: Dict[int, int] = {}  # user_idx in flat list → group_id
+    flat_users: List[UserPreference] = []
+    group_user_indices: Dict[int, Set[int]] = {gid: set() for gid in group_preferences}
     idx = 0
     for gid, prefs in group_preferences.items():
         for pref, is_su, uid in prefs:
             if not pref:
                 continue
             flat_users.append((pref, is_su, uid))
-            user_group_map[idx] = gid
+            group_user_indices.setdefault(gid, set()).add(idx)
             idx += 1
 
     if not flat_users:
         return {}, {}
 
     logger.info(
-        f"Vision 跨群合并: {len(group_preferences)} 个群, {len(flat_users)} 个用户, "
+        f"Vision 跨群评分: {len(group_preferences)} 个群, {len(flat_users)} 个用户, "
         f"{len(images)} 张候选图"
     )
 
-    # 一次 vision 筛选（图片下载在内部缓存复用）
-    sorted_pids, vote_details, vision_log = await vision_filter_images(images, flat_users)
-
-    if not sorted_pids:
+    sorted_pids, score_matrix, vision_log = await vision_filter_images(images, flat_users)
+    if not sorted_pids or not score_matrix:
         return {}, {}
 
-    # 按群拆分投票明细
-    group_votes: Dict[int, Dict[int, List[Tuple[int, bool]]]] = {
-        gid: {} for gid in group_preferences
+    candidate_order = {
+        int(img["pid"]): idx
+        for idx, img in enumerate(images)
+        if img.get("pid") is not None
     }
-    for pid, voters in vote_details.items():
-        for user_idx, is_su in voters:
-            gid = user_group_map.get(user_idx)
-            if gid is not None:
-                if pid not in group_votes[gid]:
-                    group_votes[gid][pid] = []
-                group_votes[gid][pid].append((user_idx, is_su))
-
-    # 每个群独立排序
-    def sort_key(pid: int, details: List[Tuple[int, bool]]):
-        count = len(details)
-        first_idx = min((idx for idx, _ in details), default=999)
-        return (count, -first_idx)
-
     results: Dict[int, List[int]] = {}
     logs: Dict[int, Dict[str, Any]] = {}
-    for gid, votes in group_votes.items():
-        if not votes:
-            results[gid] = []
-            logs[gid] = {
-                **vision_log,
-                "group_id": gid,
-                "group_sorted_pids": [],
-                "group_vote_details": {},
-            }
-            continue
-        g_sorted = sorted(
-            votes.keys(),
-            key=lambda pid: sort_key(pid, votes[pid]),
-            reverse=True,
+    all_users = vision_log.get("users", [])
+
+    for gid, allowed_indices in group_user_indices.items():
+        group_sorted, group_scores = _aggregate_score_matrix(
+            score_matrix,
+            candidate_order,
+            allowed_user_indices=allowed_indices,
         )
-        results[gid] = g_sorted[:target_count]
+        results[gid] = group_sorted[:target_count]
+        group_users = [
+            user for user in all_users
+            if user.get("user_idx") in allowed_indices
+        ]
         logs[gid] = {
             **vision_log,
             "group_id": gid,
+            "users": group_users,
+            "scores": {str(pid): item for pid, item in group_scores.items()},
+            "sorted_pids": group_sorted,
             "group_sorted_pids": results[gid],
-            "group_vote_details": {
-                str(pid): [
-                    {"user_idx": idx, "is_superuser": is_su}
-                    for idx, is_su in details
-                ]
-                for pid, details in votes.items()
-            },
         }
-        logger.info(f"  群 {gid}: {len(g_sorted)} 张作品 → 取前 {target_count} 张")
+        logger.info(f"  群 {gid}: {len(group_sorted)} 张作品有评分 → 取前 {target_count} 张")
 
     return results, logs
