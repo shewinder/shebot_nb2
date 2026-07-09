@@ -27,3 +27,7 @@ class Config(BaseConfig):
     vision_consensus_bonus: float = 5.0
     vision_low_penalty: float = 5.0
     vision_risk_penalty: float = 3.0
+
+    # 用户画像参与筛选的硬过滤
+    profile_max_age_days: int = 15
+    profile_skip_low_confidence: bool = True

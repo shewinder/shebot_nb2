@@ -1,4 +1,7 @@
+import re
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from random import choices
 from typing import Dict, List, Optional, Tuple
 
@@ -107,6 +110,31 @@ def random_select(pics: List[RankPic], count: int) -> List[RankPic]:
     return selected
 
 
+def _extract_profile_confidence(content: str) -> str:
+    for line in content.splitlines()[:10]:
+        if "当前置信度" not in line:
+            continue
+        match = re.search(r"当前置信度\s*[:：]\s*([^|>\s]+)", line)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _get_profile_skip_reason(path: Path, content: str) -> Optional[str]:
+    max_age_days = getattr(conf, "profile_max_age_days", 15)
+    if max_age_days > 0:
+        age_days = max(0.0, (time.time() - path.stat().st_mtime) / 86400)
+        if age_days > max_age_days:
+            return f"mtime 过期 {age_days:.1f} 天 > {max_age_days} 天"
+
+    if getattr(conf, "profile_skip_low_confidence", True):
+        confidence = _extract_profile_confidence(content)
+        if confidence.startswith("低"):
+            return "当前置信度低"
+
+    return None
+
+
 async def filter_rank(pics: List[RankPic], target_count: int = 15) -> List[RankPic]:
     """基础过滤逻辑：手动选择优先 + 去重 + 随机补齐"""
     # 获取手动选择的图片ID列表
@@ -174,21 +202,38 @@ async def read_group_preferences(group_id: int, bot) -> List[Tuple[str, bool, st
         return []
 
     result = []
+    matched_profile_count = 0
+    skipped_reasons: Dict[str, int] = {}
     for f in pref_dir.iterdir():
         if not f.is_file() or f.suffix != '.md':
             continue
         user_id = f.stem
         if user_id not in member_ids:
             continue
+        matched_profile_count += 1
         try:
             content = f.read_text(encoding='utf-8').strip()
-            if content:
-                result.append((content, False, user_id))
+            if not content:
+                continue
+            skip_reason = _get_profile_skip_reason(f, content)
+            if skip_reason:
+                skipped_reasons[skip_reason] = skipped_reasons.get(skip_reason, 0) + 1
+                logger.debug(f"群 {group_id} 跳过画像 user={user_id}: {skip_reason}")
+                continue
+            result.append((content, False, user_id))
         except Exception as e:
             logger.warning(f"读取画像文件失败 {f}: {e}")
 
     result.sort(key=lambda x: x[2])
-    logger.info(f"群 {group_id} 找到 {len(result)} 个有画像的成员")
+    skipped_count = sum(skipped_reasons.values())
+    if skipped_count:
+        reason_text = ", ".join(f"{reason}={count}" for reason, count in skipped_reasons.items())
+        logger.info(
+            f"群 {group_id} 找到 {matched_profile_count} 个有画像的成员，"
+            f"过滤后 {len(result)} 个参与筛选，跳过 {skipped_count} 个（{reason_text}）"
+        )
+    else:
+        logger.info(f"群 {group_id} 找到 {len(result)} 个有画像的成员")
     return result
 
 
