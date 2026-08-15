@@ -80,7 +80,6 @@ class Config(BaseConfig):
     search_provider: str = "youcom"  # youcom | iqs
 
     # Session 配置
-    max_history: int = 100
     session_timeout: int = 3600  # 秒，0 表示永不过期
 
     # 人格配置

@@ -11,6 +11,7 @@ from .config import Config
 from ._image_store import ImageStore, ImageEntry
 from .memory import memory_store
 from .skills import skill_manager
+from .subagent_types import SUBAGENT_TYPES
 
 from .mcp import mcp_tool_bridge, get_mcp_session_manager
 
@@ -97,6 +98,10 @@ class Session:
         self.user_id = user_id
         self.group_id = group_id
         self.agent_label: str = "main"  # 日志标识：main / sub:vision / sub:search
+        # Reply 管道状态：最近一条 user 消息时间（用于图片兜底补发）与
+        # 本轮已发送的图片标识符（会话级去重）
+        self.last_user_msg_at: float = time.time()
+        self._turn_sent_images: Set[str] = set()
 
         if register:
             session_manager.sessions[self.session_id] = self
@@ -117,6 +122,10 @@ class Session:
 
     def add_message(self, role: str, content: Union[str, List[Dict[str, Any]]]):
         """添加标准 user/assistant 消息"""
+        if role == "user":
+            # 新一轮对话开始：重置发送去重状态
+            self.last_user_msg_at = time.time()
+            self._turn_sent_images.clear()
         self._append_message({"role": role, "content": content})
 
     def add_raw_message(self, message: Dict[str, Any]) -> None:
@@ -207,6 +216,27 @@ class Session:
     
     def resolve_tool_image_placeholders(self, text: str) -> str:
         return text
+
+    def dispose(self) -> None:
+        """统一清理会话资源：图片目录 + MCP 状态 + 会话锁
+
+        删除会话前必须调用（SessionManager._remove_session 已内聚此逻辑）。
+        子 Agent 会话在图片重定位/发送完成前不要调用。
+        """
+        try:
+            self._image_store.clear()
+        except Exception:
+            logger.exception(f"{self._tag} 清理图片缓存失败")
+
+        mcp_sm = get_mcp_session_manager()
+        if mcp_sm is not None:
+            try:
+                mcp_sm.clear_session(self.session_id)
+            except Exception:
+                pass
+
+        # 会话锁在会话销毁后不再需要（持锁中的任务持有的仍是原 Lock 引用，安全）
+        _session_locks.pop(self.session_id, None)
     
     def is_expired(self) -> bool:
         if conf.session_timeout <= 0:
@@ -383,7 +413,6 @@ class Session:
 
         # 子 Agent 类型注入（仅主 Agent 可见，子 Agent 不需要知道）
         if self.agent_label == "main":
-            from ._agent_runner import SUBAGENT_TYPES
             if SUBAGENT_TYPES:
                 lines = ["【可用的子 Agent 类型】", "使用 delegate_task 工具时，通过 type 参数选择类型："]
                 for t in SUBAGENT_TYPES.values():
@@ -483,20 +512,11 @@ class SessionManager:
         return f"private_{user_id}"
     
     def _remove_session(self, session_id: str) -> None:
-        """统一删除 session 入口，同时清理 MCP 状态与会话锁"""
-        if session_id in self.sessions:
-            del self.sessions[session_id]
+        """统一删除 session 入口，资源清理内聚到 Session.dispose()"""
+        session = self.sessions.pop(session_id, None)
+        if session is not None:
             logger.debug(f"[_remove_session] session={session_id} 已从内存中删除")
-
-        # 会话锁在会话销毁后不再需要（持锁中的任务持有的仍是原 Lock 引用，安全）
-        _session_locks.pop(session_id, None)
-
-        mcp_sm = get_mcp_session_manager()
-        if mcp_sm is not None:
-            try:
-                mcp_sm.clear_session(session_id)
-            except Exception:
-                pass
+            session.dispose()
     
     def get_session(self, user_id: int, group_id: Optional[int] = None) -> Optional[Session]:
         """获取已存在且未过期的 session，不存在或过期返回 None"""

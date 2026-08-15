@@ -42,7 +42,9 @@
 ### 6. 其它既有约定（重申）
 
 - 禁止函数内 import；类型注解齐全；注释解释"为什么"。
-- 工具返回统一用 `tools.registry.ok() / fail()`（后续 P2 收敛到 Result）。
+- 工具返回统一用 `tools.registry.ok() / fail()`（P3 随权限接线收敛到 Result）。
+- 出站消息统一经 Reply 管道（`reply.build_reply` / `reply.send_reply`），
+  图片标识符解析失败降级为字面文本，禁止静默丢弃。
 - 未经明确指令不得 git commit。
 
 ## 二、目录结构
@@ -53,9 +55,12 @@ aichat/
 │   ├── errors.py           #   AppError 层级 + Result
 │   ├── logging.py          #   log_context/log_tag + sanitize
 │   └── llm_gateway.py      #   LLMGateway（httpx/超时/重试/脱敏）
+├── agent_loop.py           # AgentTask/AgentResult/run_agent_loop（隔离执行统一编排）
+├── reply.py                # Reply 管道（build_reply/send_reply）
+├── subagent_types.py       # 子 Agent 类型定义（SUBAGENT_TYPES）
 ├── chat.py                 # 入口处理（会话锁 + _run_chat）
 ├── chat_executor.py        # 编排（已接入 gateway）
-├── session.py              # Session/SessionManager（锁 + GC）
+├── session.py              # Session/SessionManager（锁 + GC + dispose）
 ├── config.py               # 配置（snapshot + 写锁）
 ├── tools/ mcp/ skills/ memory/ persona/ ...  # 能力层（P3 起接口化）
 └── README_ARCH.md          # 本文件
@@ -67,14 +72,17 @@ aichat/
 |---|---|---|
 | P0 | 统一错误/日志规范、测试锚点、规范文档 | ✅ 已落地 |
 | P1 | LLMGateway、config 访问、SessionStore（锁+GC）+ 最小接入 | ✅ 已落地 |
-| P2 | AgentLoop/AgentTask 统一 4 条执行路径、Reply 结构化管道（图 bug 修复）、Session 生命周期内聚 | ⬜ 待做 |
+| P2 | AgentLoop/AgentTask 统一执行路径、Reply 管道（图片 bug 修复+兜底）、Session 生命周期内聚 | ✅ 已落地 |
 | P3 | 工具权限接线、schema 缓存、后台任务全局上限+表清理、scheduler 执行锁、MCP 真并行启动、gateway 参数接入配置 | ⬜ 待做 |
-| P4 | `__init__.py` 命令层拆分、死代码清理、可观测性（成本/延迟/错误率）、max_history 语义补全 | ⬜ 待做 |
+| P4 | `__init__.py` 命令层拆分、死代码清理、可观测性（成本/延迟/错误率） | ⬜ 待做 |
 
-## 四、已知债务（P1 收官时记录）
+## 四、已知债务与决策记录
 
 - `__init__.py` 角色卡导入处仍使用 `aiohttpx`（P3 顺手替换）。
 - `infra/llm_gateway` 的超时/重试参数尚未接配置项（P3 与 config 访问层一起做）。
-- 工具返回仍是 ok()/fail() dict，尚未收敛到 Result（P2 与 AgentLoop 一起做）。
+- 工具返回仍是 ok()/fail() dict，尚未收敛到 Result（P3 随权限接线一起做）。
 - 文件 IO 异步化已明确**暂不实施**（用户决策）：async 函数中的同步小文件读写维持现状，
   若未来记忆/图片文件变大成为实测瓶颈再评估 `asyncio.to_thread` 方案。
+- `max_history` 配置字段已**删除**（用户决策：从未生效，不保留）。
+- `agent_loop._resolve_api_config` 保留"无 profile 时回落 `subagent_profiles[0]`"的
+  既有怪癖（影响 bg/scheduled 的 API 归属），未改变，详见 docs/p2-agent-loop-design.md。

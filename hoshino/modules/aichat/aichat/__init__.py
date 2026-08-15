@@ -22,6 +22,11 @@ from .mcp import mcp_server_manager, mcp_tool_bridge, init_mcp_session_manager
 # SKILL 系统导入
 from .skills import skill_manager
 
+# 内置工具注册：tools/__init__ 不再触发注册（避免与编排层循环导入），
+# 由插件入口显式导入完成（chat_executor 已在 chat.py 中加载完毕）。
+from .tools import builtin  # noqa: F401
+from .tools.builtin import mcp_tools  # noqa: F401
+
 
 conf = Config.get_instance('aichat')
 

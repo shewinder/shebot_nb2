@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from loguru import logger
 from pydantic import BaseModel
 
-from ._agent_runner import run_agent
+from .agent_loop import AgentTask, run_agent_loop
 from ._send_util import send_ai_response
 from .api import api_manager
 from .config import Config
@@ -138,7 +138,7 @@ class BackgroundTaskManager:
             task.status = "running"
             persona = persona_manager.get_persona(task.user_id, task.group_id)
 
-            result = await run_agent(
+            agent_result = await run_agent_loop(AgentTask(
                 task=f"请执行以下任务：{task.task_description}",
                 system_prompt=_BG_SYSTEM_PROMPT,
                 user_id=task.user_id,
@@ -148,13 +148,16 @@ class BackgroundTaskManager:
                 api_config=api_config,
                 max_rounds=conf.subagent_max_rounds,
                 blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
-                preactivate_skills=task.preactivate_skills or None,
-            )
+                preactivate_skills=task.preactivate_skills or [],
+            ))
 
+            result = agent_result.result
             task.status = "done"
             task.completed_at = datetime.now()
             task.result_summary = (result.content or "")[:500]
-            await self._send_result(task, result.content or "任务执行完成，但没有返回内容", None)
+            # 用任务自身会话发送结果，图片标识符才能正确解析（修复令牌字面量泄露）
+            await self._send_result(task, result.content or "任务执行完成，但没有返回内容", agent_result.session)
+            agent_result.session.dispose()
 
         except Exception as e:
             logger.exception(f"后台任务 {task.id} 执行异常: {e}")

@@ -15,7 +15,7 @@ from loguru import logger
 
 from .config import Config
 from .infra import LLMError, get_gateway, sanitize
-from .tools import get_tool_function, get_available_tools
+from .tools.access import get_available_tools, get_tool_function
 from .tools.registry import get_injectable_params
 from hoshino.util import log_json, truncate_log
 

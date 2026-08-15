@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from hoshino.schedule import scheduler, add_job
 
-from ._agent_runner import run_agent
+from .agent_loop import AgentTask, run_agent_loop
 from ._send_util import send_ai_response
 from .api import api_manager
 from .config import Config
@@ -186,36 +186,39 @@ class TaskManager:
         try:
             persona = persona_manager.get_persona(task.user_id, task.group_id)
 
-            result = await run_agent(
+            agent_result = await run_agent_loop(AgentTask(
                 task=f"请执行以下任务：{task.raw_description}",
                 system_prompt="【系统提示】你正在执行一个已调度的定时任务。请直接完成下面指定的操作，不要创建新的定时任务，也不要向用户询问确认。",
                 user_id=task.user_id,
                 group_id=task.group_id,
                 persona=persona,
-                session_prefix=f"agent_task_{task.id}_{uuid.uuid4().hex[:6]}",
+                session_prefix=f"agent_task_{task.id}",
                 api_config=api_config,
                 max_rounds=conf.subagent_max_rounds,
                 blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
-                preactivate_skills=task.preactivate_skills or None,
-            )
-            
+                preactivate_skills=task.preactivate_skills or [],
+            ))
+
+            result = agent_result.result
             task.execution_count += 1
             task.last_execution = datetime.now()
             task.last_result = result.content[:500] if result.content else None
             task.updated_at = datetime.now()
-            
+
             if task.is_one_time:
                 self.delete_task(task_id, task.user_id)
                 logger.info(f"一次性任务 {task_id} 执行完成并已自动删除")
             else:
                 self.save_tasks()
-            
+
             content = result.content if result.content else "任务执行完成，但没有返回内容"
-            await self._send_result(task, content, None)
-            
+            # 用任务自身会话发送结果，图片标识符才能正确解析（修复令牌字面量泄露）
+            await self._send_result(task, content, agent_result.session)
+            agent_result.session.dispose()
+
             if not task.is_one_time:
                 logger.info(f"任务 {task_id} 执行完成")
-            
+
         except Exception as e:
             logger.exception(f"任务 {task_id} 执行异常: {e}")
     

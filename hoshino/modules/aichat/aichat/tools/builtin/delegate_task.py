@@ -14,8 +14,9 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 
-from ..._agent_runner import run_agent, SUBAGENT_TYPES
+from ...agent_loop import AgentTask, rehome_images, run_agent_loop
 from ...config import Config
+from ...subagent_types import SUBAGENT_TYPES
 from ..registry import tool_registry, ok, fail
 
 if TYPE_CHECKING:
@@ -146,23 +147,28 @@ async def delegate_task(
     )
 
     try:
-        result = await run_agent(
+        agent_result = await run_agent_loop(AgentTask(
             task=task,
             system_prompt=type_def.system_prompt,
             user_id=session.user_id,
             group_id=session.group_id,
             tools=tools,
             max_rounds=max_rounds,
+            profile=agent_type,
             locked_tools=True,
             session_prefix=f"subagent_{session.session_id}",
-            profile=agent_type,
+            label=f"sub:{agent_type}",
             parent_session=session,
-            image_identifiers=image_identifiers,
+            image_identifiers=image_identifiers or [],
             blocked_tools=frozenset({"run_background_task", "delegate_task", "schedule_task"}),
-            preactivate_skills=preactivate_skills,
-        )
+            preactivate_skills=preactivate_skills or [],
+        ))
 
-        content = result.content or ""
+        # 把子会话图片重定位到父会话命名空间（含兜底补发），再释放子会话资源
+        content = await rehome_images(agent_result, session)
+        agent_result.session.dispose()
+
+        result = agent_result.result
         rounds = len(result.tool_results)
 
         if result.error and not content:
