@@ -10,6 +10,7 @@ from .api import api_manager
 from .chat import handle_ai_chat
 from .character_import import parse_character_png
 from .config import Config
+from .infra import close_all_gateways
 from .persona import persona_manager
 from .session import Session, SessionManager, session_manager
 from hoshino.util import aiohttpx, get_event_imageurl
@@ -119,10 +120,14 @@ try:
         await init_mcp_servers()
         # 同时初始化 SKILL 系统
         init_skill_system()
-    
+        # 启动会话 GC（清理过期会话及其图片/MCP 状态）
+        session_manager.start_gc()
+
     @driver.on_shutdown
     async def _shutdown_mcp():
+        await session_manager.stop_gc()
         await mcp_server_manager.stop_all()
+        await close_all_gateways()
             
 except ImportError:
     pass

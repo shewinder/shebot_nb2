@@ -1,4 +1,5 @@
 """Session 管理模块"""
+import asyncio
 import re
 import time
 from datetime import datetime
@@ -14,6 +15,16 @@ from .skills import skill_manager
 from .mcp import mcp_tool_bridge, get_mcp_session_manager
 
 conf = Config.get_instance('aichat')
+
+# per-session 异步锁注册表：串行化同一会话的并发消息处理，
+# 防止历史消息交错、回滚错位（chat.py 在消息编排前获取 session.lock）。
+_session_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _get_session_lock(session_id: str) -> asyncio.Lock:
+    if session_id not in _session_locks:
+        _session_locks[session_id] = asyncio.Lock()
+    return _session_locks[session_id]
 
 # 选项标记的正则表达式
 CHOICES_PATTERN = re.compile(r'\[CHOICES\](.*?)\[/CHOICES\]', re.DOTALL)
@@ -89,6 +100,11 @@ class Session:
 
         if register:
             session_manager.sessions[self.session_id] = self
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """本会话的互斥锁，消息编排（构建上下文→追加历史→执行）须持锁进行"""
+        return _get_session_lock(self.session_id)
 
     @property
     def _tag(self) -> str:
@@ -423,18 +439,58 @@ class Session:
 class SessionManager:
     def __init__(self):
         self.sessions: Dict[str, Session] = {}
-    
+        self._gc_task: Optional[asyncio.Task] = None
+
+    # ========== 生命周期 GC ==========
+
+    def start_gc(self, interval: int = 300) -> None:
+        """启动周期 GC 任务（幂等），清理过期会话"""
+        if self._gc_task is not None and not self._gc_task.done():
+            return
+        self._gc_task = asyncio.create_task(self._gc_loop(interval))
+        logger.info(f"Session GC 已启动，间隔 {interval}s")
+
+    async def stop_gc(self) -> None:
+        if self._gc_task is not None and not self._gc_task.done():
+            self._gc_task.cancel()
+            try:
+                await self._gc_task
+            except asyncio.CancelledError:
+                pass
+        self._gc_task = None
+
+    async def _gc_loop(self, interval: int) -> None:
+        while True:
+            await asyncio.sleep(interval)
+            self._sweep()
+
+    def _sweep(self) -> int:
+        """清理过期的用户会话；任务会话（bg/sub/agent）由各自 finally 自清理，跳过"""
+        removed = 0
+        for session_id in list(self.sessions.keys()):
+            if not (session_id.startswith("group_") or session_id.startswith("private_")):
+                continue
+            session = self.sessions[session_id]
+            if session.is_expired():
+                logger.info(f"[GC] 清理过期会话 {session_id}")
+                self._remove_session(session_id)
+                removed += 1
+        return removed
+
     def get_session_id(self, user_id: int, group_id: Optional[int] = None) -> str:
         if group_id:
             return f"group_{group_id}_user_{user_id}"
         return f"private_{user_id}"
     
     def _remove_session(self, session_id: str) -> None:
-        """统一删除 session 入口，同时清理 MCP 状态"""
+        """统一删除 session 入口，同时清理 MCP 状态与会话锁"""
         if session_id in self.sessions:
             del self.sessions[session_id]
             logger.debug(f"[_remove_session] session={session_id} 已从内存中删除")
-        
+
+        # 会话锁在会话销毁后不再需要（持锁中的任务持有的仍是原 Lock 引用，安全）
+        _session_locks.pop(session_id, None)
+
         mcp_sm = get_mcp_session_manager()
         if mcp_sm is not None:
             try:

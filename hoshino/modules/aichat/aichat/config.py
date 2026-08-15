@@ -1,7 +1,21 @@
-from typing import Dict, List, Optional
+from contextlib import contextmanager
+from threading import RLock
+from typing import Any, Dict, Iterator, List, Optional
 from pydantic import BaseModel
 
 from hoshino.config import BaseConfig, configuration
+
+# 配置写锁：所有"修改 conf 字段 + save_plugin_config"的路径都应持有此锁，
+# 防止并发写（聊天命令 / webui 同时改配置）导致 pydantic 对象脏写。
+# 用 RLock 而非 asyncio.Lock：api_manager 等同步方法也能安全使用。
+_config_write_lock = RLock()
+
+
+@contextmanager
+def config_write_guard() -> Iterator[None]:
+    """配置写入互斥上下文"""
+    with _config_write_lock:
+        yield
 
 
 class MCPServerConfig(BaseModel):
@@ -107,6 +121,10 @@ class Config(BaseConfig):
     def get_apis(self) -> List[ApiEntry]:
         """获取厂商列表"""
         return self.apis
+
+    def snapshot(self) -> Dict[str, Any]:
+        """返回配置深拷贝快照（只读使用，避免长流程中配置被并发修改）"""
+        return self.model_dump()
 
     def get_api_by_name(self, api: str) -> Optional[ApiEntry]:
         """根据 api 名称获取配置"""

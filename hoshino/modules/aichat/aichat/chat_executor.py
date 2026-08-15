@@ -7,15 +7,17 @@
 """
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 
 from .config import Config
+from .infra import LLMError, get_gateway, sanitize
 from .tools import get_tool_function, get_available_tools
 from .tools.registry import get_injectable_params
-from hoshino.util import aiohttpx, log_json, truncate_log
+from hoshino.util import log_json, truncate_log
 
 if TYPE_CHECKING:
     from .session import Session
@@ -94,7 +96,7 @@ class ChatExecutor:
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None
     ) -> Dict[str, Any]:
-        """单次 AI API 调用"""
+        """单次 AI API 调用（经 LLMGateway：超时/重试/脱敏）"""
         if not api_config or not api_config.get("api_key"):
             logger.warning("AI API 未配置或密钥为空")
             return {"error": "API 未配置", "content": None}
@@ -103,90 +105,57 @@ class ChatExecutor:
             logger.error("消息列表为空")
             return {"error": "消息列表为空", "content": None}
 
-        url = f"{api_config['api_base'].rstrip('/')}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_config['api_key']}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": api_config["model"],
-            "messages": messages,
-        }
-
-        if "max_tokens" in api_config:
-            payload["max_tokens"] = api_config["max_tokens"]
-        if "temperature" in api_config:
-            payload["temperature"] = api_config["temperature"]
-
-        if tools and api_config.get("supports_tools", False):
-            payload["tools"] = tools
-            if tool_choice:
-                payload["tool_choice"] = tool_choice
-            logger.debug(f"启用 Tool Calling，工具数量: {len(tools)}")
+        call_tools = tools if (tools and api_config.get("supports_tools", False)) else None
+        if call_tools:
+            logger.debug(f"启用 Tool Calling，工具数量: {len(call_tools)}")
 
         MAX_LOG_MESSAGES = 2
-        total_msgs = len(payload["messages"])
+        total_msgs = len(messages)
         if total_msgs > MAX_LOG_MESSAGES:
-            log_messages = [{"role": "system", "content": f"...[省略 {total_msgs - MAX_LOG_MESSAGES} 条历史消息]..."}] + payload["messages"][-MAX_LOG_MESSAGES:]
+            log_messages = [{"role": "system", "content": f"...[省略 {total_msgs - MAX_LOG_MESSAGES} 条历史消息]..."}] + messages[-MAX_LOG_MESSAGES:]
         else:
-            log_messages = payload["messages"]
+            log_messages = messages
 
         log_payload = {
-            "model": payload["model"],
-            "messages": log_messages,
+            "model": api_config["model"],
+            "messages": sanitize(log_messages),
         }
-        if "max_tokens" in payload:
-            log_payload["max_tokens"] = payload["max_tokens"]
-        if "temperature" in payload:
-            log_payload["temperature"] = payload["temperature"]
-        if "tools" in payload:
-            log_payload["tools_count"] = len(payload["tools"])
-        if "tool_choice" in payload:
-            log_payload["tool_choice"] = payload["tool_choice"]
+        if "max_tokens" in api_config:
+            log_payload["max_tokens"] = api_config["max_tokens"]
+        if "temperature" in api_config:
+            log_payload["temperature"] = api_config["temperature"]
+        if call_tools:
+            log_payload["tools_count"] = len(call_tools)
+        if tool_choice:
+            log_payload["tool_choice"] = tool_choice
 
-        logger.info(f"{self._tag} 调用 AI API: URL={url}, Payload: {log_json(truncate_log(log_payload))}")
+        logger.info(f"{self._tag} 调用 AI API: model={api_config['model']}, Payload: {log_json(truncate_log(log_payload))}")
+
+        gateway = get_gateway(api_config["api_base"], api_config["api_key"])
 
         try:
-            resp = await aiohttpx.post(url, headers=headers, json=payload)
-            if not resp.ok:
-                error_text = truncate_log(resp.text) if hasattr(resp, 'text') else 'unknown'
-                logger.error(f"{self._tag} AI API 调用失败: {resp.status_code}, 响应: {error_text}")
-                return {"error": error_text, "content": None}
-
-            result = resp.json
-            if not result:
-                logger.error("AI API 返回空结果")
-                return {"error": "返回空结果", "content": None}
-
-            logger.info(f"{self._tag} AI API 响应: {log_json(result)}")
-
-            if "choices" in result and len(result["choices"]) > 0:
-                choice = result["choices"][0]
-                message = choice.get("message", {})
-                finish_reason = choice.get("finish_reason", "")
-
-                content = message.get("content", "") or ""
-                reasoning_content = message.get("reasoning_content", "") or ""
-                tool_calls = message.get("tool_calls", [])
-                usage = result.get("usage", {})
-
-                return {
-                    "content": content.strip() if content else None,
-                    "reasoning_content": reasoning_content.strip() if reasoning_content else None,
-                    "tool_calls": tool_calls if tool_calls else [],
-                    "finish_reason": finish_reason,
-                    "raw_response": result,
-                    "usage": usage if usage else None,
-                }
-
-            error_info = result.get("error", {})
-            error_msg = error_info.get("message", "未知错误") if error_info else "返回格式错误"
-            logger.error(f"AI API 返回错误: {error_msg}, 完整响应: {log_json(result)}")
-            return {"error": error_msg, "content": None}
-
-        except Exception as e:
-            logger.exception(f"调用 AI API 异常: {e}")
+            result = await gateway.chat(
+                messages,
+                model=api_config["model"],
+                tools=call_tools,
+                tool_choice=tool_choice if call_tools else None,
+                temperature=api_config.get("temperature"),
+                max_tokens=api_config.get("max_tokens"),
+            )
+        except LLMError as e:
+            logger.error(f"{self._tag} AI API 调用失败: {e}")
             return {"error": str(e), "content": None}
+
+        logger.info(f"{self._tag} AI API 响应: {log_json(sanitize(result.raw))}")
+
+        return {
+            "content": result.content,
+            "reasoning_content": result.reasoning_content,
+            "tool_calls": result.tool_calls,
+            "finish_reason": result.finish_reason,
+            "raw_response": result.raw,
+            "usage": result.usage,
+        }
 
     async def _execute_tool_call(
         self,
@@ -256,7 +225,6 @@ class ChatExecutor:
 
             # 简化日志中的 base64 图片数据
             if "data:image" in content:
-                import re
                 pattern = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}'
                 content = re.sub(
                     pattern,
