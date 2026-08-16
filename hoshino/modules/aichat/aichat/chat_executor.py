@@ -8,6 +8,7 @@
 import asyncio
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
@@ -15,6 +16,7 @@ from loguru import logger
 
 from .config import Config
 from .infra import AppError, LLMError, get_gateway, sanitize
+from .infra.metrics import metrics
 from .tools.access import get_available_tools, get_tool_function
 from .tools.permission import check_permission, get_tool_permission
 from .tools.registry import get_injectable_params, ok, fail
@@ -108,7 +110,6 @@ class ChatExecutor:
         messages: List[Dict[str, Any]],
         api_config: Dict[str, Any],
         tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None
     ) -> APIResponse:
         """单次 AI API 调用（经 LLMGateway：超时/重试/脱敏）"""
         if not api_config or not api_config.get("api_key"):
@@ -140,8 +141,6 @@ class ChatExecutor:
             log_payload["temperature"] = api_config["temperature"]
         if call_tools:
             log_payload["tools_count"] = len(call_tools)
-        if tool_choice:
-            log_payload["tool_choice"] = tool_choice
 
         logger.info(f"{self._tag} 调用 AI API: model={api_config['model']}, Payload: {log_json(truncate_log(log_payload))}")
 
@@ -158,7 +157,6 @@ class ChatExecutor:
                 messages,
                 model=api_config["model"],
                 tools=call_tools,
-                tool_choice=tool_choice if call_tools else None,
                 temperature=api_config.get("temperature"),
                 max_tokens=api_config.get("max_tokens"),
             )
@@ -243,12 +241,14 @@ class ChatExecutor:
                 elif type_name == 'Event':
                     arguments[param_name] = context.get('event')
 
+        start = time.perf_counter()
         try:
             result = await asyncio.wait_for(
                 tool_func(**arguments),
                 timeout=conf.tool_timeout,
             )
         except asyncio.TimeoutError:
+            metrics.record_tool_timeout()
             logger.error(f"{self._tag} 工具执行超时（>{conf.tool_timeout}s）: {function_name}")
             return {
                 "tool_call_id": tool_id,
@@ -265,6 +265,7 @@ class ChatExecutor:
                 "role": "tool",
                 "content": json.dumps({"success": False, "error": str(e)}, ensure_ascii=False),
             }
+        metrics.record_tool_call((time.perf_counter() - start) * 1000)
 
         return await self._process_tool_result(tool_id, result)
 

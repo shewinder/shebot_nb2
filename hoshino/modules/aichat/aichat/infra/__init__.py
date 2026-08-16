@@ -16,6 +16,7 @@ from .errors import (
     Result,
 )
 from .logging import log_context, log_tag, sanitize, sanitize_text
+from .metrics import Metrics, metrics
 from .llm_gateway import (
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_MAX_RETRIES,
@@ -43,6 +44,9 @@ __all__ = [
     "log_tag",
     "sanitize",
     "sanitize_text",
+    # metrics
+    "Metrics",
+    "metrics",
     # llm_gateway
     "LLMGateway",
     "LLMResult",

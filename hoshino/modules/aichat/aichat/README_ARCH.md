@@ -54,15 +54,20 @@ aichat/
 ├── infra/                  # 底座层（本文件规范的主体，禁止 import hoshino）
 │   ├── errors.py           #   AppError 层级 + Result
 │   ├── logging.py          #   log_context/log_tag + sanitize
-│   └── llm_gateway.py      #   LLMGateway（httpx/超时/重试/脱敏）
+│   ├── metrics.py          #   全局指标（LLM/工具延迟、token、错误码）
+│   └── llm_gateway.py      #   LLMGateway（httpx/超时/重试/脱敏/埋点）
 ├── agent_loop.py           # AgentTask/AgentResult/run_agent_loop（隔离执行统一编排）
 ├── reply.py                # Reply 管道（build_reply/send_reply）
 ├── subagent_types.py       # 子 Agent 类型定义（SUBAGENT_TYPES）
+├── service.py              # sv = Service('aichat') 单点定义
+├── commands/               # 命令层（chat_mode/persona/model/preset/character/mcp/skills/search）
+│                           # 注意：namespace package，无 __init__.py——插件加载器会把
+│                           # 含 __init__.py 的子目录识别为独立插件，故由插件入口显式导入
 ├── chat.py                 # 入口处理（会话锁 + _run_chat）
-├── chat_executor.py        # 编排（已接入 gateway）
-├── session.py              # Session/SessionManager（锁 + GC + dispose）
+├── chat_executor.py        # 编排（APIResponse/权限校验/工具超时）
+├── session.py              # Session/SessionManager（锁 + GC + dispose + 回溯）
 ├── config.py               # 配置（snapshot + 写锁）
-├── tools/ mcp/ skills/ memory/ persona/ ...  # 能力层（P3 起接口化）
+├── tools/ mcp/ skills/ memory/ persona/ ...  # 能力层
 └── README_ARCH.md          # 本文件
 ```
 
@@ -74,7 +79,7 @@ aichat/
 | P1 | LLMGateway、config 访问、SessionStore（锁+GC）+ 最小接入 | ✅ 已落地 |
 | P2 | AgentLoop/AgentTask 统一执行路径、Reply 管道（图片 bug 修复+兜底）、Session 生命周期内聚 | ✅ 已落地 |
 | P3 | 工具权限双层接线、chat_executor 接口定型、gateway 参数接配置、schema 缓存、后台任务上限/表清理、定时任务执行锁、MCP 真并行 | ✅ 已落地 |
-| P4 | `__init__.py` 命令层拆分、死代码清理、可观测性（成本/延迟/错误率） | ⬜ 待做 |
+| P4 | 命令层拆分（commands/）、死代码清理、可观测性（metrics 埋点 + 全局统计） | ✅ 已落地 |
 
 ## 四、已知债务与决策记录
 

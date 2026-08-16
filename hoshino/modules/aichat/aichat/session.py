@@ -214,8 +214,20 @@ class Session:
         
         return "\n".join(lines)
     
-    def resolve_tool_image_placeholders(self, text: str) -> str:
-        return text
+    def rollback_messages(self, count: int) -> Tuple[int, int]:
+        """回溯最近 count 轮对话，返回 (删除的消息数, 实际回溯轮数)
+
+        以 user 消息为界划分轮次：删除最近 count 条 user 消息及其后的所有消息。
+        """
+        user_indices = [i for i, m in enumerate(self.messages) if m.get("role") == "user"]
+        if not user_indices:
+            return 0, 0
+        actual = min(count, len(user_indices))
+        cut_idx = user_indices[-actual]
+        deleted = len(self.messages) - cut_idx
+        del self.messages[cut_idx:]
+        self.last_active = time.time()
+        return deleted, actual
 
     def dispose(self) -> None:
         """统一清理会话资源：图片目录 + MCP 状态 + 会话锁
@@ -546,10 +558,6 @@ class SessionManager:
         if not session:
             session = self.create_session(user_id, group_id, persona)
         return session
-    
-    def has_session(self, user_id: int, group_id: Optional[int] = None) -> bool:
-        """检查是否存在未过期的活跃 session"""
-        return self.get_session(user_id, group_id) is not None
     
     def clear_session(self, user_id: int, group_id: Optional[int] = None) -> bool:
         session_id = self.get_session_id(user_id, group_id)

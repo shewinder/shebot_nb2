@@ -16,6 +16,7 @@
 import asyncio
 import json
 import random
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -33,6 +34,7 @@ from .errors import (
     LLMUpstreamError,
 )
 from .logging import sanitize_text
+from .metrics import metrics
 
 # 可重试的 HTTP 状态码
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
@@ -115,7 +117,31 @@ class LLMGateway:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> LLMResult:
-        """发起一次 chat 请求，失败时抛出 AppError 子类"""
+        """发起一次 chat 请求（含指标记录），失败时抛出 AppError 子类"""
+        start = time.perf_counter()
+        try:
+            result = await self._chat(
+                messages, model,
+                tools=tools, tool_choice=tool_choice,
+                temperature=temperature, max_tokens=max_tokens,
+            )
+        except LLMError as e:
+            metrics.record_llm_error(e.code)
+            raise
+        metrics.record_llm_call((time.perf_counter() - start) * 1000, result.usage)
+        return result
+
+    async def _chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        *,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> LLMResult:
+        """发起一次 chat 请求（重试循环主体），失败时抛出 AppError 子类"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
