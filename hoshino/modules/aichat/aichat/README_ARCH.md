@@ -43,6 +43,9 @@
 
 - 禁止函数内 import；类型注解齐全；注释解释"为什么"。
 - 工具返回统一用 `tools.registry.ok() / fail()`（chat_executor 执行层统一整形）。
+- **工具 schema 禁止手写**：新工具一律由注册器从函数签名 / Pydantic 输入模型
+  自动生成（描述经 `Annotated`/docstring 声明）；`parameters=` 仅限无法自动
+  表达的特殊场景（注册时注明原因）。
 - 出站消息统一经 Reply 管道（`reply.build_reply` / `reply.send_reply`），
   图片标识符解析失败降级为字面文本，禁止静默丢弃。
 - 未经明确指令不得 git commit。

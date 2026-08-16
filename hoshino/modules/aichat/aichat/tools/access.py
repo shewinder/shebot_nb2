@@ -12,6 +12,7 @@ from loguru import logger
 from ..config import Config
 from ..mcp import mcp_session_manager, mcp_tool_bridge
 from .permission import get_tool_permission, is_superuser
+from .registry import Tool, tool_registry
 from .registry import get_available_tools as _get_registry_tools
 from .registry import get_tool_function as _get_registry_tool_function
 
@@ -130,3 +131,11 @@ def get_tool_function(name: str) -> Optional[Callable]:
             logger.debug(f"获取 MCP 工具函数失败: {e}")
 
     return None
+
+
+def get_tool_info(name: str) -> Optional[Tool]:
+    """获取内置工具完整信息（含 input_model 等注册元数据）
+
+    MCP 工具没有本地 Tool 定义，返回 None（调用方回退 get_tool_function）。
+    """
+    return tool_registry.get_tool_info(name)

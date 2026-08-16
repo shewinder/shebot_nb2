@@ -13,11 +13,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
+from pydantic import ValidationError
 
 from .config import Config
 from .infra import AppError, LLMError, get_gateway, sanitize
 from .infra.metrics import metrics
-from .tools.access import get_available_tools, get_tool_function
+from .tools.access import get_available_tools, get_tool_function, get_tool_info
 from .tools.permission import check_permission, get_tool_permission
 from .tools.registry import get_injectable_params, ok, fail
 from hoshino.util import log_json, truncate_log
@@ -198,20 +199,13 @@ class ChatExecutor:
             arguments = json.loads(arguments_str)
         except json.JSONDecodeError:
             logger.error(f"工具参数解析失败: {arguments_str}")
-            return {
-                "tool_call_id": tool_id,
-                "role": "tool",
-                "content": json.dumps({"success": False, "error": "参数解析失败"}, ensure_ascii=False),
-            }
+            return self._tool_error(tool_id, "参数解析失败")
 
-        tool_func = get_tool_function(function_name)
+        tool_info = get_tool_info(function_name)
+        tool_func = tool_info.function if tool_info is not None else get_tool_function(function_name)
         if not tool_func:
             logger.error(f"未找到工具: {function_name}")
-            return {
-                "tool_call_id": tool_id,
-                "role": "tool",
-                "content": json.dumps({"success": False, "error": f"未知工具: {function_name}"}, ensure_ascii=False),
-            }
+            return self._tool_error(tool_id, f"未知工具: {function_name}")
 
         # 执行层权限校验：防模型幻觉调用未出现在 schema 中的工具名绕过
         level = get_tool_permission(function_name)
@@ -223,11 +217,7 @@ class ChatExecutor:
         )
         if not has_perm:
             logger.warning(f"{self._tag} 工具权限拒绝: {function_name} (需要 {level})")
-            return {
-                "tool_call_id": tool_id,
-                "role": "tool",
-                "content": json.dumps({"success": False, "error": reason}, ensure_ascii=False),
-            }
+            return self._tool_error(tool_id, reason)
 
         if context:
             injectable = get_injectable_params(tool_func)
@@ -241,6 +231,15 @@ class ChatExecutor:
                 elif type_name == 'Event':
                     arguments[param_name] = context.get('event')
 
+        # Pydantic 输入模型：构造模型实例，参数类型/范围校验前置到工具入口
+        if tool_info is not None and tool_info.input_model is not None:
+            try:
+                model_instance = tool_info.input_model.model_validate(arguments)
+            except ValidationError as e:
+                logger.warning(f"{self._tag} 工具参数校验失败: {function_name}: {e}")
+                return self._tool_error(tool_id, f"参数校验失败: {e}")
+            arguments = {tool_info.input_param: model_instance}
+
         start = time.perf_counter()
         try:
             result = await asyncio.wait_for(
@@ -250,24 +249,22 @@ class ChatExecutor:
         except asyncio.TimeoutError:
             metrics.record_tool_timeout()
             logger.error(f"{self._tag} 工具执行超时（>{conf.tool_timeout}s）: {function_name}")
-            return {
-                "tool_call_id": tool_id,
-                "role": "tool",
-                "content": json.dumps(
-                    {"success": False, "error": f"工具执行超时: {function_name}"},
-                    ensure_ascii=False,
-                ),
-            }
+            return self._tool_error(tool_id, f"工具执行超时: {function_name}")
         except Exception as e:
             logger.exception(f"工具执行失败: {e}")
-            return {
-                "tool_call_id": tool_id,
-                "role": "tool",
-                "content": json.dumps({"success": False, "error": str(e)}, ensure_ascii=False),
-            }
+            return self._tool_error(tool_id, str(e))
         metrics.record_tool_call((time.perf_counter() - start) * 1000)
 
         return await self._process_tool_result(tool_id, result)
+
+    @staticmethod
+    def _tool_error(tool_id: str, message: str) -> Dict[str, Any]:
+        """构造标准的工具失败响应"""
+        return {
+            "tool_call_id": tool_id,
+            "role": "tool",
+            "content": json.dumps({"success": False, "error": message}, ensure_ascii=False),
+        }
 
     async def _process_tool_result(
         self,

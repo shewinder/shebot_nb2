@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 from PIL import Image
+from pydantic import BaseModel, Field
 
 from hoshino.util import aiohttpx
 from hoshino.util.sutil import anti_harmony
@@ -134,8 +135,20 @@ def _read_local_image(file_path: str) -> Optional[str]:
         return None
 
 
+class StoreImagesInput(BaseModel):
+    """store_images 输入模型（schema 自动生成，执行前自动校验）"""
+
+    urls: List[str] = Field(
+        default_factory=list,
+        description="图片 URL 列表，从网络下载图片",
+    )
+    paths: List[str] = Field(
+        default_factory=list,
+        description="本地图片文件路径列表，相对于 data/ 目录",
+    )
+
+
 @tool_registry.register(
-    name="store_images",
     description="""存储图片到当前会话，返回标识符供回复引用。
 
 支持两种来源：
@@ -172,33 +185,15 @@ store_images(urls=["https://example.com/1.jpg"], paths=["local/2.png"])
 - 图片过大会自动跳过（限制 10MB）
 - 本地路径相对于 data/ 目录，禁止 .. 和绝对路径
 - 支持的本地图片格式：png、jpg、gif、webp""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "urls": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "图片 URL 列表，从网络下载图片"
-            },
-            "paths": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "本地图片文件路径列表，相对于 data/ 目录"
-            }
-        },
-        "required": []
-    },
 )
 async def store_images(
-    urls: Optional[List[str]] = None,
-    paths: Optional[List[str]] = None,
+    params: StoreImagesInput,
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     """存储图片到会话并返回标识符
 
     Args:
-        urls: 图片 URL 列表
-        paths: 本地图片文件路径列表（相对于 data/ 目录）
+        params: 输入参数（urls/paths）
         session: 当前会话（自动注入）
 
     Returns:
@@ -210,8 +205,8 @@ async def store_images(
             error="Missing session"
         )
 
-    urls = urls or []
-    paths = paths or []
+    urls = params.urls or []
+    paths = params.paths or []
 
     if not urls and not paths:
         return fail("请至少提供 urls 或 paths 中的一个参数")

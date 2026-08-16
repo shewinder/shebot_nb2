@@ -4,9 +4,10 @@ AI 工具：天气查询
 """
 import asyncio
 import os
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from loguru import logger
+from pydantic import Field
 
 from hoshino.util import aiohttpx
 
@@ -73,7 +74,6 @@ async def _get_weather_data(city_code: str, api_key: str, extensions: str) -> Op
 
 
 @tool_registry.register(
-    name="get_weather",
     description="""查询指定城市的天气信息，返回当前实时天气和未来几天预报数据。
 
 数据包含两部分：
@@ -87,18 +87,10 @@ async def _get_weather_data(city_code: str, api_key: str, extensions: str) -> Op
 - 用户问"未来几天天气"：展示 forecast 中所有数据
 
 注意：如果用户只问当前/今天天气，不要主动预报后几天的天气。""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "city": {
-                "type": "string",
-                "description": "城市名称，如\"北京\"、\"上海\"、\"广州\"等"
-            }
-        },
-        "required": ["city"]
-    },
 )
-async def get_weather(city: str) -> Dict[str, Any]:
+async def get_weather(
+    city: Annotated[str, Field(description="城市名称，如'北京'、'上海'、'广州'等")],
+) -> Dict[str, Any]:
     """查询天气信息"""
     try:
         gaode_key = os.getenv("GAODE_API_KEY", "")
