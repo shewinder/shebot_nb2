@@ -2,8 +2,9 @@
 AI Tool: 定时任务管理
 支持创建、查看、删除、暂停/恢复定时任务
 """
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, List, Literal, Optional, TYPE_CHECKING
 from loguru import logger
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 from ...scheduler_core import scheduler_manager
@@ -89,86 +90,22 @@ if TYPE_CHECKING:
 - task_description = "搜索今日新闻并生成早报摘要"
 - hour="8", minute="0", day="*", month="*", day_of_week='*'
 """,
-    parameters={
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "description": "操作类型: create/list/delete/pause/resume",
-                "enum": ["create", "list", "delete", "pause", "resume"]
-            },
-            "task_description": {
-                "type": "string",
-                "description": "【重要】任务执行内容，只描述要执行的具体操作，不要包含时间、频率、定时等调度信息（时间由 cron 参数单独设置）。create 时必需。正确示例: '分析用户股票持仓并给出操作建议'。错误示例: '每日12点分析用户股票持仓'（包含时间信息）"
-            },
-            "minute": {
-                "type": "string",
-                "description": "cron 分钟字段 (0-59, *, 或 */n)。create 时必需。如: '0', '30', '*', '*/30'"
-            },
-            "hour": {
-                "type": "string",
-                "description": "cron 小时字段 (0-23 或 *)。create 时必需。如: '8', '20', '*'"
-            },
-            "day": {
-                "type": "string",
-                "description": "cron 日期字段 (1-31 或 *)。create 时必需。通常用 '*'"
-            },
-            "month": {
-                "type": "string",
-                "description": "cron 月份字段 (1-12 或 *)。create 时必需。通常用 '*'"
-            },
-            "day_of_week": {
-                "type": "string",
-                "description": "cron 星期字段 (0-6, *, 或多值如 '1,3,5')。0=周日,1=周一。create 时必需。如: '*','1','1,3,5'"
-            },
-            "task_id": {
-                "type": "string",
-                "description": "任务ID，delete/pause/resume 操作时必需。从 list 操作的结果中获取。"
-            },
-            "silent": {
-                "type": "boolean",
-                "description": "【重要】是否静默执行（不添加任务报告框架）。必须根据任务类型判断：问候/提醒/打招呼类任务设为 true；搜索/生成/查询/报告类任务设为 false。"
-            },
-            "one_time": {
-                "type": "boolean",
-                "description": "是否为一次性任务，true表示任务只执行一次后自动删除。create时使用。"
-            },
-            "execute_at": {
-                "type": "string",
-                "description": "一次性任务的执行时间，ISO8601格式，如 '2024-12-25T08:00:00'。one_time=true时与delay_minutes二选一。"
-            },
-            "delay_minutes": {
-                "type": "integer",
-                "description": "延迟多少分钟后执行，如 30 表示30分钟后。one_time=true时与execute_at二选一，优先使用delay_minutes。"
-            },
-            "mention_user": {
-                "type": "boolean",
-                "description": "执行时是否 @ 任务创建者。适合提醒类任务，如'30分钟后提醒我'时设为 true，会在消息开头 @ 创建者。仅在群聊中有效。"
-            },
-            "preactivate_skills": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "预激活的 SKILL 名称列表。传入任务执行需要用到的 SKILL，避免首轮再调 activate_skill。"
-            }
-        },
-        "required": ["action"]
-    }
 )
 async def schedule_task(
-    action: str,
-    task_description: str = "",
-    minute: str = "",
-    hour: str = "",
-    day: str = "",
-    month: str = "",
-    day_of_week: str = "",
-    task_id: str = "",
-    silent: Optional[bool] = None,
-    one_time: Optional[bool] = None,
-    execute_at: str = "",
-    delay_minutes: int = 0,
-    mention_user: Optional[bool] = None,
-    preactivate_skills: Optional[List[str]] = None,
+    action: Literal["create", "list", "delete", "pause", "resume"],
+    task_description: Annotated[str, Field(description="【重要】任务执行内容，只描述要执行的具体操作，不要包含时间、频率、定时等调度信息（时间由 cron 参数单独设置）。create 时必需。正确示例: '分析用户股票持仓并给出操作建议'。错误示例: '每日12点分析用户股票持仓'（包含时间信息）")] = "",
+    minute: Annotated[str, Field(description="cron 分钟字段 (0-59, *, 或 */n)。create 时必需。如: '0', '30', '*', '*/30'")] = "",
+    hour: Annotated[str, Field(description="cron 小时字段 (0-23 或 *)。create 时必需。如: '8', '20', '*'")] = "",
+    day: Annotated[str, Field(description="cron 日期字段 (1-31 或 *)。create 时必需。通常用 '*'")] = "",
+    month: Annotated[str, Field(description="cron 月份字段 (1-12 或 *)。create 时必需。通常用 '*'")] = "",
+    day_of_week: Annotated[str, Field(description="cron 星期字段 (0-6, *, 或多值如 '1,3,5')。0=周日,1=周一。create 时必需。如: '*','1','1,3,5'")] = "",
+    task_id: Annotated[str, Field(description="任务ID，delete/pause/resume 操作时必需。从 list 操作的结果中获取。")] = "",
+    silent: Annotated[Optional[bool], Field(description="【重要】是否静默执行（不添加任务报告框架）。必须根据任务类型判断：问候/提醒/打招呼类任务设为 true；搜索/生成/查询/报告类任务设为 false。")] = None,
+    one_time: Annotated[Optional[bool], Field(description="是否为一次性任务，true表示任务只执行一次后自动删除。create时使用。")] = None,
+    execute_at: Annotated[str, Field(description="一次性任务的执行时间，ISO8601格式，如 '2024-12-25T08:00:00'。one_time=true时与delay_minutes二选一。")] = "",
+    delay_minutes: Annotated[int, Field(description="延迟多少分钟后执行，如 30 表示30分钟后。one_time=true时与execute_at二选一，优先使用delay_minutes。")] = 0,
+    mention_user: Annotated[Optional[bool], Field(description="执行时是否 @ 任务创建者。适合提醒类任务，如'30分钟后提醒我'时设为 true，会在消息开头 @ 创建者。仅在群聊中有效。")] = None,
+    preactivate_skills: Annotated[Optional[List[str]], Field(description="预激活的 SKILL 名称列表。传入任务执行需要用到的 SKILL，避免首轮再调 activate_skill。")] = None,
     session: Optional["Session"] = None,
     event: Optional["Event"] = None,
 ) -> Dict[str, Any]:

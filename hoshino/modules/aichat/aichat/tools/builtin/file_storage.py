@@ -2,7 +2,9 @@
 文件读写工具
 """
 from pathlib import Path
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, Optional, TYPE_CHECKING
+
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 
@@ -33,22 +35,9 @@ def _check_path(path: str) -> tuple[bool, Path]:
         return False, Path()
 
 
-@tool_registry.register(
-    name="read_file",
-    description="读取文件内容",
-    parameters={
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "文件路径（相对于 data 目录）"
-            }
-        },
-        "required": ["path"]
-    }
-)
+@tool_registry.register(description="读取文件内容")
 async def read_file(
-    path: str,
+    path: Annotated[str, Field(description="文件路径（相对于 data 目录）")],
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     """读取文件"""
@@ -66,27 +55,10 @@ async def read_file(
         return fail(f"读取失败: {e}")
 
 
-@tool_registry.register(
-    name="write_file",
-    description="写入文件（完全覆盖）",
-    parameters={
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "文件路径（相对于 data 目录）"
-            },
-            "content": {
-                "type": "string",
-                "description": "文件内容"
-            }
-        },
-        "required": ["path", "content"]
-    }
-)
+@tool_registry.register(description="写入文件（完全覆盖）")
 async def write_file(
-    path: str,
-    content: str,
+    path: Annotated[str, Field(description="文件路径（相对于 data 目录）")],
+    content: Annotated[str, Field(description="文件内容")],
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     """写入文件"""

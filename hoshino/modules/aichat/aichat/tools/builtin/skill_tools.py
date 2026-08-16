@@ -2,8 +2,9 @@
 SKILL 系统元工具
 提供给 AI 使用的 SKILL 发现和激活功能
 """
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, List, Optional, TYPE_CHECKING
 from loguru import logger
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 from ...skills import skill_manager
@@ -14,24 +15,13 @@ if TYPE_CHECKING:
 
 
 @tool_registry.register(
-    name="activate_skill",
     description="""激活一个 SKILL 以获得其专业能力指导。
 
 当用户请求的功能对应某个可用 SKILL 时调用。激活后其指导内容会在当前会话中持续有效。每个会话最多激活 5 个 SKILL。
 """,
-    parameters={
-        "type": "object",
-        "properties": {
-            "skill_name": {
-                "type": "string",
-                "description": "要激活的 SKILL 名称"
-            }
-        },
-        "required": ["skill_name"]
-    }
 )
 async def activate_skill(
-    skill_name: str,
+    skill_name: Annotated[str, Field(description="要激活的 SKILL 名称")],
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     """激活指定 SKILL

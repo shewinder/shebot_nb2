@@ -7,9 +7,10 @@
 update_skill → reload 自动完成 → activate_skill → execute_script 自测
 → 失败 rollback_skill。
 """
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
+from pydantic import Field
 
 from ...skills import skill_manager, updater
 from ..registry import tool_registry, ok, fail
@@ -17,15 +18,10 @@ from ..registry import tool_registry, ok, fail
 if TYPE_CHECKING:
     from ...session import Session
 
-_SCRIPTS_SCHEMA = {
-    "type": "object",
-    "additionalProperties": {"type": "string"},
-    "description": "脚本文件字典：{相对路径: 文件内容}，如 {\"scripts/fetch.py\": \"...\"}。路径禁止 .. 和绝对路径",
-}
+_SCRIPTS_DESC = "脚本文件字典：{相对路径: 文件内容}，如 {\"scripts/fetch.py\": \"...\"}。路径禁止 .. 和绝对路径"
 
 
 @tool_registry.register(
-    name="create_skill",
     description="""创建一个新的用户 SKILL 并立即热加载（无需重启）。
 
 SKILL 是持久的技能包：SKILL.md 写清"何时用/怎么用"，可附带 scripts/ 脚本。
@@ -39,22 +35,12 @@ SKILL 是持久的技能包：SKILL.md 写清"何时用/怎么用"，可附带 s
 ## 注意
 - 名称只允许小写字母/数字/下划线/连字符
 - 与内置 SKILL 同名会覆盖内置（慎重）""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "SKILL 名称（唯一标识）"},
-            "description": {"type": "string", "description": "一句话描述用途（供 AI 选择激活）"},
-            "content": {"type": "string", "description": "SKILL.md 指导正文"},
-            "scripts": _SCRIPTS_SCHEMA,
-        },
-        "required": ["name", "description", "content"],
-    },
 )
 async def create_skill(
-    name: str,
-    description: str,
-    content: str,
-    scripts: Optional[Dict[str, str]] = None,
+    name: Annotated[str, Field(description="SKILL 名称（唯一标识）")],
+    description: Annotated[str, Field(description="一句话描述用途（供 AI 选择激活）")],
+    content: Annotated[str, Field(description="SKILL.md 指导正文")],
+    scripts: Annotated[Optional[Dict[str, str]], Field(description=_SCRIPTS_DESC)] = None,
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     if not session:
@@ -68,7 +54,6 @@ async def create_skill(
 
 
 @tool_registry.register(
-    name="update_skill",
     description="""更新已有 SKILL 的内容/描述/脚本并立即热加载。
 
 写前自动备份（保留最近 5 版），更新后自动校验，格式损坏自动回滚。
@@ -79,22 +64,12 @@ async def create_skill(
 2. activate_skill 激活
 3. execute_script 跑一个测试用例验证
 4. 结果不对 → rollback_skill 回滚""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "SKILL 名称"},
-            "content": {"type": "string", "description": "新的指导正文（省略=保持原样）"},
-            "description": {"type": "string", "description": "新的一句话描述（省略=保持原样）"},
-            "scripts": _SCRIPTS_SCHEMA,
-        },
-        "required": ["name"],
-    },
 )
 async def update_skill(
-    name: str,
-    content: Optional[str] = None,
-    description: Optional[str] = None,
-    scripts: Optional[Dict[str, str]] = None,
+    name: Annotated[str, Field(description="SKILL 名称")],
+    content: Annotated[Optional[str], Field(description="新的指导正文（省略=保持原样）")] = None,
+    description: Annotated[Optional[str], Field(description="新的一句话描述（省略=保持原样）")] = None,
+    scripts: Annotated[Optional[Dict[str, str]], Field(description=_SCRIPTS_DESC)] = None,
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     if not session:
@@ -108,18 +83,10 @@ async def update_skill(
 
 
 @tool_registry.register(
-    name="delete_skill",
     description="删除用户创建的 SKILL（内置 SKILL 只读，无法删除）",
-    parameters={
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "SKILL 名称"},
-        },
-        "required": ["name"],
-    },
 )
 async def delete_skill(
-    name: str,
+    name: Annotated[str, Field(description="SKILL 名称")],
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     if not session:
@@ -130,18 +97,10 @@ async def delete_skill(
 
 
 @tool_registry.register(
-    name="rollback_skill",
     description="回滚 SKILL 到最近一次备份版本；无备份时删除用户副本（回退到内置版本）",
-    parameters={
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "SKILL 名称"},
-        },
-        "required": ["name"],
-    },
 )
 async def rollback_skill(
-    name: str,
+    name: Annotated[str, Field(description="SKILL 名称")],
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     if not session:
@@ -152,11 +111,9 @@ async def rollback_skill(
 
 
 @tool_registry.register(
-    name="reload_skills",
     description="手动热重载全部 SKILL。修改 SKILL 文件后调用，使变更立即对所有会话生效",
-    parameters={"type": "object", "properties": {}},
 )
-async def reload_skills_tool(
+async def reload_skills(
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     try:

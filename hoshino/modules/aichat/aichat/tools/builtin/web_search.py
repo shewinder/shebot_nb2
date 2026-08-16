@@ -11,6 +11,8 @@ _config = AIChatConfig.get_instance("aichat")
 _name = _config.search_provider
 _provider = get_provider(_name)
 
+# 注意：此处手写 parameters 是合法特殊场景——schema 由搜索 provider 动态提供
+# （热切换不同 provider 时 schema 随之变化），无法从单一函数签名自动推导。
 tool_registry.register(
     name="web_search",
     description=_provider["description"],

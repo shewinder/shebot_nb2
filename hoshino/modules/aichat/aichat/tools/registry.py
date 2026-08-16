@@ -20,6 +20,7 @@ from typing import (
 )
 
 from loguru import logger
+from annotated_types import Ge, Gt, Le, Lt, MaxLen, MinLen
 from pydantic import BaseModel, ConfigDict
 from pydantic.fields import FieldInfo
 
@@ -186,11 +187,36 @@ def _inline_defs(schema: Dict[str, Any]) -> Dict[str, Any]:
     return _resolve(result, frozenset())
 
 
+def _constraints_from_annotated(ann: Any) -> Dict[str, Any]:
+    """从 Annotated 元数据提取数值/长度约束 → JSON Schema 关键字"""
+    constraints: Dict[str, Any] = {}
+    if get_origin(ann) is not Annotated:
+        return constraints
+    for meta in get_args(ann)[1:]:
+        if not isinstance(meta, FieldInfo):
+            continue
+        for item in meta.metadata:
+            if isinstance(item, Ge):
+                constraints["minimum"] = item.ge
+            elif isinstance(item, Le):
+                constraints["maximum"] = item.le
+            elif isinstance(item, Gt):
+                constraints["exclusiveMinimum"] = item.gt
+            elif isinstance(item, Lt):
+                constraints["exclusiveMaximum"] = item.lt
+            elif isinstance(item, MinLen):
+                constraints["minLength"] = item.min_length
+            elif isinstance(item, MaxLen):
+                constraints["maxLength"] = item.max_length
+    return constraints
+
+
 def _annotation_to_schema(ann: Any) -> Dict[str, Any]:
     """单个类型注解 → JSON Schema 片段"""
     if ann is None or ann is inspect.Parameter.empty or ann is Any:
         return {}
 
+    constraints = _constraints_from_annotated(ann)
     base, _ = _extract_annotated(ann)
     base, _ = _unwrap_optional(base)
 
@@ -199,26 +225,34 @@ def _annotation_to_schema(ann: Any) -> Dict[str, Any]:
         base = _STR_TYPE_MAP.get(base, base)
 
     origin = get_origin(base)
+    schema: Dict[str, Any]
     if origin is Literal:
-        return {"enum": list(get_args(base))}
-    if isinstance(base, type) and issubclass(base, Enum):
-        return {"type": "string", "enum": [e.value for e in base]}
-    if isinstance(base, type) and issubclass(base, BaseModel):
+        values = list(get_args(base))
+        schema = {"enum": values}
+        # 推断字面量类型（全部同型时补 type，与手写 schema 保持一致）
+        if values and all(type(v) is type(values[0]) for v in values):
+            lit_type = _TYPE_MAP.get(type(values[0]))
+            if lit_type:
+                schema = {"type": lit_type, "enum": values}
+    elif isinstance(base, type) and issubclass(base, Enum):
+        schema = {"type": "string", "enum": [e.value for e in base]}
+    elif isinstance(base, type) and issubclass(base, BaseModel):
         schema = base.model_json_schema()
         schema.pop("title", None)
-        return _inline_defs(schema)
-    if origin is list:
+        schema = _inline_defs(schema)
+    elif origin is list:
         item_ann = get_args(base)[0] if get_args(base) else Any
-        return {"type": "array", "items": _annotation_to_schema(item_ann)}
-    if origin is dict:
+        schema = {"type": "array", "items": _annotation_to_schema(item_ann)}
+    elif origin is dict:
         args = get_args(base)
         value_schema = _annotation_to_schema(args[1]) if len(args) == 2 else {}
-        return {"type": "object", "additionalProperties": value_schema}
+        schema = {"type": "object", "additionalProperties": value_schema}
+    else:
+        type_name = _TYPE_MAP.get(base)
+        schema = {"type": type_name} if type_name else {}
 
-    type_name = _TYPE_MAP.get(base)
-    if type_name:
-        return {"type": type_name}
-    return {}
+    schema.update(constraints)
+    return schema
 
 
 def _parse_param_docs(docstring: Optional[str]) -> Dict[str, str]:

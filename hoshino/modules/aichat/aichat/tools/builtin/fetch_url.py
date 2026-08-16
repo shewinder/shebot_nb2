@@ -2,9 +2,10 @@
 AI 工具：获取指定 URL 内容
 直接访问 URL 获取 JSON 或文本内容
 """
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from loguru import logger
+from pydantic import Field
 
 from hoshino.util import aiohttpx
 
@@ -12,7 +13,6 @@ from ..registry import tool_registry, ok, fail
 
 
 @tool_registry.register(
-    name="fetch_url",
     description="""获取指定 URL 的内容（JSON 或文本）。
 
 用于已知具体 URL 需要获取内容的场景，如 API 调用、网页抓取等。
@@ -26,29 +26,11 @@ from ..registry import tool_registry, ok, fail
 - 适合 REST API 调用
 - 如果返回 JSON，结果会格式化展示
 - 如果返回文本/HTML，会截取前 5000 字符""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "要访问的完整 URL"
-            },
-            "headers": {
-                "type": "object",
-                "description": "可选的请求头（如 User-Agent、Authorization 等）"
-            },
-            "timeout": {
-                "type": "integer",
-                "description": "超时时间（秒），默认 30"
-            }
-        },
-        "required": ["url"]
-    },
 )
 async def fetch_url(
-    url: str,
-    headers: Optional[Dict[str, str]] = None,
-    timeout: int = 30,
+    url: Annotated[str, Field(description="要访问的完整 URL")],
+    headers: Annotated[Optional[Dict[str, str]], Field(description="可选的请求头（如 User-Agent、Authorization 等）")] = None,
+    timeout: Annotated[int, Field(description="超时时间（秒），默认 30")] = 30,
 ) -> Dict[str, Any]:
     """
     获取指定 URL 的内容

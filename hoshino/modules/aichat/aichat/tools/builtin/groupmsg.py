@@ -5,9 +5,10 @@
 """
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, Optional, TYPE_CHECKING
 
 from loguru import logger
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 
@@ -16,7 +17,6 @@ if TYPE_CHECKING:
 
 
 @tool_registry.register(
-    name="query_group_messages",
     description="""查询本群聊天记录。用于了解群里聊了什么、回顾上下文、分析用户发言等。
 
 典型用法：
@@ -25,34 +25,12 @@ if TYPE_CHECKING:
 - 最近一周某人的发言：query_group_messages(user_id=123456, last_seconds=604800)
 - 关键词搜索：query_group_messages(keyword="某话题", last_seconds=604800)
 - 最近上下文：query_group_messages(limit=20) 获取最近20条""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "user_id": {
-                "type": "integer",
-                "description": "用户QQ号，用于筛选特定用户的发言。不传则不限定用户"
-            },
-            "keyword": {
-                "type": "string",
-                "description": "关键词搜索，在消息文本中查找。不传则不限定关键词"
-            },
-            "last_seconds": {
-                "type": "integer",
-                "description": "往前查多少秒的消息。如：3600=最近一小时，86400=今天，604800=最近一周。不传则不限时间"
-            },
-            "limit": {
-                "type": "integer",
-                "description": "返回条数上限，默认100，最大2000"
-            }
-        },
-        "required": []
-    }
 )
 async def query_group_messages(
-    user_id: Optional[int] = None,
-    keyword: Optional[str] = None,
-    last_seconds: Optional[int] = None,
-    limit: int = 100,
+    user_id: Annotated[Optional[int], Field(description="用户QQ号，用于筛选特定用户的发言。不传则不限定用户")] = None,
+    keyword: Annotated[Optional[str], Field(description="关键词搜索，在消息文本中查找。不传则不限定关键词")] = None,
+    last_seconds: Annotated[Optional[int], Field(description="往前查多少秒的消息。如：3600=最近一小时，86400=今天，604800=最近一周。不传则不限时间")] = None,
+    limit: Annotated[int, Field(description="返回条数上限，默认100，最大2000")] = 100,
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     """查询群聊历史消息

@@ -56,7 +56,11 @@ class TestAnnotationToSchema(unittest.TestCase):
     def test_literal_enum(self):
         self.assertEqual(
             _annotation_to_schema(Literal["a", "b"]),
-            {"enum": ["a", "b"]},
+            {"type": "string", "enum": ["a", "b"]},
+        )
+        self.assertEqual(
+            _annotation_to_schema(Literal[1, 2]),
+            {"type": "integer", "enum": [1, 2]},
         )
 
     def test_any_freeform(self):
@@ -158,6 +162,24 @@ class TestRegisterAutoSchema(unittest.TestCase):
         self.assertEqual(info.parameters["required"], ["name"])
         self.assertEqual(info.description, "自动生成的工具")
         self.assertIsNone(info.input_model)
+
+
+class TestRegistrationCompleteness(unittest.TestCase):
+    """工具注册完整性回归：P4 曾误删入口注册行导致 MCP 工具静默未注册"""
+
+    EXPECTED_TOOLS = {
+        "run_background_task", "wait_and_resume", "delegate_task", "get_current_time",
+        "execute_script", "fetch_url", "read_file", "write_file", "query_group_messages",
+        "activate_mcp_server", "list_active_mcp_servers", "read_memory", "write_memory",
+        "schedule_task", "manage_service", "activate_skill", "web_search", "get_weather",
+        "store_images", "create_skill", "update_skill", "delete_skill", "rollback_skill",
+        "reload_skills",
+    }
+
+    def test_all_tools_registered(self):
+        names = set(tool_registry.list_tools())
+        missing = self.EXPECTED_TOOLS - names
+        self.assertFalse(missing, f"工具未注册: {missing}")
 
 
 class TestExecutorPydanticModel(unittest.IsolatedAsyncioTestCase):

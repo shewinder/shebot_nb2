@@ -6,8 +6,9 @@ AI Tool: 服务管理
 - 仅群管理员、群主或超级用户可使用此工具
 - 只能操作当前所在群组的服务（禁止跨群操作）
 """
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, List, Literal, Optional, TYPE_CHECKING
 from loguru import logger
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 from hoshino.service import Service, _loaded_services
@@ -54,7 +55,6 @@ def _is_group_context(event: Optional["Event"]) -> bool:
 
 
 @tool_registry.register(
-    name="manage_service",
     description="""管理机器人的服务功能。可以查看服务列表、启用或禁用服务。
 
 ## 权限要求
@@ -79,25 +79,10 @@ def _is_group_context(event: Optional["Event"]) -> bool:
 - 服务名模糊匹配时如果有多个匹配结果，会返回错误而不会自动执行
 
 注意：此工具仅在群聊中可用，私聊场景下无法使用。""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "description": "操作类型: list/enable/disable/status",
-                "enum": ["list", "enable", "disable", "status"]
-            },
-            "service_name": {
-                "type": "string",
-                "description": "服务名称，enable/disable/status 时必需"
-            }
-        },
-        "required": ["action"]
-    }
 )
 async def manage_service(
-    action: str,
-    service_name: str = "",
+    action: Literal["list", "enable", "disable", "status"],
+    service_name: Annotated[str, Field(description="服务名称，enable/disable/status 时必需")] = "",
     bot: Optional["Bot"] = None,
     event: Optional["Event"] = None,
 ) -> Dict[str, Any]:

@@ -10,9 +10,10 @@
 
 模型配置、工具白名单覆盖、max_rounds 覆盖在 SubAgentProfile 中配置。
 """
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
+from pydantic import Field
 
 from ...agent_loop import AgentTask, rehome_images, run_agent_loop
 from ...config import Config
@@ -51,7 +52,6 @@ def _build_type_descriptions() -> str:
 
 
 @tool_registry.register(
-    name="delegate_task",
     description="""【同步委托】将子任务交给独立的子 Agent 执行，等待完成后返回结果。
 
 子 Agent 拥有独立的对话上下文和受限工具集，执行过程不污染你的主对话上下文。
@@ -71,37 +71,13 @@ def _build_type_descriptions() -> str:
 - 任务描述要具体明确，包含预期产出
 - 多个独立查询可以并行委托（同一轮中调用本工具多次）
 - 子 Agent 返回后，你基于摘要合成最终回复""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "task": {
-                "type": "string",
-                "description": "子任务的详细描述，说明要研究/分析/收集什么，期望的产出格式"
-            },
-            "type": {
-                "type": "string",
-                "description": "子 Agent 类型，从系统提示中列出的可用类型中选择。如 'search'（搜索汇总）、'vision'（视觉分析）"
-            },
-            "image_identifiers": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "需传递给子 Agent 的图片标识符列表，如 [\"user_image_1\", \"ai_image_3\"]。需要子 Agent 分析图片时传入"
-            },
-            "preactivate_skills": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "预激活的 SKILL 名称列表。传入 sub agent 执行任务需要用到的 SKILL，避免首轮再调 activate_skill。"
-            },
-        },
-        "required": ["task"]
-    },
 )
 async def delegate_task(
-    task: str,
+    task: Annotated[str, Field(description="子任务的详细描述，说明要研究/分析/收集什么，期望的产出格式")],
     session: Optional["Session"] = None,
-    type: str = "search",
-    image_identifiers: Optional[List[str]] = None,
-    preactivate_skills: Optional[List[str]] = None,
+    type: Annotated[str, Field(description="子 Agent 类型，从系统提示中列出的可用类型中选择。如 'search'（搜索汇总）、'vision'（视觉分析）")] = "search",
+    image_identifiers: Annotated[Optional[List[str]], Field(description="需传递给子 Agent 的图片标识符列表，如 [\"user_image_1\", \"ai_image_3\"]。需要子 Agent 分析图片时传入")] = None,
+    preactivate_skills: Annotated[Optional[List[str]], Field(description="预激活的 SKILL 名称列表。传入 sub agent 执行任务需要用到的 SKILL，避免首轮再调 activate_skill。")] = None,
 ) -> Dict[str, Any]:
     """同步委托子 Agent 执行任务"""
     if not session:

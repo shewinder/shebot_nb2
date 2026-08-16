@@ -7,9 +7,10 @@ import asyncio
 import json
 import shlex
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 
@@ -36,7 +37,6 @@ def _is_path_safe(target: Path, allowed_base: Path) -> bool:
 
 
 @tool_registry.register(
-    name="execute_script",
     description="""执行指定 SKILL 目录下的脚本文件（Python、Shell 等）
 
 用于执行已激活 SKILL 目录下的脚本，完成特定任务。
@@ -67,39 +67,12 @@ execute_script(
 - stderr: 脚本的标准错误
 - return_code: 脚本退出码
 """,
-    parameters={
-        "type": "object",
-        "properties": {
-            "skill_name": {
-                "type": "string",
-                "description": "SKILL 名称（必须从当前激活的 SKILL 中选择）"
-            },
-            "script_path": {
-                "type": "string",
-                "description": "脚本文件路径（相对于 SKILL 目录，如 'scripts/calc.py'）"
-            },
-            "args": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "传递给脚本的参数列表",
-                "default": []
-            },
-            "timeout": {
-                "type": "integer",
-                "description": "超时时间（秒，默认180，最大300）",
-                "default": 180,
-                "minimum": 1,
-                "maximum": 300
-            }
-        },
-        "required": ["skill_name", "script_path"]
-    }
 )
 async def execute_script(
-    skill_name: str,
-    script_path: str,
-    args: Optional[List[str]] = None,
-    timeout: int = 180,
+    skill_name: Annotated[str, Field(description="SKILL 名称（必须从当前激活的 SKILL 中选择）")],
+    script_path: Annotated[str, Field(description="脚本文件路径（相对于 SKILL 目录，如 'scripts/calc.py'）")],
+    args: Annotated[Optional[List[str]], Field(description="传递给脚本的参数列表")] = None,
+    timeout: Annotated[int, Field(ge=1, le=300, description="超时时间（秒，默认180，最大300）")] = 180,
     session: Optional["Session"] = None,
     bot: Optional["Bot"] = None,
     event: Optional["Event"] = None,

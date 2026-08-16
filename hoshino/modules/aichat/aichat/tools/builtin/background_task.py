@@ -4,9 +4,10 @@
 """
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, List, Literal, Optional, TYPE_CHECKING
 
 from loguru import logger
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 from ...background_task_core import bg_task_manager
@@ -55,7 +56,6 @@ def _format_task_list(tasks: list) -> str:
 
 
 @tool_registry.register(
-    name="run_background_task",
     description="""启动、查看或取消后台任务。
 
 ## ⚠️ 何时必须使用本工具（重要）
@@ -85,36 +85,12 @@ task_description 应该详细描述完整的任务链，包括所有步骤。AI 
 ## 限制
 - 每用户同时只能有 1 个运行中的后台任务
 - 任务创建后可通过 list 查看进度""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "description": "操作类型: start/list/cancel",
-                "enum": ["start", "list", "cancel"]
-            },
-            "task_description": {
-                "type": "string",
-                "description": "任务描述，详细说明要执行的操作。start 时必需。"
-            },
-            "task_id": {
-                "type": "string",
-                "description": "任务ID，cancel 时必需。从 list 结果中获取。"
-            },
-            "preactivate_skills": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "预激活的 SKILL 名称列表。传入 sub agent 执行任务需要用到的 SKILL，避免首轮再调 activate_skill。"
-            }
-        },
-        "required": ["action"]
-    }
 )
 async def run_background_task(
-    action: str,
-    task_description: str = "",
-    task_id: str = "",
-    preactivate_skills: Optional[List[str]] = None,
+    action: Literal["start", "list", "cancel"],
+    task_description: Annotated[str, Field(description="任务描述，详细说明要执行的操作。start 时必需。")] = "",
+    task_id: Annotated[str, Field(description="任务ID，cancel 时必需。从 list 结果中获取。")] = "",
+    preactivate_skills: Annotated[Optional[List[str]], Field(description="预激活的 SKILL 名称列表。传入 sub agent 执行任务需要用到的 SKILL，避免首轮再调 activate_skill。")] = None,
     session: Optional["Session"] = None,
     event: Optional["Event"] = None,
 ) -> Dict[str, Any]:
@@ -208,21 +184,9 @@ async def run_background_task(
 - 图像生成任务：1-2 分钟
 
 调用此工具后，会在指定时间后自动恢复，继续执行。""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "delay_minutes": {
-                "type": "integer",
-                "description": "多少分钟后恢复执行（1-60）",
-                "minimum": 1,
-                "maximum": 60
-            }
-        },
-        "required": ["delay_minutes"]
-    }
 )
 async def wait_and_resume(
-    delay_minutes: int,
+    delay_minutes: Annotated[int, Field(ge=1, le=60, description="多少分钟后恢复执行（1-60）")],
 ) -> Dict[str, Any]:
     delay_minutes = max(1, min(delay_minutes, 60))
 

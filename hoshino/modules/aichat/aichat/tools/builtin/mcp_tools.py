@@ -2,8 +2,9 @@
 MCP 系统元工具
 提供给 AI 使用的 MCP server 发现和激活功能
 """
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, Optional, TYPE_CHECKING
 from loguru import logger
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 
@@ -13,25 +14,14 @@ if TYPE_CHECKING:
 
 
 @tool_registry.register(
-    name="activate_mcp_server",
     description="""激活 MCP server 以使用其工具（浏览器自动化、文件系统等）。
 
 当用户请求的功能需要 MCP server 时调用。激活后其工具在当前会话中可用，最多激活 3 个。
 部分 MCP server 已默认激活（default_active），无需再次调用此工具。
 """,
-    parameters={
-        "type": "object",
-        "properties": {
-            "server_id": {
-                "type": "string",
-                "description": "要激活的 MCP server ID"
-            }
-        },
-        "required": ["server_id"]
-    }
 )
 async def activate_mcp_server(
-    server_id: str,
+    server_id: Annotated[str, Field(description="要激活的 MCP server ID")],
     session: Optional["Session"] = None,
 ) -> Dict[str, Any]:
     """激活指定 MCP server
@@ -195,7 +185,6 @@ async def activate_mcp_server(
 
 
 @tool_registry.register(
-    name="list_active_mcp_servers",
     description="""列出当前会话中已激活的 MCP server。
 
 用于查询当前有哪些 MCP server 已经激活，以及它们提供的工具。
@@ -208,11 +197,6 @@ async def activate_mcp_server(
 ## 示例
 list_active_mcp_servers()
 """,
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
 )
 async def list_active_mcp_servers(
     session: Optional["Session"] = None,

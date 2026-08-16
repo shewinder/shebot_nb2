@@ -2,8 +2,9 @@
 
 为 AI 提供 read_memory / write_memory 两个工具，使其能够自主读写用户记忆笔记。
 """
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Dict, Optional, TYPE_CHECKING
 from loguru import logger
+from pydantic import Field
 
 from ..registry import tool_registry, ok, fail
 from ...memory import memory_store
@@ -16,7 +17,6 @@ if TYPE_CHECKING:
 
 
 @tool_registry.register(
-    name="read_memory",
     description="""读取当前用户的通用记忆笔记。不要用于读取图片偏好/画像文件——图片偏好请用 read_file(path="aichat/preferences/{user_id}.md")。
 
 返回该用户的完整 Markdown 格式记忆文件内容。如果这是首次读取，你会看到默认模板。
@@ -25,11 +25,6 @@ if TYPE_CHECKING:
 - 添加新记忆前：先 read，然后在 write 中保留原有内容并追加
 - 更新记忆时：先 read，找到需要修改的段落，在 write 中修改该部分，保留其余内容
 - 整理记忆时：如果内容过长，可以合并相似条目或删除陈旧信息""",
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
 )
 async def read_memory(session: Optional["Session"] = None) -> Dict[str, Any]:
     """读取用户记忆笔记
@@ -52,7 +47,6 @@ async def read_memory(session: Optional["Session"] = None) -> Dict[str, Any]:
 
 
 @tool_registry.register(
-    name="write_memory",
     description="""覆盖写入当前用户的通用记忆笔记（对话上下文、个人信息、偏好声明等）。
 
 ⛔ 禁止：不要用此工具存储图片偏好/画像分析结果。图片偏好请用 write_file 写入 aichat/preferences/{user_id}.md。
@@ -72,18 +66,11 @@ async def read_memory(session: Optional["Session"] = None) -> Dict[str, Any]:
 - 没有调用 read_memory 就直接 write_memory（可能导致历史记忆丢失）
 - 只写入新内容，遗漏了旧记忆
 - 用 write_memory 写入图片偏好分析结果（应用 write_file）""",
-    parameters={
-        "type": "object",
-        "properties": {
-            "content": {
-                "type": "string",
-                "description": "完整的记忆笔记 Markdown 内容，必须包含所有历史记忆（不能遗漏）"
-            }
-        },
-        "required": ["content"]
-    }
 )
-async def write_memory(content: str, session: Optional["Session"] = None) -> Dict[str, Any]:
+async def write_memory(
+    content: Annotated[str, Field(description="完整的记忆笔记 Markdown 内容，必须包含所有历史记忆（不能遗漏）")],
+    session: Optional["Session"] = None,
+) -> Dict[str, Any]:
     """写入用户记忆笔记
 
     Args:

@@ -16,6 +16,12 @@ from .service import sv
 from .session import session_manager
 from .skills import skill_manager
 
+# 内置工具注册：tools/__init__ 不触发注册（避免与编排层循环导入），
+# 必须由插件入口显式导入。注意：不能依赖 commands/search.py 对
+# tools.builtin 的间接导入——那会遗漏 mcp_tools（历史回归教训）。
+from .tools import builtin  # noqa: F401
+from .tools.builtin import mcp_tools  # noqa: F401
+
 conf = Config.get_instance('aichat')
 
 
