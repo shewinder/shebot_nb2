@@ -11,6 +11,7 @@ from loguru import logger
 
 from ..config import Config
 from ..mcp import mcp_session_manager, mcp_tool_bridge
+from .permission import get_tool_permission, is_superuser
 from .registry import get_available_tools as _get_registry_tools
 from .registry import get_tool_function as _get_registry_tool_function
 
@@ -21,27 +22,39 @@ async def get_available_tools(session: Optional[Any] = None) -> List[Dict[str, A
     支持渐进式加载：如果提供了 session，只返回会话中已激活的 MCP 工具；
     否则返回所有 MCP 工具（兼容旧模式）。
 
+    会话级 schema 缓存：以"当前激活的 MCP server 集合"为 key，
+    激活状态不变时直接返回上次结果（内置工具 schema 与 blocked/
+    权限过滤对同一会话是稳定的）。
+
     Args:
         session: 可选的 Session 实例，用于渐进式加载 MCP 工具
 
     Returns:
         OpenAI tools 格式的列表
     """
+    conf = Config.get_instance('aichat')
+
+    # 先确保 default_active 的 server 已激活（可能改变激活集合，须在缓存判断前执行）
+    if session is not None and conf.enable_mcp and mcp_session_manager is not None:
+        await mcp_session_manager.ensure_default_servers_activated(session.session_id)
+
+    # 缓存判断：key = 当前激活的 MCP server 集合
+    cache_key: Optional[frozenset] = None
+    if session is not None:
+        active = mcp_session_manager.get_active_servers(session.session_id) if mcp_session_manager else set()
+        cache_key = frozenset(active)
+        cached = getattr(session, '_tool_schemas_cache', None)
+        if cached is not None and cached[0] == cache_key:
+            logger.debug(f"[MCP] schema 缓存命中，共 {len(cached[1])} 个工具")
+            return cached[1]
+
     # 获取内置工具
     tools = _get_registry_tools()
 
     # 获取 MCP 工具（如果启用）
     try:
-        conf = Config.get_instance('aichat')
-        if conf.enable_mcp:
-            if mcp_session_manager is None:
-                logger.debug("[MCP] session_manager 未初始化，跳过 MCP 工具加载")
-                return tools
-
+        if conf.enable_mcp and mcp_session_manager is not None:
             if session:
-                # 确保 default_active 的 server 在新会话中自动激活
-                await mcp_session_manager.ensure_default_servers_activated(session.session_id)
-
                 # 渐进式加载：只获取会话中已激活的 MCP 工具
                 active_servers = mcp_session_manager.get_active_servers(session.session_id)
                 if active_servers:
@@ -56,6 +69,8 @@ async def get_available_tools(session: Optional[Any] = None) -> List[Dict[str, A
                 mcp_tools_list = await mcp_tool_bridge.get_tool_schemas()
                 tools.extend(mcp_tools_list)
                 logger.info(f"[MCP] 加载所有 {len(mcp_tools_list)} 个 MCP 工具（无会话模式）")
+        elif conf.enable_mcp:
+            logger.debug("[MCP] session_manager 未初始化，跳过 MCP 工具加载")
     except Exception as e:
         logger.exception(f"[MCP] 获取 MCP 工具失败: {e}")
 
@@ -74,6 +89,19 @@ async def get_available_tools(session: Optional[Any] = None) -> List[Dict[str, A
                 t for t in tools
                 if t["function"]["name"] not in blocked
             ]
+
+    # 过滤无权限工具（schema 层）：SUPERUSER 工具对普通用户不可见
+    # 执行层校验在 chat_executor._execute_tool_call（防幻觉调用绕过）
+    if session is not None:
+        uid = getattr(session, 'user_id', None)
+        tools = [
+            t for t in tools
+            if get_tool_permission(t["function"]["name"]) == "USER" or is_superuser(uid)
+        ]
+
+    # 写入会话级缓存（key 为激活集合，激活状态变化后自动失效）
+    if session is not None and cache_key is not None:
+        session._tool_schemas_cache = (cache_key, tools)
 
     return tools
 

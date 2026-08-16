@@ -2,6 +2,8 @@
 import asyncio
 from typing import Tuple, List, Optional, Set
 from loguru import logger
+import httpx
+
 from hoshino import Bot, Event, Service
 from hoshino.permission import ADMIN, SUPERUSER
 from hoshino.typing import T_State
@@ -13,7 +15,7 @@ from .config import Config
 from .infra import close_all_gateways
 from .persona import persona_manager
 from .session import Session, SessionManager, session_manager
-from hoshino.util import aiohttpx, get_event_imageurl
+from hoshino.util import get_event_imageurl
 from hoshino.util.message_util import extract_images_from_reply
 
 # MCP 导入
@@ -57,32 +59,39 @@ async def init_mcp_servers():
         
         # 3. 预连接所有启用的 server（确保首次激活无延迟）
         logger.info("正在预连接所有 MCP servers...")
-        connect_tasks = []
-        for server_config in conf.mcp_servers:
-            if server_config.enabled:
-                task = _connect_server_with_timeout(server_config)
-                connect_tasks.append((server_config.id, task))
         
-        # 并行连接，设置超时
+        async def _connect_one(server_config):
+            """单个 server 预连接（独立超时，失败不影响其它 server）"""
+            try:
+                success = await asyncio.wait_for(
+                    _connect_server_with_timeout(server_config), timeout=30
+                )
+                return server_config.id, success
+            except asyncio.TimeoutError:
+                return server_config.id, False
+            except Exception:
+                return server_config.id, False
+
+        # 真并行连接：所有 server 同时发起，总耗时 = max(各 server) 而非累加
+        results = await asyncio.gather(
+            *[_connect_one(sc) for sc in conf.mcp_servers if sc.enabled],
+            return_exceptions=True,
+        )
+
         connected_count = 0
         failed_servers = []
-        for server_id, task in connect_tasks:
-            try:
-                success = await asyncio.wait_for(task, timeout=30)
-                if success:
-                    connected_count += 1
-                    logger.info(f"MCP server '{server_id}' 预连接成功")
-                else:
-                    failed_servers.append(server_id)
-                    logger.warning(f"MCP server '{server_id}' 预连接失败")
-            except asyncio.TimeoutError:
+        for item in results:
+            if not (isinstance(item, tuple) and len(item) == 2):
+                continue
+            server_id, success = item
+            if success:
+                connected_count += 1
+                logger.info(f"MCP server '{server_id}' 预连接成功")
+            else:
                 failed_servers.append(server_id)
-                logger.warning(f"MCP server '{server_id}' 预连接超时")
-            except Exception as e:
-                failed_servers.append(server_id)
-                logger.exception(f"MCP server '{server_id}' 预连接异常: {e}")
+                logger.warning(f"MCP server '{server_id}' 预连接失败或超时")
         
-        logger.info(f"MCP 系统初始化完成：{connected_count}/{len(connect_tasks)} 个 server 已连接")
+        logger.info(f"MCP 系统初始化完成：{connected_count}/{len(results)} 个 server 已连接")
         if failed_servers:
             logger.warning(f"连接失败的 servers: {', '.join(failed_servers)}（将在激活时重试）")
         
@@ -907,8 +916,9 @@ async def _process_character_images(event: Event, bot: Bot, save_as_global: bool
     
     for i, image_url in enumerate(image_urls, 1):
         try:
-            resp = await aiohttpx.get(image_url)
-            if not resp.ok:
+            async with httpx.AsyncClient(timeout=30.0, verify=False, follow_redirects=True) as client:
+                resp = await client.get(image_url)
+            if resp.status_code != 200:
                 fail_count += 1
                 fail_reasons.append(f"第{i}张：下载失败 HTTP {resp.status_code}")
                 continue

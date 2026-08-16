@@ -128,7 +128,8 @@ class TaskManager:
                     kwargs={'task_id': task.id},
                     run_date=task.execute_at,
                     id=f"aichat_task_{task.id}",
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=1,  # 防止上次执行未完成时重复触发同一任务
                 )
                 self._job_ids[task.id] = job.id
                 logger.info(f"已调度一次性任务 {task.id}: {task.execute_at}")
@@ -139,6 +140,7 @@ class TaskManager:
                     kwargs={'task_id': task.id},
                     id=f"aichat_task_{task.id}",
                     replace_existing=True,
+                    max_instances=1,  # 防止上次执行未完成时重复触发同一任务
                     **self._cron_to_kwargs(task.cron_expression)
                 )
                 self._job_ids[task.id] = job.id

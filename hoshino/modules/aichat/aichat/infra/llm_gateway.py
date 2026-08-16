@@ -82,6 +82,7 @@ class LLMGateway:
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.max_retries = max(0, max_retries)
+        self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
         # client 注入（测试用）时连接池生命周期归调用方
         self._owns_client = client is None
@@ -233,12 +234,33 @@ class LLMGateway:
 _gateways: Dict[str, LLMGateway] = {}
 
 
-def get_gateway(api_base: str, api_key: str) -> LLMGateway:
-    """获取指定 api_base 的共享网关；api_key 变化时重建"""
+def get_gateway(
+    api_base: str,
+    api_key: str,
+    *,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
+    read_timeout: float = DEFAULT_READ_TIMEOUT,
+) -> LLMGateway:
+    """获取指定 api_base 的共享网关；api_key 或参数变化时重建
+
+    参数默认值仅作兜底；生产调用方（chat_executor）应传入 Config 中的值。
+    """
     key = api_base.rstrip("/")
     gateway = _gateways.get(key)
-    if gateway is None or gateway.api_key != api_key:
-        gateway = LLMGateway(api_base, api_key)
+    if (
+        gateway is None
+        or gateway.api_key != api_key
+        or gateway.max_retries != max_retries
+        or gateway.read_timeout != read_timeout
+    ):
+        gateway = LLMGateway(
+            api_base,
+            api_key,
+            max_retries=max_retries,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+        )
         _gateways[key] = gateway
     return gateway
 

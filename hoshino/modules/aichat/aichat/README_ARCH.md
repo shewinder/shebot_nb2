@@ -42,7 +42,7 @@
 ### 6. 其它既有约定（重申）
 
 - 禁止函数内 import；类型注解齐全；注释解释"为什么"。
-- 工具返回统一用 `tools.registry.ok() / fail()`（P3 随权限接线收敛到 Result）。
+- 工具返回统一用 `tools.registry.ok() / fail()`（chat_executor 执行层统一整形）。
 - 出站消息统一经 Reply 管道（`reply.build_reply` / `reply.send_reply`），
   图片标识符解析失败降级为字面文本，禁止静默丢弃。
 - 未经明确指令不得 git commit。
@@ -73,16 +73,15 @@ aichat/
 | P0 | 统一错误/日志规范、测试锚点、规范文档 | ✅ 已落地 |
 | P1 | LLMGateway、config 访问、SessionStore（锁+GC）+ 最小接入 | ✅ 已落地 |
 | P2 | AgentLoop/AgentTask 统一执行路径、Reply 管道（图片 bug 修复+兜底）、Session 生命周期内聚 | ✅ 已落地 |
-| P3 | 工具权限接线、schema 缓存、后台任务全局上限+表清理、scheduler 执行锁、MCP 真并行启动、gateway 参数接入配置 | ⬜ 待做 |
+| P3 | 工具权限双层接线、chat_executor 接口定型、gateway 参数接配置、schema 缓存、后台任务上限/表清理、定时任务执行锁、MCP 真并行 | ✅ 已落地 |
 | P4 | `__init__.py` 命令层拆分、死代码清理、可观测性（成本/延迟/错误率） | ⬜ 待做 |
 
 ## 四、已知债务与决策记录
 
-- `__init__.py` 角色卡导入处仍使用 `aiohttpx`（P3 顺手替换）。
-- `infra/llm_gateway` 的超时/重试参数尚未接配置项（P3 与 config 访问层一起做）。
-- 工具返回仍是 ok()/fail() dict，尚未收敛到 Result（P3 随权限接线一起做）。
 - 文件 IO 异步化已明确**暂不实施**（用户决策）：async 函数中的同步小文件读写维持现状，
   若未来记忆/图片文件变大成为实测瓶颈再评估 `asyncio.to_thread` 方案。
 - `max_history` 配置字段已**删除**（用户决策：从未生效，不保留）。
 - `agent_loop._resolve_api_config` 保留"无 profile 时回落 `subagent_profiles[0]`"的
   既有怪癖（影响 bg/scheduled 的 API 归属），未改变，详见 docs/p2-agent-loop-design.md。
+- 工具权限默认全 `USER`（用户决策 A1）：机制已接通，管理员经
+  `Config.tool_permissions` 收紧（如 `{"execute_script": "SUPERUSER"}`）。

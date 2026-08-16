@@ -88,6 +88,13 @@ class BackgroundTaskManager:
                 f"请等待完成后提交新任务"
             )
 
+        # 全局并发上限（防止大量用户同时提交导致成本失控）
+        global_running = sum(1 for t in self.tasks.values() if t.status in ('pending', 'running'))
+        if global_running >= conf.bg_task_max_total:
+            raise RuntimeError(
+                f"后台任务已达全局上限（{conf.bg_task_max_total} 个），请稍后再试"
+            )
+
         task = BackgroundTask(
             id=str(uuid.uuid4())[:8],
             user_id=user_id,
@@ -165,6 +172,21 @@ class BackgroundTaskManager:
             task.error = str(e)
             task.completed_at = datetime.now()
             await self._send_result(task, f"任务执行失败: {str(e)}", None)
+
+        self._prune_finished()
+
+    def _prune_finished(self) -> None:
+        """滚动清理已完成任务记录，仅保留最近 conf.bg_task_keep_finished 条"""
+        finished = [
+            t for t in self.tasks.values()
+            if t.status in ('done', 'failed', 'cancelled')
+        ]
+        finished.sort(key=lambda t: t.completed_at or t.created_at, reverse=True)
+        keep = max(0, conf.bg_task_keep_finished)
+        for t in finished[keep:]:
+            del self.tasks[t.id]
+        if len(finished) > keep:
+            logger.debug(f"[bg] 清理 {len(finished) - keep} 条历史任务记录，保留最近 {keep} 条")
 
     async def _send_result(self, task: BackgroundTask, content: str, session):
         try:

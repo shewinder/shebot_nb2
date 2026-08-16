@@ -111,6 +111,18 @@ class Config(BaseConfig):
     max_tool_rounds: int = 20           # 单次对话最大工具调用轮数
     subagent_max_rounds: int = 10       # 子 Agent 最大工具调用轮数
     subagent_profiles: List[SubAgentProfile] = []  # 子 Agent 模型配置
+    # 工具权限覆盖：{工具名: "SUPERUSER"|"USER"}，覆盖默认权限表（默认全 USER）
+    tool_permissions: Dict[str, str] = {}
+    tool_timeout: float = 300.0         # 单次工具执行兜底超时（秒）
+
+    # LLM Gateway 参数
+    llm_connect_timeout: float = 10.0   # 连接超时（秒）
+    llm_read_timeout: float = 120.0     # 读取超时（秒）
+    llm_max_retries: int = 2            # 429/5xx/网络错误重试次数
+
+    # 后台任务限制
+    bg_task_max_total: int = 10         # 全局并发后台任务上限
+    bg_task_keep_finished: int = 50     # 保留最近 N 条已完成任务记录
 
     # 记忆系统配置
     enable_memory: bool = True

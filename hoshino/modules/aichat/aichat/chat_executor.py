@@ -14,9 +14,10 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from loguru import logger
 
 from .config import Config
-from .infra import LLMError, get_gateway, sanitize
+from .infra import AppError, LLMError, get_gateway, sanitize
 from .tools.access import get_available_tools, get_tool_function
-from .tools.registry import get_injectable_params
+from .tools.permission import check_permission, get_tool_permission
+from .tools.registry import get_injectable_params, ok, fail
 from hoshino.util import log_json, truncate_log
 
 if TYPE_CHECKING:
@@ -31,8 +32,21 @@ class ChatResult:
     content: Optional[str] = None
     reasoning_content: Optional[str] = None
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
-    error: Optional[str] = None
+    error: Optional[AppError] = None
     usage: Optional[Dict[str, int]] = None
+
+
+@dataclass
+class APIResponse:
+    """单次 LLM API 调用的类型化结果（替代裸 dict）"""
+    content: Optional[str] = None
+    reasoning_content: Optional[str] = None
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    finish_reason: str = ""
+    # 从原始响应提取的完整 assistant 消息（含 tool_calls 原始结构），供写回历史
+    assistant_message: Optional[Dict[str, Any]] = None
+    usage: Optional[Dict[str, int]] = None
+    error: Optional[AppError] = None
 
 
 class ChatExecutor:
@@ -95,15 +109,15 @@ class ChatExecutor:
         api_config: Dict[str, Any],
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> APIResponse:
         """单次 AI API 调用（经 LLMGateway：超时/重试/脱敏）"""
         if not api_config or not api_config.get("api_key"):
             logger.warning("AI API 未配置或密钥为空")
-            return {"error": "API 未配置", "content": None}
+            return APIResponse(error=AppError("API 未配置", code="llm.unconfigured"))
 
         if not messages:
             logger.error("消息列表为空")
-            return {"error": "消息列表为空", "content": None}
+            return APIResponse(error=AppError("消息列表为空", code="llm.empty_messages"))
 
         call_tools = tools if (tools and api_config.get("supports_tools", False)) else None
         if call_tools:
@@ -131,7 +145,13 @@ class ChatExecutor:
 
         logger.info(f"{self._tag} 调用 AI API: model={api_config['model']}, Payload: {log_json(truncate_log(log_payload))}")
 
-        gateway = get_gateway(api_config["api_base"], api_config["api_key"])
+        gateway = get_gateway(
+            api_config["api_base"],
+            api_config["api_key"],
+            max_retries=conf.llm_max_retries,
+            connect_timeout=conf.llm_connect_timeout,
+            read_timeout=conf.llm_read_timeout,
+        )
 
         try:
             result = await gateway.chat(
@@ -144,18 +164,24 @@ class ChatExecutor:
             )
         except LLMError as e:
             logger.error(f"{self._tag} AI API 调用失败: {e}")
-            return {"error": str(e), "content": None}
+            return APIResponse(error=e)
 
         logger.info(f"{self._tag} AI API 响应: {log_json(sanitize(result.raw))}")
 
-        return {
-            "content": result.content,
-            "reasoning_content": result.reasoning_content,
-            "tool_calls": result.tool_calls,
-            "finish_reason": result.finish_reason,
-            "raw_response": result.raw,
-            "usage": result.usage,
-        }
+        assistant_message: Optional[Dict[str, Any]] = None
+        if result.raw:
+            choices = result.raw.get("choices") or []
+            if choices:
+                assistant_message = choices[0].get("message")
+
+        return APIResponse(
+            content=result.content,
+            reasoning_content=result.reasoning_content,
+            tool_calls=result.tool_calls,
+            finish_reason=result.finish_reason or "",
+            assistant_message=assistant_message,
+            usage=result.usage,
+        )
 
     async def _execute_tool_call(
         self,
@@ -189,6 +215,22 @@ class ChatExecutor:
                 "content": json.dumps({"success": False, "error": f"未知工具: {function_name}"}, ensure_ascii=False),
             }
 
+        # 执行层权限校验：防模型幻觉调用未出现在 schema 中的工具名绕过
+        level = get_tool_permission(function_name)
+        session = context.get('session') if context else None
+        has_perm, reason = check_permission(
+            level,
+            user_id=getattr(session, 'user_id', None) if session else None,
+            event=context.get('event') if context else None,
+        )
+        if not has_perm:
+            logger.warning(f"{self._tag} 工具权限拒绝: {function_name} (需要 {level})")
+            return {
+                "tool_call_id": tool_id,
+                "role": "tool",
+                "content": json.dumps({"success": False, "error": reason}, ensure_ascii=False),
+            }
+
         if context:
             injectable = get_injectable_params(tool_func)
             for param_name, type_name in injectable.items():
@@ -202,50 +244,20 @@ class ChatExecutor:
                     arguments[param_name] = context.get('event')
 
         try:
-            result = await tool_func(**arguments)
-
-            success = result.get("success", False)
-            content = result.get("content", "")
-            error = result.get("error")
-            metadata = result.get("metadata", {})
-
-            # MCP 图像自动管道
-            images = result.get("images", [])
-            if images:
-                identifiers = []
-                for img in images:
-                    if isinstance(img, str) and img.startswith("data:"):
-                        try:
-                            identifier = await self.session.store_ai_image(img)
-                            identifiers.append(identifier)
-                        except Exception:
-                            logger.exception(f"自动存储 MCP 图像失败")
-                if identifiers:
-                    content = content + "\n" + " ".join(identifiers)
-
-            # 简化日志中的 base64 图片数据
-            if "data:image" in content:
-                pattern = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}'
-                content = re.sub(
-                    pattern,
-                    lambda m: m.group(0)[:50] + "...[图片数据已省略]",
-                    content
-                )
-
-            content_for_ai = {
-                "success": success,
-                "content": content,
-                "error": error
-            }
-            if metadata:
-                content_for_ai["metadata"] = metadata
-
+            result = await asyncio.wait_for(
+                tool_func(**arguments),
+                timeout=conf.tool_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"{self._tag} 工具执行超时（>{conf.tool_timeout}s）: {function_name}")
             return {
                 "tool_call_id": tool_id,
                 "role": "tool",
-                "content": json.dumps(content_for_ai, ensure_ascii=False),
+                "content": json.dumps(
+                    {"success": False, "error": f"工具执行超时: {function_name}"},
+                    ensure_ascii=False,
+                ),
             }
-
         except Exception as e:
             logger.exception(f"工具执行失败: {e}")
             return {
@@ -253,6 +265,50 @@ class ChatExecutor:
                 "role": "tool",
                 "content": json.dumps({"success": False, "error": str(e)}, ensure_ascii=False),
             }
+
+        return await self._process_tool_result(tool_id, result)
+
+    async def _process_tool_result(
+        self,
+        tool_id: str,
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """整形工具返回：MCP 图片管道 + base64 脱敏 + 标准 ok/fail 结构"""
+        success = result.get("success", False)
+        content = result.get("content", "")
+        error = result.get("error")
+        metadata = result.get("metadata", {})
+
+        # MCP 图像自动管道
+        images = result.get("images", [])
+        if images:
+            identifiers = []
+            for img in images:
+                if isinstance(img, str) and img.startswith("data:"):
+                    try:
+                        identifier = await self.session.store_ai_image(img)
+                        identifiers.append(identifier)
+                    except Exception:
+                        logger.exception(f"自动存储 MCP 图像失败")
+            if identifiers:
+                content = content + "\n" + " ".join(identifiers)
+
+        # 简化日志中的 base64 图片数据
+        if "data:image" in content:
+            pattern = r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}'
+            content = re.sub(
+                pattern,
+                lambda m: m.group(0)[:50] + "...[图片数据已省略]",
+                content
+            )
+
+        content_for_ai = ok(content, metadata) if success else fail(content, error=error, metadata=metadata)
+
+        return {
+            "tool_call_id": tool_id,
+            "role": "tool",
+            "content": json.dumps(content_for_ai, ensure_ascii=False),
+        }
 
     async def _chat_with_api(
         self,
@@ -268,12 +324,12 @@ class ChatExecutor:
             max_tool_rounds = conf.max_tool_rounds
 
         if not tools or not api_config.get("supports_tools", False):
-            result = await self._call_ai_api(messages, api_config, tools=None)
+            resp = await self._call_ai_api(messages, api_config, tools=None)
             return ChatResult(
-                content=result.get("content"),
-                reasoning_content=result.get("reasoning_content"),
-                error=result.get("error"),
-                usage=result.get("usage"),
+                content=resp.content,
+                reasoning_content=resp.reasoning_content,
+                error=resp.error,
+                usage=resp.usage,
             )
 
         current_messages = messages.copy()
@@ -287,36 +343,32 @@ class ChatExecutor:
                 tools = await get_available_tools(session=self.session)
                 logger.debug(f"{self._tag} [MCP] 第 {round_num + 1} 轮重新获取工具，共 {len(tools) if tools else 0} 个")
 
-            result = await self._call_ai_api(current_messages, api_config, tools=tools)
+            resp = await self._call_ai_api(current_messages, api_config, tools=tools)
 
-            usage = result.get("usage")
-            if usage and isinstance(usage, dict):
-                total_usage["prompt_tokens"] += usage.get("prompt_tokens", 0) or 0
-                total_usage["completion_tokens"] += usage.get("completion_tokens", 0) or 0
-                total_usage["total_tokens"] += usage.get("total_tokens", 0) or 0
+            if resp.usage and isinstance(resp.usage, dict):
+                total_usage["prompt_tokens"] += resp.usage.get("prompt_tokens", 0) or 0
+                total_usage["completion_tokens"] += resp.usage.get("completion_tokens", 0) or 0
+                total_usage["total_tokens"] += resp.usage.get("total_tokens", 0) or 0
 
-            if result.get("error"):
+            if resp.error:
                 return ChatResult(
-                    error=result["error"],
+                    error=resp.error,
                     tool_results=all_tool_results,
                     usage=total_usage if total_usage["total_tokens"] > 0 else None,
                 )
 
-            content = result.get("content")
-            tool_calls = result.get("tool_calls", [])
-
-            if not tool_calls:
+            if not resp.tool_calls:
                 return ChatResult(
-                    content=content,
-                    reasoning_content=result.get("reasoning_content"),
+                    content=resp.content,
+                    reasoning_content=resp.reasoning_content,
                     tool_results=all_tool_results,
                     usage=total_usage if total_usage["total_tokens"] > 0 else None,
                 )
 
-            if content and on_content:
-                await on_content(content)
+            if resp.content and on_content:
+                await on_content(resp.content)
 
-            assistant_message = result.get("raw_response", {}).get("choices", [{}])[0].get("message", {})
+            assistant_message = resp.assistant_message or {}
             current_messages.append(assistant_message)
             self.session.add_raw_message(assistant_message)
 
@@ -324,7 +376,7 @@ class ChatExecutor:
             async def _run_one(tc):
                 return tc, await self._execute_tool_call(tc, context=context)
 
-            results = await asyncio.gather(*[_run_one(tc) for tc in tool_calls])
+            results = await asyncio.gather(*[_run_one(tc) for tc in resp.tool_calls])
 
             for tool_call, tool_result in results:
                 all_tool_results.append({
@@ -348,7 +400,7 @@ class ChatExecutor:
         logger.warning(f"达到最大工具调用轮数限制: {max_tool_rounds}")
         return ChatResult(
             content="工具调用次数过多，请简化请求",
-            error="达到最大工具调用轮数限制",
+            error=AppError("达到最大工具调用轮数限制", code="agent.max_rounds"),
             tool_results=all_tool_results,
             usage=total_usage if total_usage["total_tokens"] > 0 else None,
         )

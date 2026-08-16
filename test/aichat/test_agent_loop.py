@@ -37,8 +37,11 @@ from hoshino.modules.aichat.aichat.agent_loop import (  # noqa: E402
     run_agent_loop,
 )
 from hoshino.modules.aichat.aichat.chat_executor import ChatResult  # noqa: E402
-from hoshino.modules.aichat.aichat.infra import llm_gateway as lg  # noqa: E402
+from hoshino.modules.aichat.aichat.config import Config  # noqa: E402
+from hoshino.modules.aichat.aichat.infra import AppError, llm_gateway as lg  # noqa: E402
 from hoshino.modules.aichat.aichat.session import Session, session_manager  # noqa: E402
+
+conf = Config.get_instance('aichat')
 
 _MOCK_BASE = "https://api.mock"
 _OK_BODY = {
@@ -52,7 +55,13 @@ def _install_mock_gateway() -> None:
         return httpx.Response(200, json=_OK_BODY, request=request)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    lg._gateways[_MOCK_BASE] = lg.LLMGateway(_MOCK_BASE, "sk-test", client=client, max_retries=0)
+    # 参数必须与 get_gateway 工厂比较逻辑一致（与 conf 默认值相同），否则会被判定过期重建
+    lg._gateways[_MOCK_BASE] = lg.LLMGateway(
+        _MOCK_BASE, "sk-test", client=client,
+        max_retries=conf.llm_max_retries,
+        connect_timeout=conf.llm_connect_timeout,
+        read_timeout=conf.llm_read_timeout,
+    )
 
 
 class FakeImageStore:
@@ -116,7 +125,8 @@ class TestRunAgentLoop(unittest.IsolatedAsyncioTestCase):
         with patch.object(agent_loop.api_manager, "get_api_config", return_value=None):
             task = AgentTask(task="任务", system_prompt="x", user_id=1)
             result = await run_agent_loop(task)
-        self.assertEqual(result.result.error, "API 未配置")
+        self.assertIsInstance(result.result.error, AppError)
+        self.assertEqual(result.result.error.code, "llm.unconfigured")
         self.assertNotIn(result.session.session_id, session_manager.sessions)
 
     async def test_session_flags(self):

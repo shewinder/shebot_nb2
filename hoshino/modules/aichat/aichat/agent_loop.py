@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from .api import _build_api_config_dict, api_manager
 from .chat_executor import ChatExecutor, ChatResult
 from .config import Config
+from .infra import AppError
 from .reply import IMAGE_TOKEN_RE
 from .session import Session, session_manager
 
@@ -174,7 +175,10 @@ async def _run(task: AgentTask, session: Session) -> AgentResult:
     api_config = task.api_config or _resolve_api_config(task.profile)
     if not api_config or not api_config.get("api_key"):
         logger.error(f"[Agent:{task.label}] API 未配置，无法执行子任务")
-        return AgentResult(result=ChatResult(error="API 未配置"), session=session)
+        return AgentResult(
+            result=ChatResult(error=AppError("API 未配置", code="llm.unconfigured")),
+            session=session,
+        )
 
     # 预激活 SKILL，省去首轮 activate_skill 调用
     if task.preactivate_skills:

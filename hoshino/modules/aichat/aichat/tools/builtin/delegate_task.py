@@ -173,7 +173,7 @@ async def delegate_task(
 
         if result.error and not content:
             logger.warning(f"[SubAgent] 子任务失败: {result.error}")
-            return fail(f"子任务执行失败: {result.error}", error=result.error)
+            return fail(f"子任务执行失败: {result.error}", error=str(result.error))
 
         if result.error:
             logger.warning(f"[SubAgent] 子任务部分完成: {result.error}")
