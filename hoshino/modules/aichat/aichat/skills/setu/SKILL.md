@@ -117,7 +117,7 @@ disable-model_invocation: false
 **用户**: "推荐点我喜欢的"
 
 **AI 执行**:
-1. `read_file` 读取用户画像（`aichat/preferences/{user_id}.md`）
+1. `read_preference` 读取用户画像（自动读取当前用户）
 2. 从画像提取高频标签（如"兽耳"、"蓝发"）
 3. **选择API**：
    - 简单标签/随机推荐 → Lolicon API

@@ -169,7 +169,7 @@ class TestRegistrationCompleteness(unittest.TestCase):
 
     EXPECTED_TOOLS = {
         "run_background_task", "wait_and_resume", "delegate_task", "get_current_time",
-        "execute_script", "fetch_url", "read_file", "write_file", "query_group_messages",
+        "execute_script", "fetch_url", "read_preference", "write_preference", "query_group_messages",
         "activate_mcp_server", "list_active_mcp_servers", "read_memory", "write_memory",
         "schedule_task", "manage_service", "activate_skill", "web_search", "get_weather",
         "store_images", "create_skill", "update_skill", "delete_skill", "rollback_skill",

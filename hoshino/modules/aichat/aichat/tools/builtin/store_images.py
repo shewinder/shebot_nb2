@@ -5,6 +5,7 @@ AI 工具：存储图片到会话
 import base64
 import os
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
@@ -18,6 +19,24 @@ from ..registry import tool_registry, ok, fail
 
 if TYPE_CHECKING:
     from ...session import Session
+
+# 本地图片读取的允许根目录（原 file_storage 的路径校验，随通用读写工具一并收敛于此）
+ALLOWED_ROOT = Path("data").resolve()
+
+
+def _check_path(path: str) -> tuple[bool, Path]:
+    """检查路径是否合法（禁止绝对路径与路径遍历，且必须在 data 目录下）"""
+    try:
+        if path.startswith("/") or ".." in path:
+            return False, Path()
+
+        full_path = (ALLOWED_ROOT / path).resolve()
+        if not str(full_path).startswith(str(ALLOWED_ROOT)):
+            return False, Path()
+
+        return True, full_path
+    except Exception:
+        return False, Path()
 
 
 async def _download_image_to_base64(image_url: str, need_anti_harmony: bool = True) -> Optional[str]:
@@ -91,8 +110,6 @@ def _read_local_image(file_path: str) -> Optional[str]:
     Args:
         file_path: 相对于 data/ 目录的图片文件路径
     """
-    from .file_storage import _check_path
-
     is_valid, full_path = _check_path(file_path)
     if not is_valid:
         logger.error(f"非法的文件路径: {file_path}")

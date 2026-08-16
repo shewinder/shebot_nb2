@@ -56,10 +56,10 @@ description: 识别到图片点评、偏好学习或画像查询意图时激活�
 ### 用户发图
 
 1. 分析图片，输出简短点评和关键维度。
-2. 调用 `read_file(path="aichat/preferences/{user_id}.md")` 读取画像。
+2. 调用 `read_preference` 读取画像（自动读取当前用户）。
 3. 判断这张图强化、削弱或新增了什么模式。
 4. 按信号权重写回画像；如果只是低权重浏览，只轻量更新“最近事件/边界与待观察/证据摘要”。
-5. 控制长度后调用 `write_file` 写回完整画像。
+5. 控制长度后调用 `write_preference` 写回完整画像。
 
 多图同时发送时：逐张做简短判断，再归纳共同模式；不要把某一张图的局部元素扩展到整批图片。
 
@@ -152,11 +152,10 @@ description: 识别到图片点评、偏好学习或画像查询意图时激活�
 ## 工具约束
 
 ```python
-user_id = session.user_id
-read_file(path=f"aichat/preferences/{user_id}.md")
-write_file(path=f"aichat/preferences/{user_id}.md", content="...")
+read_preference()          # 自动读取当前用户画像
+write_preference(content=...)  # 自动写入当前用户画像
 ```
 
 - 禁止使用 `write_memory` / `read_memory`。
-- 画像路径始终是 `aichat/preferences/{user_id}.md`，相对于 data 目录。
+- 画像由系统按当前用户自动定位，无需也无法指定 user_id 或路径。
 - 写回必须是完整、精炼、受长度控制的 Markdown。

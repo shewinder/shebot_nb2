@@ -13,10 +13,10 @@ from . import web_search
 from . import execute_script
 from . import fetch_url
 from . import store_images
-from . import file_storage
+from . import preference_tools
 from . import background_task
 from . import memory_tools
 from . import delegate_task
 from . import groupmsg
 
-__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "skill_admin", "web_search", "execute_script", "fetch_url", "store_images", "file_storage", "memory_tools", "background_task", "delegate_task", "groupmsg"]
+__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "skill_admin", "web_search", "execute_script", "fetch_url", "store_images", "preference_tools", "background_task", "memory_tools", "delegate_task", "groupmsg"]
