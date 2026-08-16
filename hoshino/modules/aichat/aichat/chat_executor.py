@@ -219,8 +219,8 @@ class ChatExecutor:
             logger.warning(f"{self._tag} 工具权限拒绝: {function_name} (需要 {level})")
             return self._tool_error(tool_id, reason)
 
+        injectable = get_injectable_params(tool_func)
         if context:
-            injectable = get_injectable_params(tool_func)
             for param_name, type_name in injectable.items():
                 if param_name in arguments:
                     continue
@@ -238,7 +238,11 @@ class ChatExecutor:
             except ValidationError as e:
                 logger.warning(f"{self._tag} 工具参数校验失败: {function_name}: {e}")
                 return self._tool_error(tool_id, f"参数校验失败: {e}")
-            arguments = {tool_info.input_param: model_instance}
+            # 用模型实例替换原始参数字段，保留已注入的 session/bot/event
+            for key in list(arguments.keys()):
+                if key not in injectable:
+                    arguments.pop(key)
+            arguments[tool_info.input_param] = model_instance
 
         start = time.perf_counter()
         try:

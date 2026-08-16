@@ -7,7 +7,7 @@ description: 当用户请求访问 Pixiv 数据、Pixiv 作品详情、PID 信�
 
 ## 数据源
 
-使用 `fetch_url` 访问已知 API。`fetch_url` 只接收完整 URL，不支持单独传 params，因此必须把查询参数拼到 URL 中。
+使用 `curl` 工具访问已知 API（url 参数直接带查询串，或按需使用 headers/data）。
 
 | 场景 | URL |
 |------|-----|
@@ -46,15 +46,14 @@ API 返回的原图 URL 通常在 `i.pximg.net` 域名下。需要直接访问�
 ### 查询 PID 作品
 
 1. 准备参数：`PID`。
-2. 调用 `fetch_url`：
-   `https://api.shewinder.win/pixiv/illust_detail?illust_id=PID`
+2. 调用 `curl(url="https://api.shewinder.win/pixiv/illust_detail?illust_id=PID")`
 3. 按字段规范整理标题、作者、标签、页数、收藏/浏览、图片 URL 等信息。
 
 ### 查询日榜
 
 1. 准备参数：`date=YYYY-MM-DD`；默认使用昨天日期，当天榜单可能未稳定。
 2. 准备模式：普通日榜用 `mode=day`，R18 用 `mode=day_r18`。
-3. 调用 `fetch_url` 获取 60 条。
+3. 调用 `curl` 获取 60 条。
 4. 只保留 `type == "illust"`，按榜单顺序选前 N 张。
 5. 按字段规范整理每个作品的数据。
 

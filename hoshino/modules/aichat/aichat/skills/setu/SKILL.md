@@ -67,8 +67,8 @@ disable-model_invocation: false
 **用户**: "来点色图"、"来张图"
 
 **AI 执行**:
-1. `fetch_url` 调用 API 获取随机图（**r18=2**, num=5）
-2. `send_images` 下载并准备图片（自动反和谐）
+1. `curl` 调用 API 获取随机图（**r18=2**, num=5）
+2. `store_images` 下载并准备图片（自动反和谐）
 3. 回复带图片和作品信息
 
 **回复示例**：
@@ -95,8 +95,8 @@ disable-model_invocation: false
 2. **选择API**：
    - 普通搜索 → Lolicon API（keyword=猫耳, **r18=2**, num=5）
    - 追求高质量/多标签 → Yande API（AI翻译为 cat_ears+order:score）
-3. `fetch_url` 调用 API
-4. `send_images` 发送结果
+3. `curl` 调用 API
+4. `store_images` 发送结果
 5. 如无结果，提示换关键词或尝试 Yande
 
 **回复示例**：
@@ -122,7 +122,7 @@ disable-model_invocation: false
 3. **选择API**：
    - 简单标签/随机推荐 → Lolicon API
    - 多标签组合/追求高质量 → Yande API
-4. `fetch_url` 调用搜索（**r18=2**）
+4. `curl` 调用搜索（**r18=2**）
 5. 匹配度高的优先展示
 
 **回复示例**：
@@ -151,9 +151,9 @@ disable-model_invocation: false
 **AI 执行**：
 1. 解析标签（如 `["少女", "泳装"]`）
 2. **AI 翻译**：将中文标签翻译为英文（如 少女→girl, 猫耳→cat_ears）
-3. `fetch_url` 调用 Yande API（`tags=girl+swimsuit+order:score`, limit=20）
+3. `curl` 调用 Yande API（`tags=girl+swimsuit+order:score`, limit=20）
 4. 按 `score` 排序，选择高分作品
-5. `send_images` 发送（最多2张，避免刷屏）
+5. `store_images` 发送（最多2张，避免刷屏）
 
 **常见标签对照**：
 | 中文 | 英文标签 |
@@ -189,8 +189,8 @@ disable-model_invocation: false
 
 **AI 执行**:
 1. ⚠️ 确认环境（群聊需检查配置，私聊默认可行）
-2. `fetch_url` 调用 API（r18=1, num=3）
-3. `send_images` 发送
+2. `curl` 调用 API（r18=1, num=3）
+3. `store_images` 发送
 
 **注意**：群聊中R18需确认群配置，建议私聊使用
 
@@ -211,7 +211,7 @@ disable-model_invocation: false
 ### 图片处理
 - **Lolicon**: `i.pixiv.re` → `pixiv.shewinder.win`
 - **Yande**: `files.yande.re` → `files.shewinder.win`
-- 使用 `send_images` 下载，自动反和谐
+- 使用 `store_images` 下载，自动反和谐
 - 引用返回的 `<ai_image_N>` 标识符
 
 ### 失败处理

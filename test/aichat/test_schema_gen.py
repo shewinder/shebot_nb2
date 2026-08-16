@@ -169,7 +169,7 @@ class TestRegistrationCompleteness(unittest.TestCase):
 
     EXPECTED_TOOLS = {
         "run_background_task", "wait_and_resume", "delegate_task", "get_current_time",
-        "execute_script", "fetch_url", "read_preference", "write_preference", "query_group_messages",
+        "execute_script", "curl", "read_preference", "write_preference", "query_group_messages",
         "activate_mcp_server", "list_active_mcp_servers", "read_memory", "write_memory",
         "schedule_task", "manage_service", "activate_skill", "web_search", "get_weather",
         "store_images", "create_skill", "update_skill", "delete_skill", "rollback_skill",
@@ -189,20 +189,23 @@ class TestExecutorPydanticModel(unittest.IsolatedAsyncioTestCase):
             n: int = Field(default=1, ge=1, le=5)
 
         @tool_registry.register
-        async def __test_model_tool(params: TestInput):
-            from hoshino.modules.aichat.aichat.tools.registry import ok
+        async def __test_model_tool(params: TestInput, session: Optional["Session"] = None):
+            from hoshino.modules.aichat.aichat.tools.registry import ok, fail
+            # 回归：Pydantic 校验后注入的 session 不能被抹掉（store_images Missing session bug）
+            if session is None:
+                return fail("Missing session", error="Missing session")
             return ok(f"{params.q}:{params.n}")
 
         session = Session("schema_exec_1", 1)
         executor = ChatExecutor(session)
 
-        # 合法参数：模型构造成功，函数收到模型实例
+        # 合法参数：模型构造成功，函数收到模型实例 + 注入的 session
         result = await executor._execute_tool_call(
             {"id": "c1", "function": {"name": "__test_model_tool", "arguments": '{"q": "hi", "n": 3}'}},
             context={"session": session},
         )
         parsed = json.loads(result["content"])
-        self.assertTrue(parsed["success"])
+        self.assertTrue(parsed["success"], parsed)
         self.assertIn("hi:3", parsed["content"])
 
         # 非法参数：pydantic 校验拦截，不进入函数

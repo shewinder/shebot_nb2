@@ -5,8 +5,8 @@
 执行完毕后返回摘要，不污染主对话上下文。
 
 子 Agent 类型（代码写死）：
-- search: 搜索汇总（web_search, fetch_url, get_current_time, weather）
-- vision: 视觉分析（fetch_url）
+- search: 搜索汇总（web_search, curl, get_current_time, weather）
+- vision: 视觉分析（curl）
 
 模型配置、工具白名单覆盖、max_rounds 覆盖在 SubAgentProfile 中配置。
 """

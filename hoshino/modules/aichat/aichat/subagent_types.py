@@ -25,11 +25,11 @@ SUBAGENT_TYPES: Dict[str, SubAgentTypeDef] = {
 执行规则：
 - 直接执行任务，不要反问或等待用户确认
 - 如果用户消息中包含图片，你可以直接看到并分析
-- 使用 web_search 和 fetch_url 全面收集信息
+- 使用 web_search 和 curl 全面收集信息
 - 完成后返回清晰的结构化结果摘要
 - 简洁直接，不添加无关评论或角色扮演
 - 如果任务无法完成，明确说明原因及已尝试的步骤""",
-        tool_names=frozenset({"web_search", "fetch_url", "get_current_time", "weather"}),
+        tool_names=frozenset({"web_search", "curl", "get_current_time", "weather"}),
     ),
     "vision": SubAgentTypeDef(
         name="vision",
