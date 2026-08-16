@@ -106,6 +106,7 @@ class Config(BaseConfig):
     # 用户自定义 SKILL 搜索路径（这些路径的 skill 不会被 git 跟踪）
     skill_user_paths: List[str] = ["data/skills"]
     skill_max_per_session: int = 5     # 单个会话最大激活 SKILL 数量
+    skill_max_user_skills: int = 50    # 用户 skill 总数上限（自更新系统）
 
     # 工具调用配置
     max_tool_rounds: int = 20           # 单次对话最大工具调用轮数

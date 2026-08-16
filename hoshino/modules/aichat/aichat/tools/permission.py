@@ -35,6 +35,12 @@ DEFAULT_TOOL_PERMISSIONS: Dict[str, PermissionLevel] = {
     "web_search": "USER",
     "weather": "USER",
     "get_current_time": "USER",
+    # skill 自更新：全局共享资源，默认仅超级用户可操作（A1 决策）
+    "create_skill": "SUPERUSER",
+    "update_skill": "SUPERUSER",
+    "delete_skill": "SUPERUSER",
+    "rollback_skill": "SUPERUSER",
+    "reload_skills": "SUPERUSER",
 }
 
 

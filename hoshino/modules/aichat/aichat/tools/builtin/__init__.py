@@ -8,6 +8,7 @@ from . import weather
 from . import environment
 from . import service_manage
 from . import skill_tools
+from . import skill_admin
 from . import web_search
 from . import execute_script
 from . import fetch_url
@@ -18,4 +19,4 @@ from . import memory_tools
 from . import delegate_task
 from . import groupmsg
 
-__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "web_search", "execute_script", "fetch_url", "store_images", "file_storage", "memory_tools", "background_task", "delegate_task", "groupmsg"]
+__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "skill_admin", "web_search", "execute_script", "fetch_url", "store_images", "file_storage", "memory_tools", "background_task", "delegate_task", "groupmsg"]

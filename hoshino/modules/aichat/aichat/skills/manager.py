@@ -23,18 +23,24 @@ class SkillManager:
         self.discovery = SkillDiscovery(self.user_paths)
         self._skills: Dict[str, Skill] = {}
         self._initialized = False
-    
+
+    def _sync_discovery_paths(self) -> None:
+        """把当前 user_paths 同步给 discovery（路径变更后热重载才能生效）"""
+        self.discovery.user_paths = [Path(p) for p in self.user_paths]
+
     def initialize(self) -> None:
         """初始化，发现所有 SKILL"""
         if self._initialized:
             return
         
+        self._sync_discovery_paths()
         self._skills = self.discovery.discover_all()
         self._initialized = True
         logger.info(f"SKILL 管理器初始化完成，共 {len(self._skills)} 个 SKILL")
     
     def reload(self) -> None:
         """重新加载所有 SKILL"""
+        self._sync_discovery_paths()
         self._skills = self.discovery.discover_all()
         logger.info(f"SKILL 重新加载完成，共 {len(self._skills)} 个 SKILL")
     

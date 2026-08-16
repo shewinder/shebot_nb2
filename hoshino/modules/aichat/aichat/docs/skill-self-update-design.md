@@ -1,8 +1,10 @@
 # 设计：Skill 自更新系统（Bot 自主创建/更新/回滚 Skill）
 
-> 状态：设计稿（待评审，评审通过后才动代码）
-> 决策点（已拍板）：A1 管理工具默认 SUPERUSER；B1 内置 skill 只读，
-> 更新内置 = 用户路径生成覆盖副本；C2 删除帮助文本中不存在的停用命令。
+> 状态：已评审通过并实施。决策记录：A1 管理工具默认 SUPERUSER；
+> B1 内置 skill 只读，更新内置 = 用户路径覆盖副本；C2 删除帮助文本中
+> 不存在的停用命令。第 9 节补充决策点按默认执行（备份固定 5 份、
+> 不做 test_skill 工具、上限为 Config 项 skill_max_user_skills=50）。
+> 实施中额外修复：SkillManager 热重载未同步 discovery.user_paths 的隐性 bug。
 > 关联：`../README_ARCH.md`（P0-P4 已落地的基础设施）
 
 ## 1. 目标

@@ -43,6 +43,4 @@ SKILL 系统：
   #使用 <skill名称>  激活指定 SKILL
   #技能列表  列出所有可用 SKILL
   #当前技能  查看已激活的 SKILL
-  #停用技能 <skill名称>  停用指定 SKILL
-  #停用所有技能  停用所有 SKILL
 ''')

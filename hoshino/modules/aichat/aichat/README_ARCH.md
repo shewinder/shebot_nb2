@@ -90,3 +90,8 @@ aichat/
   既有怪癖（影响 bg/scheduled 的 API 归属），未改变，详见 docs/p2-agent-loop-design.md。
 - 工具权限默认全 `USER`（用户决策 A1）：机制已接通，管理员经
   `Config.tool_permissions` 收紧（如 `{"execute_script": "SUPERUSER"}`）。
+- Skill 自更新系统（用户决策 A1/B1/C2）：5 个管理工具默认 `SUPERUSER`；
+  内置 skill 只读（更新自动转用户路径覆盖副本）；写前校验+备份（5 份轮换）+
+  审计（.changes.jsonl）+ reload 自检失败自动回滚。设计见
+  docs/skill-self-update-design.md。顺带修复 SkillManager 热重载未同步
+  discovery.user_paths 的隐性 bug。

@@ -17,6 +17,34 @@ from .model import Skill, SkillMetadata
 BUILTIN_SKILL_PATH = Path(__file__).parent
 
 
+def parse_frontmatter(content: str) -> tuple:
+    """解析 YAML frontmatter（读时解析与写前校验共用）
+
+    Returns:
+        (metadata_dict, body) 或 (None, content) 当 frontmatter 缺失/非法
+    """
+    # 匹配 --- 包围的 frontmatter
+    pattern = r'^---\s*\n(.*?)\n---\s*\n(.*)$'
+    match = re.match(pattern, content, re.DOTALL)
+
+    if not match:
+        logger.warning("SKILL.md 缺少 YAML frontmatter")
+        return None, content
+
+    try:
+        metadata = yaml.safe_load(match.group(1))
+        if not isinstance(metadata, dict):
+            logger.warning("SKILL.md frontmatter 不是有效的 YAML 对象")
+            return None, content
+
+        body = match.group(2)
+        return metadata, body
+
+    except yaml.YAMLError as e:
+        logger.warning(f"解析 SKILL.md frontmatter 失败: {e}")
+        return None, content
+
+
 class SkillDiscovery:
     """SKILL 发现器
     
@@ -87,7 +115,7 @@ class SkillDiscovery:
             return None
         
         # 解析 frontmatter
-        metadata, body = self._parse_frontmatter(content)
+        metadata, body = parse_frontmatter(content)
         if metadata is None:
             return None
         
@@ -123,29 +151,6 @@ class SkillDiscovery:
         
         logger.debug(f"成功加载 SKILL: {skill.metadata.name}")
         return skill
-    
-    def _parse_frontmatter(self, content: str) -> tuple:
-        """解析 YAML frontmatter"""
-        # 匹配 --- 包围的 frontmatter
-        pattern = r'^---\s*\n(.*?)\n---\s*\n(.*)$'
-        match = re.match(pattern, content, re.DOTALL)
-        
-        if not match:
-            logger.warning("SKILL.md 缺少 YAML frontmatter")
-            return None, content
-        
-        try:
-            metadata = yaml.safe_load(match.group(1))
-            if not isinstance(metadata, dict):
-                logger.warning("SKILL.md frontmatter 不是有效的 YAML 对象")
-                return None, content
-            
-            body = match.group(2)
-            return metadata, body
-            
-        except yaml.YAMLError as e:
-            logger.warning(f"解析 SKILL.md frontmatter 失败: {e}")
-            return None, content
     
     def get_skill(self, name: str) -> Optional[Skill]:
         """获取指定名称的 SKILL"""
