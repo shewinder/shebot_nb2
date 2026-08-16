@@ -91,10 +91,17 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
 
     async def test_at_token(self):
         s = self._session_with({})
-        parts = await build_reply("<@123>你好", s)
+        parts = await build_reply("<@12345>你好", s)
         self.assertEqual(parts[0].kind, "at")
-        self.assertEqual(parts[0].qq_id, 123)
+        self.assertEqual(parts[0].qq_id, 12345)
         self.assertEqual(parts[1].text, "你好")
+
+    async def test_short_digits_not_treated_as_at(self):
+        """3 位数字不是合法 QQ 号，应保持字面文本"""
+        s = self._session_with({})
+        parts = await build_reply("<@123>你好", s)
+        self.assertTrue(all(p.kind == "text" for p in parts))
+        self.assertIn("<@123>", parts[0].text)
 
     async def test_auto_attach(self):
         s = self._session_with(

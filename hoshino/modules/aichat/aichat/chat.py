@@ -35,6 +35,11 @@ async def download_image_to_base64(image_url: str) -> Optional[str]:
             logger.error(f"图片数据为空: {image_url}")
             return None
 
+        # 限制图片大小（10MB），与 store_images 工具保持一致
+        if len(image_data) > 10 * 1024 * 1024:
+            logger.warning(f"图片过大，跳过: {len(image_data)} bytes, URL: {image_url}")
+            return None
+
         ext = "png"
         content_type = resp.headers.get("Content-Type", "")
         if content_type and content_type.startswith("image/"):
@@ -116,7 +121,10 @@ async def handle_ai_chat(bot: Bot, event: Event):
 
     image_urls = get_event_imageurl(event)
 
-    image_urls.extend(await extract_images_from_reply(event, bot))
+    try:
+        image_urls.extend(await extract_images_from_reply(event, bot))
+    except Exception as e:
+        logger.debug(f"提取引用消息图片失败: {e}")
     logger.info(f"检测到图片URL: {image_urls}")
 
     persona = persona_manager.get_persona(user_id, group_id)

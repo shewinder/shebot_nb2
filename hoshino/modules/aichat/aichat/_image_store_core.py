@@ -6,6 +6,7 @@ Session 图像存储核心层（纯工具模块，不依赖 hoshino）
 import base64
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -76,6 +77,9 @@ class ImageStoreCore:
         self._dir = self.BASE_DIR / session_id
         self._meta_file = self._dir / ".meta.json"
         self._memory_fallback: Dict[str, str] = {}
+        # 串行化本实例内的并发存取（并行工具调用同时存图时序号/元数据不互相覆盖）；
+        # 跨进程一致性仍由 _next_index 每次从磁盘重读保证
+        self._lock = threading.Lock()
         self._ensure_dir()
         self._meta: Dict[str, Dict[str, Any]] = self._load_meta()
 
@@ -139,60 +143,62 @@ class ImageStoreCore:
         Returns:
             ImageEntry
         """
-        # 提取元数据
-        img_format, width, height = self._extract_meta_from_bytes(data)
-        use_ext = ext if ext in ("png", "jpg", "jpeg", "webp", "gif") else (img_format or "png")
-        if use_ext == "jpeg":
-            use_ext = "jpg"
+        with self._lock:
+            # 提取元数据
+            img_format, width, height = self._extract_meta_from_bytes(data)
+            use_ext = ext if ext in ("png", "jpg", "jpeg", "webp", "gif") else (img_format or "png")
+            if use_ext == "jpeg":
+                use_ext = "jpg"
 
-        # 确定文件名
-        idx = self._next_index(source)
-        filename = f"{source}_image_{idx}.{use_ext}"
-        identifier = f"<{source}_image_{idx}>"
-        file_path = self._dir / filename
+            # 确定文件名
+            idx = self._next_index(source)
+            filename = f"{source}_image_{idx}.{use_ext}"
+            identifier = f"<{source}_image_{idx}>"
+            file_path = self._dir / filename
 
-        # 写入文件（失败则降级）
-        try:
-            with open(file_path, "wb") as f:
-                f.write(data)
-        except Exception as e:
-            logger.error(f"[ImageStoreCore] 写入文件失败: {e}，降级为内存存储")
-            b64 = base64.b64encode(data).decode("utf-8")
-            self._memory_fallback[identifier] = f"data:image/{use_ext};base64,{b64}"
-            return ImageEntry(
+            # 写入文件（失败则降级）
+            try:
+                with open(file_path, "wb") as f:
+                    f.write(data)
+            except Exception as e:
+                logger.error(f"[ImageStoreCore] 写入文件失败: {e}，降级为内存存储")
+                b64 = base64.b64encode(data).decode("utf-8")
+                self._memory_fallback[identifier] = f"data:image/{use_ext};base64,{b64}"
+                return ImageEntry(
+                    identifier=identifier,
+                    source=source,
+                    session_id=self.session_id,
+                    filename="",
+                    format=img_format or use_ext,
+                    width=width,
+                    height=height,
+                    size_bytes=len(data),
+                    created_at=time.time(),
+                    file_path=Path(""),
+                    url=url,
+                )
+
+            # 更新元数据
+            entry = ImageEntry(
                 identifier=identifier,
                 source=source,
                 session_id=self.session_id,
-                filename="",
+                filename=filename,
                 format=img_format or use_ext,
                 width=width,
                 height=height,
                 size_bytes=len(data),
                 created_at=time.time(),
-                file_path=Path(""),
+                file_path=file_path.resolve(),
                 url=url,
             )
+            self._meta[entry.identifier.lstrip("<").rstrip(">")] = entry.to_dict()
+            # 清理超限旧图后统一落盘一次（meta 读写从 2读2写 降为 1读1写）
+            self._cleanup_locked()
+            self._save_meta()
 
-        # 更新元数据
-        entry = ImageEntry(
-            identifier=identifier,
-            source=source,
-            session_id=self.session_id,
-            filename=filename,
-            format=img_format or use_ext,
-            width=width,
-            height=height,
-            size_bytes=len(data),
-            created_at=time.time(),
-            file_path=file_path.resolve(),
-            url=url,
-        )
-        self._meta[entry.identifier.lstrip("<").rstrip(">")] = entry.to_dict()
-        self._save_meta()
-        self.cleanup()
-
-        logger.info(f"[ImageStoreCore] 存储图像 {identifier} -> {file_path}, {entry.width}x{entry.height}")
-        return entry
+            logger.info(f"[ImageStoreCore] 存储图像 {identifier} -> {file_path}, {entry.width}x{entry.height}")
+            return entry
 
     def get(self, identifier: str) -> Optional[ImageEntry]:
         """根据标识符获取图像元数据"""
@@ -256,12 +262,24 @@ class ImageStoreCore:
         return [e for e in self.list_all() if e.source == source]
 
     def cleanup(self, max_images: int = 20) -> None:
-        """清理超限图像，保留最新的"""
-        all_entries = self.list_all()
-        if len(all_entries) <= max_images:
+        """清理超限图像，保留最新的 max_images 张"""
+        with self._lock:
+            self._cleanup_locked(max_images)
+            self._save_meta()
+
+    def _cleanup_locked(self, max_images: int = 20) -> None:
+        """基于内存 meta 清理超限图像（不重读磁盘，落盘由调用方统一执行）"""
+        entries = []
+        for data in self._meta.values():
+            try:
+                entries.append(ImageEntry.from_dict(data))
+            except Exception:
+                pass
+        if len(entries) <= max_images:
             return
 
-        to_remove = all_entries[:len(all_entries) - max_images]
+        entries.sort(key=lambda e: e.created_at)
+        to_remove = entries[:len(entries) - max_images]
         for entry in to_remove:
             try:
                 clean_id = entry.identifier.lstrip("<").rstrip(">")
@@ -271,20 +289,30 @@ class ImageStoreCore:
                     logger.debug(f"[ImageStoreCore] 清理旧图像: {entry.identifier}")
             except Exception:
                 pass
-        self._save_meta()
 
     def clear(self) -> None:
         """清空当前会话所有图像（Session 新建时调用）"""
-        for entry in self.list_all():
+        with self._lock:
+            for entry in self._list_entries():
+                try:
+                    if entry.file_path.exists():
+                        entry.file_path.unlink()
+                except Exception:
+                    pass
+            self._meta.clear()
             try:
-                if entry.file_path.exists():
-                    entry.file_path.unlink()
+                if self._meta_file.exists():
+                    self._meta_file.unlink()
             except Exception:
                 pass
-        self._meta.clear()
-        try:
-            if self._meta_file.exists():
-                self._meta_file.unlink()
-        except Exception:
-            pass
-        logger.info(f"[ImageStoreCore] 清空会话 {self.session_id} 图像缓存")
+            logger.info(f"[ImageStoreCore] 清空会话 {self.session_id} 图像缓存")
+
+    def _list_entries(self) -> List[ImageEntry]:
+        """解析当前内存 meta 为 ImageEntry 列表（不触发磁盘重读）"""
+        results = []
+        for data in self._meta.values():
+            try:
+                results.append(ImageEntry.from_dict(data))
+            except Exception:
+                pass
+        return sorted(results, key=lambda e: e.created_at)

@@ -27,6 +27,15 @@ def _get_session_lock(session_id: str) -> asyncio.Lock:
         _session_locks[session_id] = asyncio.Lock()
     return _session_locks[session_id]
 
+
+def _copy_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    """拷贝消息字典；list 型 content（多模态）拷贝外层列表，避免追加时污染持久历史"""
+    copied = dict(message)
+    content = copied.get("content")
+    if isinstance(content, list):
+        copied["content"] = list(content)
+    return copied
+
 # 选项标记的正则表达式
 CHOICES_PATTERN = re.compile(r'\[CHOICES\](.*?)\[/CHOICES\]', re.DOTALL)
 CHOICE_ITEM_PATTERN = re.compile(r'^(\d+)\.\s*(.+)$', re.MULTILINE)
@@ -449,19 +458,14 @@ class Session:
                 {"role": "assistant", "content": "已了解当前系统上下文。"},
             ]
 
-        # 3. 图片列表提示附加到历史最后一条 user 消息
+        # 3. 图片列表提示附加到（副本的）最后一条 user 消息——不修改持久历史
+        #    持久历史保持干净，提示文本只在本次 API 请求中生效
+        api_messages = [_copy_message(m) for m in self.messages]
         image_list_prompt = self.build_image_list_prompt()
         if image_list_prompt:
-            for msg in reversed(self.messages):
+            for msg in reversed(api_messages):
                 if msg.get("role") == "user":
                     content = msg.get("content", "")
-                    # 避免重复附加
-                    if isinstance(content, str) and image_list_prompt in content:
-                        break
-                    if isinstance(content, list):
-                        texts = [item.get("text", "") for item in content if isinstance(item, dict)]
-                        if any(image_list_prompt in t for t in texts):
-                            break
                     if isinstance(content, list):
                         content.append({"type": "text", "text": image_list_prompt})
                     elif isinstance(content, str):
@@ -472,8 +476,8 @@ class Session:
         system_log = system_content[:2000] + "...[截断]" if len(system_content) > 2000 else system_content
         logger.debug(f"[SKILL] 完整系统消息:\n{system_log}")
 
-        # 4. 返回完整 API 消息（system + context + history）
-        return [system_msg] + context_msgs + self.messages
+        # 4. 返回完整 API 消息（system + context + 历史副本）
+        return [system_msg] + context_msgs + api_messages
     
 
 

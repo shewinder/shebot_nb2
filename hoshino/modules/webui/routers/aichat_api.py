@@ -29,6 +29,13 @@ def get_superusers() -> Set[int]:
 router = APIRouter(prefix="/aichat")
 
 
+def mask_api_key(api_key: str) -> str:
+    """脱敏显示：保留前 6 后 4 位；编辑表单回传掩码值时按"未修改"处理"""
+    if not api_key or len(api_key) <= 10:
+        return "***"
+    return f"{api_key[:6]}***{api_key[-4:]}"
+
+
 class ApiInfo(BaseModel):
     """API 厂商信息 - 兼容前端模型管理格式"""
     api: str                # 厂商标识
@@ -92,7 +99,7 @@ async def get_apis():
             api=api.api,
             model=api.model,
             api_base=api.api_base,
-            api_key=api.api_key,
+            api_key=mask_api_key(api.api_key),
             max_tokens=api.max_tokens,
             temperature=api.temperature,
             is_current=api.api == current_api,
@@ -115,7 +122,7 @@ async def get_current_api():
         api=entry.api,
         model=entry.model,
         api_base=entry.api_base,
-        api_key=entry.api_key,
+        api_key=mask_api_key(entry.api_key),
         max_tokens=entry.max_tokens,
         temperature=entry.temperature,
         is_current=True,
@@ -459,7 +466,9 @@ async def update_api(api_name: str, req: UpdateApiRequest):
     if req.api_base is not None:
         api_entry.api_base = req.api_base
     if req.api_key is not None and req.api_key.strip() != "":
-        api_entry.api_key = req.api_key
+        # 表单回传的是掩码值（未改动密钥）时保持不变，避免误覆盖真实密钥
+        if req.api_key.strip() != mask_api_key(api_entry.api_key):
+            api_entry.api_key = req.api_key
     if req.model is not None:
         api_entry.model = req.model
     if req.max_tokens is not None:

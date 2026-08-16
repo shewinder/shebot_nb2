@@ -28,8 +28,9 @@ if TYPE_CHECKING:
 
 # 图片/at 标识符（容错空白）。IMAGE_TOKEN_RE 同时被 agent_loop.rehome_images 复用
 IMAGE_TOKEN_RE = re.compile(r"<\s*(user_image_\d+|ai_image_\d+)\s*>")
-AT_TOKEN_RE = re.compile(r"<\s*@(\d+)\s*>")
-TOKEN_RE = re.compile(r"<\s*(user_image_\d+|ai_image_\d+)\s*>|<\s*@(\d+)\s*>")
+# @ 仅匹配合法 QQ 号长度（5-11 位），避免模型解释语法时输出短数字被误触发
+AT_TOKEN_RE = re.compile(r"<\s*@(\d{5,11})\s*>")
+TOKEN_RE = re.compile(r"<\s*(user_image_\d+|ai_image_\d+)\s*>|<\s*@(\d{5,11})\s*>")
 
 
 @dataclass
