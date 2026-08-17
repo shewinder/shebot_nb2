@@ -119,3 +119,86 @@ async def write_memory(
         return ok("记忆已更新", metadata={"length": len(content)})
     else:
         return fail("写入记忆失败", error="Write failed")
+
+
+@tool_registry.register(
+    description="""读取全局记忆（bot 级公共知识，所有用户所有会话共享并注入）。
+
+全局记忆记录管理员设定的公共约定、运营知识等，对所有人可见。
+与 read_memory（个人记忆，仅本人可见）不同。""",
+)
+async def read_global_memory(session: Optional["Session"] = None) -> Dict[str, Any]:
+    """读取全局记忆笔记
+
+    Args:
+        session: 会话对象（自动注入，用于校验用户上下文）
+
+    Returns:
+        包含全局记忆内容的 ToolResult
+    """
+    if not session or not session.user_id:
+        return fail("无法获取用户信息", error="Missing user context")
+
+    try:
+        content = await memory_store.read_global()
+        return ok(content, metadata={"length": len(content)})
+    except Exception as e:
+        logger.exception(f"read_global_memory 失败: {e}")
+        return fail("读取全局记忆失败", error=str(e))
+
+
+@tool_registry.register(
+    description="""覆盖写入全局记忆（bot 级公共知识）。⚠️ 仅超级用户可用。
+
+全局记忆对**所有用户的所有会话**可见并注入，写入前务必确认内容适合所有人。
+
+⚠️ 重要规则（与 write_memory 相同）：
+1. 必须先调用 read_global_memory 读取现有内容
+2. 写入时必须保留未改动的部分，只修改需要更新的地方
+3. 总长度不超过 5000 字符，接近上限时先精简旧内容""",
+)
+async def write_global_memory(
+    content: Annotated[str, Field(description="完整的全局记忆 Markdown 内容（必须包含所有历史内容，不能遗漏）")],
+    session: Optional["Session"] = None,
+) -> Dict[str, Any]:
+    """写入全局记忆笔记
+
+    Args:
+        content: 完整的 Markdown 全局记忆内容
+        session: 会话对象（自动注入，用于校验用户上下文）
+
+    Returns:
+        操作结果的 ToolResult
+    """
+    if not session or not session.user_id:
+        return fail("无法获取用户信息", error="Missing user context")
+
+    content = content.strip() if content else ""
+    if not content:
+        return fail("全局记忆内容不能为空", error="Empty content")
+
+    # 长度检查
+    max_len = conf.memory_max_length
+    if len(content) > max_len:
+        return fail(
+            f"全局记忆内容过长（{len(content)} 字符），请精简到 {max_len} 字符以内。",
+            error="Content too long",
+            metadata={"max_length": max_len, "current_length": len(content)},
+        )
+
+    # 内容丢失保护（与 write_memory 一致）
+    existing = await memory_store.read_global()
+    existing_stripped = existing.strip()
+    content_stripped = content.strip()
+    if existing_stripped and len(content_stripped) < len(existing_stripped) * 0.4:
+        return fail(
+            "新内容比现有内容短很多，疑似遗漏了历史内容。请先调用 read_global_memory 确认完整内容后再写入。",
+            error="Content too short",
+            metadata={"existing_length": len(existing_stripped), "new_length": len(content_stripped)},
+        )
+
+    success = await memory_store.write_global(content)
+    if success:
+        return ok("全局记忆已更新", metadata={"length": len(content)})
+    else:
+        return fail("写入全局记忆失败", error="Write failed")

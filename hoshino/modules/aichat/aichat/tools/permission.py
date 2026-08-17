@@ -41,6 +41,8 @@ DEFAULT_TOOL_PERMISSIONS: Dict[str, PermissionLevel] = {
     "delete_skill": "SUPERUSER",
     "rollback_skill": "SUPERUSER",
     "reload_skills": "SUPERUSER",
+    # 全局记忆：写一次影响所有会话，仅超级用户可写
+    "write_global_memory": "SUPERUSER",
 }
 
 

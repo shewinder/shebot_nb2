@@ -440,15 +440,24 @@ class Session:
                     lines.append(f"  · {t.name}: {t.description}")
                 context_parts.append("\n".join(lines))
 
-        # 记忆注入
+        # 记忆注入（全局 + 用户两层）
         if conf.enable_memory and self.user_id:
+            memory_sections: List[str] = []
+            try:
+                global_text = await memory_store.get_global_inject_text(conf.memory_max_inject_length)
+                if global_text:
+                    memory_sections.append(f"【全局记忆】\n{global_text}")
+            except Exception as e:
+                logger.warning(f"[Memory] 注入全局记忆失败: {e}")
             try:
                 memory_text = await memory_store.get_inject_text(self.user_id, conf.memory_max_inject_length)
                 if memory_text:
-                    context_parts.append(f"【关于该用户的历史记忆】\n{memory_text}")
+                    memory_sections.append(f"【关于该用户的历史记忆】\n{memory_text}")
                     logger.debug(f"{self._tag} [Memory] 已注入记忆，长度: {len(memory_text)}")
             except Exception as e:
                 logger.warning(f"[Memory] 注入记忆失败: {e}")
+            if memory_sections:
+                context_parts.append("\n\n".join(memory_sections))
 
         context_msgs: List[Dict[str, Any]] = []
         if context_parts:
