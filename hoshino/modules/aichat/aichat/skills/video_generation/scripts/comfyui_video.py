@@ -57,7 +57,8 @@ DURATION_FRAMES = {"2": 49, "5": 121}
 
 # 任务名称 → 工作流文件名
 TASK_WORKFLOW = {
-    "t2v": "wan22_t2v",
+    "t2v": "wan22_t2v_fast",   # 文生视频快速版（Q8 + LightX2V 4 步，约 3 分钟）
+    "t2v_quality": "wan22_t2v",  # 文生视频高质量版（Q4 25 步，约 10 分钟）
     "i2v": "wan22_i2v",
 }
 
