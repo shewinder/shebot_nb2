@@ -1,0 +1,9 @@
+{
+  "name": "video_generation",
+  "description": "AI 视频生成，支持文生视频、图生视频。基于本地 ComfyUI Wan2.2，支持 2 秒/5 秒时长",
+  "allowed_tools": [
+    "execute_script"
+  ],
+  "user_invocable": true,
+  "disable_model_invocation": false
+}

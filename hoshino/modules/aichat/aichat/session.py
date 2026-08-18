@@ -3,12 +3,14 @@ import asyncio
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from loguru import logger
 
 from .config import Config
 from ._image_store import ImageStore, ImageEntry
+from ._video_store_core import VideoStoreCore
 from .memory import memory_store
 from .skills import skill_manager
 from .subagent_types import SUBAGENT_TYPES
@@ -96,6 +98,8 @@ class Session:
         self.continuous_mode = False
         self._image_store = ImageStore(session_id)
         self._image_store.clear()  # 新建 Session 时清空旧图像缓存
+        # 视频存储（独立标识符 <ai_video_N>，目录与图片同级）
+        self._video_store = VideoStoreCore(session_id)
         # SKILL 系统：已激活的 SKILL 名称集合
         self.active_skills: Set[str] = set()
         # 当前正在执行的 SKILL（用于工具权限检查）
@@ -157,6 +161,20 @@ class Session:
     def list_images(self) -> List[ImageEntry]:
         """列出当前会话所有图像（供 Skill 脚本使用）"""
         return self._image_store.list_all()
+
+    def store_ai_video_bytes(self, data: bytes) -> str:
+        """存储 AI 生成的视频字节，返回标识符（如 <ai_video_1>）"""
+        entry = self._video_store.store_bytes(data, "ai", "mp4")
+        self.last_active = time.time()
+        return entry.identifier
+
+    def resolve_video_file(self, identifier: str) -> Optional[Path]:
+        """根据视频标识符解析本地文件路径"""
+        return self._video_store.get_file_path(identifier)
+
+    def list_videos(self) -> List[Any]:
+        """列出当前会话所有视频"""
+        return self._video_store.list_all()
 
     @staticmethod
     def build_image_rules_prompt() -> str:

@@ -10,6 +10,7 @@
 - 会话级去重：同轮已发送的图片不重复发（on_content 中间轮与最终回复之间）；
 - 兜底：本轮新创建但未被模型引用的 ai 图片自动补发。
 """
+import base64
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Set, TYPE_CHECKING
@@ -30,12 +31,14 @@ if TYPE_CHECKING:
 IMAGE_TOKEN_RE = re.compile(r"<\s*(user_image_\d+|ai_image_\d+)\s*>")
 # @ 仅匹配合法 QQ 号长度（5-11 位），避免模型解释语法时输出短数字被误触发
 AT_TOKEN_RE = re.compile(r"<\s*@(\d{5,11})\s*>")
-TOKEN_RE = re.compile(r"<\s*(user_image_\d+|ai_image_\d+)\s*>|<\s*@(\d{5,11})\s*>")
+TOKEN_RE = re.compile(
+    r"<\s*(user_image_\d+|ai_image_\d+|ai_video_\d+)\s*>|<\s*@(\d{5,11})\s*>"
+)
 
 
 @dataclass
 class ReplyPart:
-    kind: str            # "text" | "image" | "at"
+    kind: str            # "text" | "image" | "video" | "at"
     text: str = ""
     identifier: str = ""
     qq_id: int = 0
@@ -61,12 +64,20 @@ async def build_reply(
             if text.strip():
                 parts.append(ReplyPart(kind="text", text=text))
 
-        if m.group(1):  # 图片标识符
+        if m.group(1):  # 图片/视频标识符
             norm = f"<{m.group(1)}>"
             if session is None:
                 parts.append(ReplyPart(kind="text", text=norm))
             elif norm in referenced:
                 continue
+            elif norm.startswith("<ai_video_"):
+                # 视频标识符：查视频存储
+                if session._video_store.get(norm) is None:
+                    logger.warning(f"回复引用了不存在的视频标识符，降级为字面文本: {norm}")
+                    parts.append(ReplyPart(kind="text", text=norm))
+                else:
+                    parts.append(ReplyPart(kind="video", identifier=norm))
+                    referenced.add(norm)
             elif session._image_store.get(norm) is None:
                 logger.warning(f"回复引用了不存在的图片标识符，降级为字面文本: {norm}")
                 parts.append(ReplyPart(kind="text", text=norm))
@@ -113,29 +124,54 @@ def _resolve_image_segment(session: Optional["Session"], identifier: str) -> Opt
         return None
 
 
+def _resolve_video_segment(session: Optional["Session"], identifier: str) -> Optional[MessageSegment]:
+    """解析视频标识符为 MessageSegment（文件缺失时返回 None）
+
+    使用 base64 发送而非文件路径：无头 QQ 客户端常运行在容器中，
+    访问不到宿主机（WSL）上的视频文件路径。
+    """
+    if session is None:
+        return None
+    file_path = session.resolve_video_file(identifier)
+    if not file_path:
+        return None
+    try:
+        data = file_path.read_bytes()
+        b64 = base64.b64encode(data).decode("ascii")
+        return MessageSegment.video(file=f"base64://{b64}")
+    except Exception as e:
+        logger.warning(f"构造视频消息段失败 {identifier}: {e}")
+        return None
+
+
 def _build_plain_messages(
-    parts: List[ReplyPart], image_segments: List[MessageSegment]
+    parts: List[ReplyPart],
+    image_segments: List[MessageSegment],
+    video_segments: List[MessageSegment] = None,
 ) -> List[Message]:
-    """plain 模式：文本+@内联，图片追加或分批"""
+    """plain 模式：文本+@内联，图片/视频追加或分批"""
+    if video_segments is None:
+        video_segments = []
     msg = Message()
     messages: List[Message] = []
 
     for p in parts:
-        if p.kind == "image":
+        if p.kind in ("image", "video"):
             continue
         if p.kind == "at":
             msg += MessageSegment.at(p.qq_id)
         elif p.text.strip():
             msg += MessageSegment.text(p.text)
 
-    if len(image_segments) > 3:
+    media_segments = image_segments + video_segments
+    if len(media_segments) > 3:
         if msg:
             messages.append(msg)
-        for seg in image_segments:
+        for seg in media_segments:
             messages.append(Message(seg))
         return messages
 
-    for seg in image_segments:
+    for seg in media_segments:
         msg += seg
     if msg:
         messages.append(msg)
@@ -146,8 +182,11 @@ async def _build_markdown_messages(
     parts: List[ReplyPart],
     image_segments: List[MessageSegment],
     markdown_min_length: int,
+    video_segments: List[MessageSegment] = None,
 ) -> List[Message]:
-    """Markdown 模式：文本走渲染，图片独立，@ 独立消息"""
+    """Markdown 模式：文本走渲染，图片/视频独立，@ 独立消息"""
+    if video_segments is None:
+        video_segments = []
     clean_text = "".join(p.text for p in parts if p.kind == "text").strip()
     at_segments = [MessageSegment.at(p.qq_id) for p in parts if p.kind == "at"]
 
@@ -173,7 +212,7 @@ async def _build_markdown_messages(
             at_msg += seg
         messages.append(at_msg)
 
-    for seg in image_segments:
+    for seg in image_segments + video_segments:
         messages.append(Message(seg))
 
     return messages
@@ -234,16 +273,22 @@ async def send_reply(
     bot = bots[0]
 
     image_segments: List[MessageSegment] = []
+    video_segments: List[MessageSegment] = []
     for p in parts:
         if p.kind == "image":
             seg = _resolve_image_segment(session, p.identifier)
             if seg:
                 image_segments.append(seg)
+        elif p.kind == "video":
+            seg = _resolve_video_segment(session, p.identifier)
+            if seg:
+                video_segments.append(seg)
 
     if enable_markdown:
-        messages = await _build_markdown_messages(parts, image_segments, markdown_min_length)
+        messages = await _build_markdown_messages(
+            parts, image_segments, markdown_min_length, video_segments)
     else:
-        messages = _build_plain_messages(parts, image_segments)
+        messages = _build_plain_messages(parts, image_segments, video_segments)
 
     messages = [m for m in messages if m]
     if not messages:
