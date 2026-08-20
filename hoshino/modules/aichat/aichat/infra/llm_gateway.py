@@ -68,6 +68,15 @@ def _parse_retry_after(headers: httpx.Headers) -> Optional[float]:
         return None
 
 
+def _error_cause_detail(exc: BaseException) -> str:
+    """提取异常底层原因用于诊断日志（如 '[Errno -2] Name or service not known'）"""
+    cause = exc.__cause__
+    if cause is None:
+        return ""
+    text = str(cause).strip()
+    return text if text else ""
+
+
 class LLMGateway:
     """OpenAI 兼容 chat completions 客户端（带重试与错误分类）"""
 
@@ -175,10 +184,16 @@ class LLMGateway:
             try:
                 resp = await self._client.post(self.chat_url, headers=headers, json=payload)
             except httpx.TimeoutException as e:
-                last_error = LLMTimeoutError(f"请求超时（>{self.read_timeout}s）", cause=e)
+                detail = _error_cause_detail(e)
+                suffix = f"（{detail}）" if detail else ""
+                last_error = LLMTimeoutError(f"请求超时（>{self.read_timeout}s）{suffix}", cause=e)
                 continue
             except httpx.HTTPError as e:
-                last_error = LLMNetworkError(f"网络错误: {e}", cause=e)
+                # ConnectError 的 str 只有 "All connection attempts failed"，
+                # 真实原因（DNS 失败/连接超时/被拒）在 __cause__，必须带进错误消息
+                detail = _error_cause_detail(e)
+                suffix = f"（{detail}）" if detail else ""
+                last_error = LLMNetworkError(f"网络错误: {e}{suffix}", cause=e)
                 continue
 
             if resp.status_code == 429:

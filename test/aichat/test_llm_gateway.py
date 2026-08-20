@@ -19,6 +19,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "hoshino" / "modules" / "aichat" / "aicha
 
 from infra.errors import (  # noqa: E402
     LLMAuthError,
+    LLMNetworkError,
     LLMParseError,
     LLMRateLimitedError,
     LLMTimeoutError,
@@ -153,6 +154,21 @@ class TestGateway(unittest.IsolatedAsyncioTestCase):
         with patch("infra.llm_gateway.asyncio.sleep", new=AsyncMock()):
             with self.assertRaises(LLMTimeoutError):
                 await gw.chat(_MSGS, "m1")
+
+    async def test_network_error_includes_cause_detail(self):
+        """诊断日志回归：ConnectError 的底层原因（DNS/超时/拒绝）必须出现在错误消息里"""
+
+        def handler(request):
+            try:
+                raise OSError("[Errno -2] Name or service not known")
+            except OSError as e:
+                raise httpx.ConnectError("All connection attempts failed", request=request) from e
+
+        gw = _make_gateway(handler, max_retries=0)
+        with self.assertRaises(LLMNetworkError) as ctx:
+            await gw.chat(_MSGS, "m1")
+        self.assertIn("All connection attempts failed", str(ctx.exception))
+        self.assertIn("[Errno -2] Name or service not known", str(ctx.exception))
 
     async def test_error_body_base64_sanitized(self):
         blob = "data:image/png;base64," + "D" * 200
