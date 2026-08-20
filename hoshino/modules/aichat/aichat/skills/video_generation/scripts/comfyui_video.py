@@ -53,14 +53,21 @@ else:
 
 COMFYUI_BASE_URL = os.environ.get("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
 
-# 时长 → 帧数（24fps，H3 的 17k+5 网格：56≈2.3s, 124≈5.2s）
-DURATION_FRAMES = {"2": 56, "5": 124}
-
 # 任务名称 → 工作流文件名
 TASK_WORKFLOW = {
     "t2v": "h3_t2v",   # MiniMax H3 文生视频（带音频，约 1-2 分钟）
     "i2v": "h3_i2v",   # MiniMax H3 图生视频（首帧锚定，约 1-2 分钟）
 }
+
+# H3 帧数网格：17k+5（24fps 下 124≈5.2s, 243≈10.1s）
+H3_MIN_FRAMES = 5
+H3_MAX_FRAMES = 362  # 官方训练范围 124-362（5-15 秒）
+
+
+def duration_to_frames(duration: float) -> int:
+    """秒数 → H3 帧数（snap 到 17k+5 网格）"""
+    frames = max(H3_MIN_FRAMES, round(duration * 24))
+    return 17 * round((frames - 5) / 17) + 5
 
 
 def upload_image_to_comfyui(image_path: str) -> str:
@@ -101,7 +108,12 @@ def apply_size(workflow: Dict[str, Any], width: int, height: int) -> None:
                 node["inputs"][k] = width if v == "{{width}}" else height
 
 
-MAX_PIXELS = 864 * 480  # 目标分辨率像素量上限（16:9 基准，与显存预算匹配）
+# 分辨率档位 → 16:9 基准像素量上限
+RESOLUTION_PIXELS = {
+    "480p": 864 * 480,     # 快速档（默认）
+    "768p": 1344 * 768,    # 高清档（约 3-5 倍耗时）
+}
+MAX_PIXELS = RESOLUTION_PIXELS["480p"]
 
 
 def compute_target_size(image_path: str, max_pixels: int = MAX_PIXELS,
@@ -226,7 +238,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="ComfyUI 视频生成")
     parser.add_argument("--task", choices=["t2v", "i2v"], default="t2v", help="任务类型")
     parser.add_argument("--prompt", default="", help="视频描述（已调优）")
-    parser.add_argument("--duration", choices=["2", "5"], default="2", help="时长（秒）")
+    parser.add_argument("--duration", type=float, default=2.0,
+                        help="时长（秒，1-15，默认 2）")
+    parser.add_argument("--resolution", choices=list(RESOLUTION_PIXELS.keys()), default="480p",
+                        help="分辨率档位（默认 480p 快速；768p 高清约 3-5 倍耗时）")
     parser.add_argument("--images", default="", help="图生视频输入图标识符，逗号分隔")
     parser.add_argument("--prompt-id", default="", help="续查已提交任务的 prompt_id（幂等）")
     parser.add_argument("--wait", type=int, default=280, help="本次等待秒数（默认 280）")
@@ -263,7 +278,13 @@ def main() -> None:
 
     # 替换占位符
     apply_prompt(wf, args.prompt)
-    apply_length(wf, DURATION_FRAMES[args.duration])
+    if not 1.0 <= args.duration <= 15.0:
+        output_error("时长仅支持 1-15 秒")
+        return
+    apply_length(wf, duration_to_frames(args.duration))
+
+    # 分辨率：t2v 用档位 16:9 基准；i2v 按输入图比例自适应（上限随档位）
+    max_pixels = RESOLUTION_PIXELS[args.resolution]
 
     if args.task == "i2v":
         image_paths: List[str] = []
@@ -281,14 +302,18 @@ def main() -> None:
             output_error("图生视频需要提供 --images 图片标识符")
             return
         try:
-            # 按首张输入图比例自适应分辨率（16:9 基准像素量上限）
-            width, height = compute_target_size(image_paths[0])
+            # 按首张输入图比例自适应分辨率（像素量上限随档位）
+            width, height = compute_target_size(image_paths[0], max_pixels=max_pixels)
             apply_size(wf, width, height)
             uploaded = [upload_image_to_comfyui(p) for p in image_paths]
         except Exception as e:
             output_error(f"图片上传失败: {e}")
             return
         apply_input_images(wf, uploaded)
+    else:
+        # t2v：档位 16:9 基准尺寸（32 对齐）
+        base_sizes = {"480p": (864, 480), "768p": (1344, 768)}
+        apply_size(wf, *base_sizes[args.resolution])
 
     # 提交并等待
     try:

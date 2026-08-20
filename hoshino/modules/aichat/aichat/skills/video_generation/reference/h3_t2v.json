@@ -60,8 +60,8 @@
     0
    ],
    "prompt": "{{prompt}}",
-   "width": 864,
-   "height": 480,
+   "width": "{{width}}",
+   "height": "{{height}}",
    "length": "{{length}}"
   }
  },
