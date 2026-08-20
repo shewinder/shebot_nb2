@@ -130,6 +130,30 @@ class TestImageStoreCore(unittest.TestCase):
             ImageStoreCore.BASE_DIR = old_base
             tmp.cleanup()
 
+    def test_lazy_dir_creation_and_clear_removes_dir(self):
+        """回归：会话创建不再急切建目录（修复空目录堆积）；clear 后目录消失"""
+        from hoshino.modules.aichat.aichat._image_store_core import ImageStoreCore
+
+        tmp = tempfile.TemporaryDirectory()
+        old_base = ImageStoreCore.BASE_DIR
+        ImageStoreCore.BASE_DIR = Path(tmp.name)
+        try:
+            # 1. 仅构造（无存储）→ 不产生目录
+            store = ImageStoreCore("lazy_sess")
+            self.assertFalse(store._dir.exists())
+
+            # 2. 存储 → 目录按需创建
+            store.store_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 16, "ai")
+            self.assertTrue(store._dir.exists())
+            self.assertTrue(store._dir.is_dir())
+
+            # 3. clear → 目录一并删除
+            store.clear()
+            self.assertFalse(store._dir.exists())
+        finally:
+            ImageStoreCore.BASE_DIR = old_base
+            tmp.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

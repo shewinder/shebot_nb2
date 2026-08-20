@@ -80,11 +80,12 @@ class ImageStoreCore:
         # 串行化本实例内的并发存取（并行工具调用同时存图时序号/元数据不互相覆盖）；
         # 跨进程一致性仍由 _next_index 每次从磁盘重读保证
         self._lock = threading.Lock()
-        self._ensure_dir()
+        # 惰性建目录：会话创建不再急切 mkdir，首次 store/_save_meta 时才建，
+        # 从未存图的会话不会在 data/aichat/images 留下空目录
         self._meta: Dict[str, Dict[str, Any]] = self._load_meta()
 
     def _ensure_dir(self) -> None:
-        """确保存储目录存在"""
+        """确保存储目录存在（仅在真正写入时调用）"""
         self._dir.mkdir(parents=True, exist_ok=True)
 
     def _load_meta(self) -> Dict[str, Dict[str, Any]]:
@@ -100,6 +101,7 @@ class ImageStoreCore:
     def _save_meta(self) -> None:
         """保存 .meta.json"""
         try:
+            self._ensure_dir()
             with open(self._meta_file, "w", encoding="utf-8") as f:
                 json.dump(self._meta, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -144,6 +146,8 @@ class ImageStoreCore:
             ImageEntry
         """
         with self._lock:
+            # 惰性建目录：仅在真正存储时创建
+            self._ensure_dir()
             # 提取元数据
             img_format, width, height = self._extract_meta_from_bytes(data)
             use_ext = ext if ext in ("png", "jpg", "jpeg", "webp", "gif") else (img_format or "png")
@@ -291,7 +295,11 @@ class ImageStoreCore:
                 pass
 
     def clear(self) -> None:
-        """清空当前会话所有图像（Session 新建时调用）"""
+        """清空当前会话所有图像（Session 新建/销毁时调用）
+
+        清空后顺手删除空目录（best-effort）：一次性任务会话（子 Agent/后台/
+        定时任务）跑完 dispose 后不会在 data/aichat/images 留下空目录。
+        """
         with self._lock:
             for entry in self._list_entries():
                 try:
@@ -304,6 +312,11 @@ class ImageStoreCore:
                 if self._meta_file.exists():
                     self._meta_file.unlink()
             except Exception:
+                pass
+            # 目录内无残留文件时删除自身（rmdir 非空会失败，静默保留）
+            try:
+                self._dir.rmdir()
+            except OSError:
                 pass
             logger.info(f"[ImageStoreCore] 清空会话 {self.session_id} 图像缓存")
 
