@@ -113,9 +113,9 @@ def http_post(url: str,
               data: Optional[Any] = None,
               files: Optional[Any] = None,
               timeout: int = 300) -> Dict[str, Any]:
-    """同步 POST 请求"""
+    """同步 POST 请求（禁用环境代理：ComfyUI 为本地/局域网服务，走代理会 502）"""
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
             if files:
                 resp = client.post(url, headers=headers, data=data, files=files)
             elif json_data is not None:
@@ -130,9 +130,9 @@ def http_post(url: str,
 def http_get(url: str,
              headers: Optional[Dict[str, str]] = None,
              timeout: int = 300) -> Dict[str, Any]:
-    """同步 GET 请求"""
+    """同步 GET 请求（禁用环境代理，同 http_post）"""
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
             resp = client.get(url, headers=headers)
             return _parse_response(resp)
     except Exception as e:

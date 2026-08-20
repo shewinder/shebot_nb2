@@ -2,12 +2,13 @@
 """
 Author: SheBot
 Date: 2026-08-18
-Description: ComfyUI 视频生成脚本（文生视频/图生视频），供 video_generation SKILL 调用
+Description: MiniMax H3 视频生成脚本（文生视频/图生视频），供 video_generation SKILL 调用
 
 约定：
-- 工作流 JSON 放在 skill 目录的 reference/ 下：wan22_t2v.json / wan22_i2v.json
+- 工作流 JSON 放在 skill 目录的 reference/ 下：h3_t2v.json / h3_i2v.json
 - Prompt 占位符: {{prompt}}
 - 图片占位符: {{input_image}}
+- 尺寸占位符: {{width}} / {{height}}（按输入图比例自适应，32 对齐）
 - 时长占位符: {{length}}（由 --duration 决定帧数）
 - 分阶段执行：首次调用提交并等待，超时返回 prompt_id；LLM 可带 --prompt-id 续查（幂等）
 """
@@ -52,14 +53,13 @@ else:
 
 COMFYUI_BASE_URL = os.environ.get("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
 
-# 时长 → 帧数（24fps）
-DURATION_FRAMES = {"2": 49, "5": 121}
+# 时长 → 帧数（24fps，H3 的 17k+5 网格：56≈2.3s, 124≈5.2s）
+DURATION_FRAMES = {"2": 56, "5": 124}
 
 # 任务名称 → 工作流文件名
 TASK_WORKFLOW = {
-    "t2v": "wan22_t2v_fast",   # 文生视频快速版（Q8 + LightX2V 4 步，约 3 分钟）
-    "t2v_quality": "wan22_t2v",  # 文生视频高质量版（Q4 25 步，约 10 分钟）
-    "i2v": "wan22_i2v",
+    "t2v": "h3_t2v",   # MiniMax H3 文生视频（带音频，约 1-2 分钟）
+    "i2v": "h3_i2v",   # MiniMax H3 图生视频（首帧锚定，约 1-2 分钟）
 }
 
 
@@ -101,25 +101,26 @@ def apply_size(workflow: Dict[str, Any], width: int, height: int) -> None:
                 node["inputs"][k] = width if v == "{{width}}" else height
 
 
-MAX_PIXELS = 832 * 480  # 目标分辨率像素量上限（16:9 基准，与显存预算匹配）
+MAX_PIXELS = 864 * 480  # 目标分辨率像素量上限（16:9 基准，与显存预算匹配）
 
 
-def compute_target_size(image_path: str, max_pixels: int = MAX_PIXELS) -> tuple:
-    """按输入图宽高比计算目标分辨率（16 对齐，像素量不超过 max_pixels）
+def compute_target_size(image_path: str, max_pixels: int = MAX_PIXELS,
+                        alignment: int = 32) -> tuple:
+    """按输入图宽高比计算目标分辨率（alignment 对齐，像素量不超过 max_pixels）
 
-    输入图与目标同比例时 ComfyUI 零裁剪零变形；异比例时等比缩放+居中裁剪。
+    MiniMax H3 的分辨率要求 32 倍数对齐；输入图与目标同比例时零变形。
     """
     from PIL import Image
     with Image.open(image_path) as img:
         w, h = img.size
     aspect = w / h
     scale = min((max_pixels / (w * h)) ** 0.5, 1.0)
-    width = max(16, round(w * scale / 16) * 16)
-    height = max(16, round(width / aspect / 16) * 16)
+    width = max(alignment, round(w * scale / alignment) * alignment)
+    height = max(alignment, round(width / aspect / alignment) * alignment)
     # 面积超限时逐档回退（保持比例）
-    while width * height > max_pixels * 1.1 and width > 16 and height > 16:
-        width -= 16
-        height = max(16, round(width / aspect / 16) * 16)
+    while width * height > max_pixels * 1.1 and width > alignment and height > alignment:
+        width -= alignment
+        height = max(alignment, round(width / aspect / alignment) * alignment)
     return width, height
 
 
@@ -237,7 +238,7 @@ def main() -> None:
         if result["status"] == "done":
             stored = store_video(result["data"])
             output_result(True, identifier=stored["identifier"], path=stored["path"],
-                          model=f"wan22_{args.task}")
+                          model=f"h3_{args.task}")
         elif result["status"] == "error":
             output_error(result["error"])
         else:
@@ -300,7 +301,7 @@ def main() -> None:
     if result["status"] == "done":
         stored = store_video(result["data"])
         output_result(True, identifier=stored["identifier"], path=stored["path"],
-                      model=f"wan22_{args.task}")
+                      model=f"h3_{args.task}")
     elif result["status"] == "error":
         output_error(result["error"])
     else:

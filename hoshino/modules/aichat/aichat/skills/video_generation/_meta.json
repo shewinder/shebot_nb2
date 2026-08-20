@@ -1,6 +1,6 @@
 {
   "name": "video_generation",
-  "description": "AI 视频生成，支持文生视频、图生视频。基于本地 ComfyUI Wan2.2，支持 2 秒/5 秒时长",
+  "description": "AI 视频生成（MiniMax H3），支持文生视频、图生视频，原生音轨，约 1-2 分钟出片",
   "allowed_tools": [
     "execute_script"
   ],
