@@ -70,6 +70,46 @@ def duration_to_frames(duration: float) -> int:
     return 17 * round((frames - 5) / 17) + 5
 
 
+def build_multi_guide_workflow(base_wf: Dict[str, Any], uploaded: List[str],
+                               frame_count: int, guides: Optional[List[int]] = None,
+                               start_nid: int = 100) -> None:
+    """在基础 T2V 工作流上动态插入多图 AddGuide 锚定链（就地修改）
+
+    - 每张图：一个 LoadImage 节点 + 一个 MiniMaxH3AddGuide 节点
+    - AddGuide 链式：前一个的 positive 输出接下一个的 positive 输入
+    - guides 缺省时：首图锚 0 帧、末图锚最后帧、中间图均匀分布
+    - 返回后调用方需把 KSampler 的 positive 指向最后一个 AddGuide
+    """
+    if not uploaded:
+        return None
+    n = len(uploaded)
+    if guides is None:
+        if n == 1:
+            frame_ids = [0]
+        else:
+            frame_ids = [round(i * (frame_count - 1) / (n - 1)) for i in range(n)]
+    else:
+        if len(guides) != n:
+            raise RuntimeError(f"--guides 数量({len(guides)})必须与图片数({n})一致")
+        frame_ids = [max(0, min(frame_count - 1, round(g * 24))) for g in guides]
+
+    cond_node = "7"  # MiniMaxH3ImageToVideo 的 positive 输出
+    latent_node = "7"
+    for i, (fname, fidx) in enumerate(zip(uploaded, frame_ids)):
+        img_nid = str(start_nid + i * 2)
+        guide_nid = str(start_nid + i * 2 + 1)
+        base_wf[img_nid] = {"class_type": "LoadImage", "inputs": {"image": fname}}
+        base_wf[guide_nid] = {"class_type": "MiniMaxH3AddGuide", "inputs": {
+            "positive": [cond_node, 0],
+            "vae": ["3", 0],
+            "latent": [latent_node, 1],
+            "image": [img_nid, 0],
+            "frame_idx": fidx,
+        }}
+        cond_node = guide_nid
+    return cond_node
+
+
 def upload_image_to_comfyui(image_path: str) -> str:
     """上传本地图片到 ComfyUI 服务器，返回文件名"""
     base = COMFYUI_BASE_URL.rstrip("/")
@@ -242,7 +282,8 @@ def main() -> None:
                         help="时长（秒，1-15，默认 2）")
     parser.add_argument("--resolution", choices=list(RESOLUTION_PIXELS.keys()), default="480p",
                         help="分辨率档位（默认 480p 快速；768p 高清约 3-5 倍耗时）")
-    parser.add_argument("--images", default="", help="图生视频输入图标识符，逗号分隔")
+    parser.add_argument("--images", default="", help="图生视频输入图标识符，逗号分隔（多图=多帧锚定）")
+    parser.add_argument("--guides", default="", help="多图锚定时间点（秒，逗号分隔，须与图片数一致；缺省自动均分）")
     parser.add_argument("--prompt-id", default="", help="续查已提交任务的 prompt_id（幂等）")
     parser.add_argument("--wait", type=int, default=280, help="本次等待秒数（默认 280）")
     args = parser.parse_args()
@@ -304,12 +345,46 @@ def main() -> None:
         try:
             # 按首张输入图比例自适应分辨率（像素量上限随档位）
             width, height = compute_target_size(image_paths[0], max_pixels=max_pixels)
-            apply_size(wf, width, height)
             uploaded = [upload_image_to_comfyui(p) for p in image_paths]
         except Exception as e:
             output_error(f"图片上传失败: {e}")
             return
-        apply_input_images(wf, uploaded)
+
+        guides: Optional[List[float]] = None
+        if args.guides:
+            guides = []
+            for g in args.guides.split(","):
+                g = g.strip()
+                if not g:
+                    continue
+                try:
+                    guides.append(float(g))
+                except ValueError:
+                    output_error(f"--guides 含非法数值: {g}")
+                    return
+
+        multi = len(uploaded) > 1 or guides is not None
+        if multi:
+            # 多图多帧锚定：以 h3_t2v 为基础动态构造 AddGuide 链
+            try:
+                wf = copy.deepcopy(load_workflow("h3_t2v"))
+            except RuntimeError as e:
+                output_error(str(e))
+                return
+            apply_prompt(wf, args.prompt)
+            apply_length(wf, duration_to_frames(args.duration))
+            apply_size(wf, width, height)
+            frame_count = duration_to_frames(args.duration)
+            try:
+                last_guide = build_multi_guide_workflow(wf, uploaded, frame_count, guides)
+            except RuntimeError as e:
+                output_error(str(e))
+                return
+            wf["8"]["inputs"]["positive"] = [last_guide, 0]
+        else:
+            # 单图：首帧锚定
+            apply_size(wf, width, height)
+            apply_input_images(wf, uploaded)
     else:
         # t2v：档位 16:9 基准尺寸（32 对齐）
         base_sizes = {"480p": (864, 480), "768p": (1344, 768)}
