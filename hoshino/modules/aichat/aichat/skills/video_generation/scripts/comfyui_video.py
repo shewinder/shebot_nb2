@@ -110,6 +110,21 @@ def build_multi_guide_workflow(base_wf: Dict[str, Any], uploaded: List[str],
     return cond_node
 
 
+def _apply_anchors(wf: Dict[str, Any], first_name: Optional[str] = None,
+                   last_name: Optional[str] = None) -> None:
+    """填充 h3_i2v 工作流的首帧/尾帧锚位，并清理未用锚位节点"""
+    if first_name:
+        wf["13"]["inputs"]["image"] = first_name
+    else:
+        wf["7"]["inputs"].pop("first_frame", None)
+        wf.pop("13", None)
+    if last_name:
+        wf["14"]["inputs"]["image"] = last_name
+    else:
+        wf["7"]["inputs"].pop("last_frame", None)
+        wf.pop("14", None)
+
+
 def upload_image_to_comfyui(image_path: str) -> str:
     """上传本地图片到 ComfyUI 服务器，返回文件名"""
     base = COMFYUI_BASE_URL.rstrip("/")
@@ -219,6 +234,16 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
 
         entry = hist.get(prompt_id, {})
         if not entry:
+            # 不在历史：查队列是否仍在执行/排队；都不在 = 任务已丢失（如服务器重启）
+            q_result = http_get(f"{base}/queue")
+            q = q_result.get("json", {}) if q_result.get("status") == 200 else {}
+            in_queue = any(
+                prompt_id in (item[1] if isinstance(item, list) and len(item) > 1 else ())
+                for item in q.get("queue_running", []) + q.get("queue_pending", [])
+            )
+            if not in_queue:
+                return {"status": "error",
+                        "error": "任务已丢失（ComfyUI 可能重启过），请重新生成"}
             continue
 
         status = entry.get("status", {})
@@ -284,6 +309,8 @@ def main() -> None:
                         help="分辨率档位（默认 480p 快速；768p 高清约 3-5 倍耗时）")
     parser.add_argument("--images", default="", help="图生视频输入图标识符，逗号分隔（多图=多帧锚定）")
     parser.add_argument("--guides", default="", help="多图锚定时间点（秒，逗号分隔，须与图片数一致；缺省自动均分）")
+    parser.add_argument("--anchor", choices=["first", "last"], default="first",
+                        help="单图锚定位置（首帧/尾帧，默认首帧）")
     parser.add_argument("--prompt-id", default="", help="续查已提交任务的 prompt_id（幂等）")
     parser.add_argument("--wait", type=int, default=280, help="本次等待秒数（默认 280）")
     args = parser.parse_args()
@@ -381,10 +408,17 @@ def main() -> None:
                 output_error(str(e))
                 return
             wf["8"]["inputs"]["positive"] = [last_guide, 0]
-        else:
-            # 单图：首帧锚定
+        elif len(uploaded) == 2:
+            # 两张图：原生首尾帧（FLF2V）
             apply_size(wf, width, height)
-            apply_input_images(wf, uploaded)
+            _apply_anchors(wf, first_name=uploaded[0], last_name=uploaded[1])
+        else:
+            # 单图：按 --anchor 指定首帧或尾帧锚定
+            apply_size(wf, width, height)
+            if args.anchor == "first":
+                _apply_anchors(wf, first_name=uploaded[0])
+            else:
+                _apply_anchors(wf, last_name=uploaded[0])
     else:
         # t2v：档位 16:9 基准尺寸（32 对齐）
         base_sizes = {"480p": (864, 480), "768p": (1344, 768)}

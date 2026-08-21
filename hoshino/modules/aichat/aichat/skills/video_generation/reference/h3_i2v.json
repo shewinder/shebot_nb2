@@ -66,6 +66,10 @@
    "first_frame": [
     "13",
     0
+   ],
+   "last_frame": [
+    "14",
+    0
    ]
   }
  },
@@ -155,6 +159,12 @@
   "class_type": "LoadImage",
   "inputs": {
    "image": "{{input_image}}"
+  }
+ },
+ "14": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "{{input_image_last}}"
   }
  }
 }
