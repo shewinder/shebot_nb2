@@ -1,0 +1,175 @@
+{
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+   "type": "minimax",
+   "device": "default"
+  }
+ },
+ "3": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+  }
+ },
+ "4": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+  }
+ },
+ "5": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+   "strength_model": 1.0
+  }
+ },
+ "6": {
+  "class_type": "MiniMaxH3SigmaShift",
+  "inputs": {
+   "model": [
+    "5",
+    0
+   ],
+   "shift_video": 12.0,
+   "shift_audio": 3.0
+  }
+ },
+ "7": {
+  "class_type": "MiniMaxH3ReferenceToVideo",
+  "inputs": {
+   "clip": [
+    "2",
+    0
+   ],
+   "vae": [
+    "3",
+    0
+   ],
+   "audio_vae": [
+    "4",
+    0
+   ],
+   "prompt": "{{prompt}}",
+   "width": "{{width}}",
+   "height": "{{height}}",
+   "length": "{{length}}",
+   "ref_image_size": "match",
+   "ref_images.ref_image_0": [
+    "15",
+    0
+   ],
+   "ref_images.ref_image_1": [
+    "16",
+    0
+   ]
+  }
+ },
+ "8": {
+  "class_type": "KSampler",
+  "inputs": {
+   "model": [
+    "6",
+    0
+   ],
+   "positive": [
+    "7",
+    0
+   ],
+   "negative": [
+    "12",
+    0
+   ],
+   "latent_image": [
+    "7",
+    1
+   ],
+   "seed": 20260821,
+   "steps": 8,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1.0
+  }
+ },
+ "12": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": [
+    "2",
+    0
+   ],
+   "text": ""
+  }
+ },
+ "9": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "8",
+    0
+   ],
+   "vae": [
+    "3",
+    0
+   ]
+  }
+ },
+ "10": {
+  "class_type": "VAEDecodeAudio",
+  "inputs": {
+   "samples": [
+    "8",
+    0
+   ],
+   "vae": [
+    "4",
+    0
+   ]
+  }
+ },
+ "11": {
+  "class_type": "VHS_VideoCombine",
+  "inputs": {
+   "images": [
+    "9",
+    0
+   ],
+   "audio": [
+    "10",
+    0
+   ],
+   "frame_rate": 24,
+   "loop_count": 0,
+   "filename_prefix": "h3_refimg_bot",
+   "format": "video/h264-mp4",
+   "pingpong": false,
+   "save_output": true
+  }
+ },
+ "15": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "{{input_image}}"
+  }
+ },
+ "16": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "{{input_image_2}}"
+  }
+ }
+}

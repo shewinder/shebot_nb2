@@ -2,7 +2,7 @@
 """
 Author: SheBot
 Date: 2026-08-18
-Description: MiniMax H3 视频生成脚本（文生视频/图生视频），供 video_generation SKILL 调用
+Description: MiniMax H3 视频生成脚本（文生视频/图生视频/角色参考），供 video_generation SKILL 调用
 
 约定：
 - 工作流 JSON 放在 skill 目录的 reference/ 下：h3_t2v.json / h3_i2v.json
@@ -56,7 +56,8 @@ COMFYUI_BASE_URL = os.environ.get("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
 # 任务名称 → 工作流文件名
 TASK_WORKFLOW = {
     "t2v": "h3_t2v",   # MiniMax H3 文生视频（带音频，约 1-2 分钟）
-    "i2v": "h3_i2v",   # MiniMax H3 图生视频（首帧锚定，约 1-2 分钟）
+    "i2v": "h3_i2v",   # MiniMax H3 图生视频（首帧/尾帧锚定，约 1-2 分钟）
+    "ref": "h3_refimg",  # MiniMax H3 角色参考模式（ref2va，无锚定，首帧自然+角色跟随）
 }
 
 # H3 帧数网格：17k+5（24fps 下 124≈5.2s, 243≈10.1s）
@@ -123,6 +124,23 @@ def _apply_anchors(wf: Dict[str, Any], first_name: Optional[str] = None,
     else:
         wf["7"]["inputs"].pop("last_frame", None)
         wf.pop("14", None)
+
+
+def _apply_ref_images(wf: Dict[str, Any], uploaded: List[str]) -> None:
+    """按参考图数量重建 MiniMaxH3ReferenceToVideo 的 ref_images 输入（就地修改）
+
+    每张图一个 LoadImage 节点（从 id 15 起），ref_images.ref_image_i 指向对应节点。
+    先清空工作流预置的 ref_images.* 输入，避免残留引用缺失节点的输入。
+    """
+    for key in [k for k in wf["7"]["inputs"] if k.startswith("ref_images.")]:
+        del wf["7"]["inputs"][key]
+    for i, fname in enumerate(uploaded):
+        img_nid = str(15 + i)
+        wf[img_nid] = {"class_type": "LoadImage", "inputs": {"image": fname}}
+        wf["7"]["inputs"][f"ref_images.ref_image_{i}"] = [img_nid, 0]
+    # 清理超出参考图数量的预置 LoadImage 节点（基础工作流只有 15/16）
+    for j in range(len(uploaded), 16):
+        wf.pop(str(15 + j), None)
 
 
 def upload_image_to_comfyui(image_path: str) -> str:
@@ -301,13 +319,13 @@ def store_video(data: bytes) -> Dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ComfyUI 视频生成")
-    parser.add_argument("--task", choices=["t2v", "i2v"], default="t2v", help="任务类型")
+    parser.add_argument("--task", choices=["t2v", "i2v", "ref"], default="t2v", help="任务类型")
     parser.add_argument("--prompt", default="", help="视频描述（已调优）")
     parser.add_argument("--duration", type=float, default=2.0,
                         help="时长（秒，1-15，默认 2）")
     parser.add_argument("--resolution", choices=list(RESOLUTION_PIXELS.keys()), default="480p",
                         help="分辨率档位（默认 480p 快速；768p 高清约 3-5 倍耗时）")
-    parser.add_argument("--images", default="", help="图生视频输入图标识符，逗号分隔（多图=多帧锚定）")
+    parser.add_argument("--images", default="", help="输入图标识符，逗号分隔（i2v=锚定图；ref=角色参考图）")
     parser.add_argument("--guides", default="", help="多图锚定时间点（秒，逗号分隔，须与图片数一致；缺省自动均分）")
     parser.add_argument("--anchor", choices=["first", "last"], default="first",
                         help="单图锚定位置（首帧/尾帧，默认首帧）")
@@ -419,6 +437,30 @@ def main() -> None:
                 _apply_anchors(wf, first_name=uploaded[0])
             else:
                 _apply_anchors(wf, last_name=uploaded[0])
+    elif args.task == "ref":
+        # 角色参考模式（ref2va）：多图作 <Picture N> 参考，无锚定，首帧自然
+        image_paths = []
+        for ident in args.images.split(","):
+            ident = ident.strip()
+            if not ident:
+                continue
+            path = resolve_image_file(ident)
+            if path:
+                image_paths.append(path)
+            else:
+                output_error(f"未找到图片标识符: {ident}")
+                return
+        if not image_paths:
+            output_error("角色参考模式需要提供 --images 参考图标识符")
+            return
+        try:
+            width, height = compute_target_size(image_paths[0], max_pixels=max_pixels)
+            uploaded = [upload_image_to_comfyui(p) for p in image_paths]
+        except Exception as e:
+            output_error(f"图片上传失败: {e}")
+            return
+        apply_size(wf, width, height)
+        _apply_ref_images(wf, uploaded)
     else:
         # t2v：档位 16:9 基准尺寸（32 对齐）
         base_sizes = {"480p": (864, 480), "768p": (1344, 768)}
