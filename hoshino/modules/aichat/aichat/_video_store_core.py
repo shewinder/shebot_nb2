@@ -80,7 +80,8 @@ class VideoStoreCore:
         self._meta_file = self._dir / ".meta.json"
         self._lock = threading.Lock()
         self._memory_fallback: Dict[str, str] = {}
-        self._ensure_dir()
+        # 惰性建目录：会话创建不再急切 mkdir（与 _image_store_core 对齐），
+        # 仅在 store_bytes/_save_meta 真正写入时创建
         self._meta = self._load_meta()
 
     def _ensure_dir(self) -> None:
@@ -97,6 +98,7 @@ class VideoStoreCore:
 
     def _save_meta(self) -> None:
         try:
+            self._ensure_dir()
             tmp = self._meta_file.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(self._meta, ensure_ascii=False), encoding="utf-8")
             tmp.replace(self._meta_file)
@@ -133,9 +135,10 @@ class VideoStoreCore:
             self._meta.pop(data["identifier"].lstrip("<").rstrip(">"), None)
             removed += 1
 
-    def store_bytes(self, data: bytes, source: str, ext: str = "mp4") -> VideoEntry:
+    def store_bytes(self, data: bytes, source: str, ext: str = "mp4", url: Optional[str] = None) -> VideoEntry:
         """存储视频字节数据，返回 VideoEntry"""
         with self._lock:
+            self._ensure_dir()
             use_ext = ext if ext in ("mp4", "webm", "gif") else "mp4"
             idx = self._next_index(source)
             filename = f"{source}_video_{idx}.{use_ext}"
@@ -152,13 +155,13 @@ class VideoStoreCore:
                 return VideoEntry(
                     identifier=identifier, source=source, session_id=self.session_id,
                     filename="", format=use_ext, size_bytes=len(data),
-                    created_at=time.time(), file_path=Path(""), url=None,
+                    created_at=time.time(), file_path=Path(""), url=url,
                 )
 
             entry = VideoEntry(
                 identifier=identifier, source=source, session_id=self.session_id,
                 filename=filename, format=use_ext, size_bytes=len(data),
-                created_at=time.time(), file_path=file_path.resolve(), url=None,
+                created_at=time.time(), file_path=file_path.resolve(), url=url,
             )
             self._meta[identifier.lstrip("<").rstrip(">")] = entry.to_dict()
             self._cleanup_locked()
@@ -186,6 +189,28 @@ class VideoStoreCore:
         if entry and entry.file_path.exists():
             return entry.file_path
         return None
+
+    def clear(self) -> None:
+        """清空当前会话所有视频，并删除空目录（best-effort，与图片存储对齐）"""
+        with self._lock:
+            for data in list(self._meta.values()):
+                try:
+                    p = Path(data.get("file_path", ""))
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
+            self._meta.clear()
+            try:
+                if self._meta_file.exists():
+                    self._meta_file.unlink()
+            except Exception:
+                pass
+            try:
+                self._dir.rmdir()
+            except OSError:
+                pass
+            logger.info(f"[VideoStoreCore] 清空会话 {self.session_id} 视频缓存")
 
     def list_all(self) -> List[VideoEntry]:
         self._meta = self._load_meta()

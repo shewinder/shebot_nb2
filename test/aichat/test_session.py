@@ -155,5 +155,57 @@ class TestImageStoreCore(unittest.TestCase):
             tmp.cleanup()
 
 
+class TestVideoStoreCore(unittest.TestCase):
+    def test_lazy_dir_user_source_and_clear(self):
+        """视频存储与图片对齐：惰性建目录、user 源标识符、clear 删目录"""
+        from hoshino.modules.aichat.aichat._video_store_core import BASE_DIR, VideoStoreCore
+
+        tmp = tempfile.TemporaryDirectory()
+        old_base = BASE_DIR
+        BASE_DIR = Path(tmp.name)
+        try:
+            store = VideoStoreCore("vid_sess")
+            self.assertFalse(store._dir.exists())  # 构造零目录
+
+            # user 源：标识符 <user_video_1>，url 记录
+            entry = store.store_bytes(b"\x00video", "user", "mp4", url="https://example.com/a.mp4")
+            self.assertEqual(entry.identifier, "<user_video_1>")
+            self.assertEqual(entry.url, "https://example.com/a.mp4")
+            self.assertTrue(store._dir.exists())
+
+            # ai 源标识符独立编号
+            entry2 = store.store_bytes(b"\x00video2", "ai", "mp4")
+            self.assertEqual(entry2.identifier, "<ai_video_1>")
+
+            # clear：内容与目录一并消失
+            store.clear()
+            self.assertFalse(store._dir.exists())
+            self.assertEqual(store.list_all(), [])
+        finally:
+            BASE_DIR = old_base
+            tmp.cleanup()
+
+
+class TestVideoSessionMethods(unittest.IsolatedAsyncioTestCase):
+    async def test_store_user_video_is_async(self):
+        """回归：store_user_video 为 async（曾被同步实现 + await 调用导致崩溃，
+        表现为转发视频已存储但对话未进入、历史丢失）"""
+        from hoshino.modules.aichat.aichat._video_store_core import BASE_DIR
+
+        tmp = tempfile.TemporaryDirectory()
+        old_base = BASE_DIR
+        BASE_DIR = Path(tmp.name)
+        try:
+            s = Session("vid_method_1", 1)
+            ident = await s.store_user_video(b"\x00v", url="https://example.com/v.mp4")
+            self.assertEqual(ident, "<user_video_1>")
+            # AI 侧同理
+            ident2 = await s.store_ai_video_bytes(b"\x00v2")
+            self.assertEqual(ident2, "<ai_video_1>")
+        finally:
+            BASE_DIR = old_base
+            tmp.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()

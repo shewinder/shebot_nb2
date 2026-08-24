@@ -127,5 +127,23 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([p for p in parts if p.kind == "image"], [])
 
 
+    async def test_user_video_identifier(self):
+        """用户视频标识符 <user_video_1> 解析为 video part"""
+        s = Session("reply_video_1", 1)
+        fake_video_store = SimpleNamespace(get=lambda norm: SimpleNamespace(file_path=Path("v.mp4")) if norm == "<user_video_1>" else None)
+        s._video_store = fake_video_store
+        parts = await build_reply("看这段<user_video_1>视频", s)
+        kinds = [p.kind for p in parts]
+        self.assertEqual(kinds, ["text", "video", "text"])
+        self.assertEqual(parts[1].identifier, "<user_video_1>")
+
+    async def test_missing_video_identifier_literal(self):
+        s = Session("reply_video_2", 1)
+        s._video_store = SimpleNamespace(get=lambda norm: None)
+        parts = await build_reply("看<ai_video_9>", s)
+        self.assertTrue(all(p.kind == "text" for p in parts))
+        self.assertIn("<ai_video_9>", "".join(p.text for p in parts))
+
+
 if __name__ == "__main__":
     unittest.main()

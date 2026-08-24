@@ -185,6 +185,16 @@ def get_event_imageurl(event: Event) -> List[str]:
     return imglist
 
 
+def get_event_videourl(event: Event) -> List[str]:
+    msg = event.get_message()
+    videolist = [
+        s.data['url']
+        for s in msg
+        if s.type == 'video' and 'url' in s.data
+    ]
+    return videolist
+
+
 
 
 async def _strip_cmd(bot: "Bot", event: "Event", state: T_State):

@@ -98,8 +98,9 @@ class Session:
         self.continuous_mode = False
         self._image_store = ImageStore(session_id)
         self._image_store.clear()  # 新建 Session 时清空旧图像缓存
-        # 视频存储（独立标识符 <ai_video_N>，目录与图片同级）
+        # 视频存储（独立标识符 <ai_video_N> / <user_video_N>，目录与图片同级）
         self._video_store = VideoStoreCore(session_id)
+        self._video_store.clear()  # 新建 Session 时清空旧视频缓存
         # SKILL 系统：已激活的 SKILL 名称集合
         self.active_skills: Set[str] = set()
         # 当前正在执行的 SKILL（用于工具权限检查）
@@ -162,9 +163,21 @@ class Session:
         """列出当前会话所有图像（供 Skill 脚本使用）"""
         return self._image_store.list_all()
 
-    def store_ai_video_bytes(self, data: bytes) -> str:
-        """存储 AI 生成的视频字节，返回标识符（如 <ai_video_1>）"""
+    async def store_ai_video_bytes(self, data: bytes) -> str:
+        """存储 AI 生成的视频字节，返回标识符（如 <ai_video_1>）
+
+        async 与 store_ai_image 对齐（曾为同步方法导致调用方 await 崩溃）
+        """
         entry = self._video_store.store_bytes(data, "ai", "mp4")
+        self.last_active = time.time()
+        return entry.identifier
+
+    async def store_user_video(self, data: bytes, url: Optional[str] = None) -> str:
+        """存储用户上传的视频字节，返回标识符（如 <user_video_1>）
+
+        async 与 store_user_image 对齐
+        """
+        entry = self._video_store.store_bytes(data, "user", "mp4", url=url)
         self.last_active = time.time()
         return entry.identifier
 
@@ -175,6 +188,32 @@ class Session:
     def list_videos(self) -> List[Any]:
         """列出当前会话所有视频"""
         return self._video_store.list_all()
+
+    def build_video_list_prompt(self) -> str:
+        """构建可用视频列表提示（动态内容，附加到用户消息）"""
+        videos = self._video_store.list_all()
+        if not videos:
+            return ""
+
+        lines = [
+            "",
+            "=" * 40,
+            "【当前可用视频】",
+        ]
+
+        for v in videos:
+            size_kb = v.size_bytes // 1024
+            line = f"{v.identifier} ({v.source}, {v.format}, {size_kb}KB)"
+            if v.url:
+                line += f"\n  url: {v.url}"
+            lines.append(line)
+
+        lines.extend([
+            "=" * 40,
+            ""
+        ])
+
+        return "\n".join(lines)
 
     @staticmethod
     def build_image_rules_prompt() -> str:
@@ -257,7 +296,7 @@ class Session:
         return deleted, actual
 
     def dispose(self) -> None:
-        """统一清理会话资源：图片目录 + MCP 状态 + 会话锁
+        """统一清理会话资源：图片/视频目录 + MCP 状态 + 会话锁
 
         删除会话前必须调用（SessionManager._remove_session 已内聚此逻辑）。
         子 Agent 会话在图片重定位/发送完成前不要调用。
@@ -266,6 +305,11 @@ class Session:
             self._image_store.clear()
         except Exception:
             logger.exception(f"{self._tag} 清理图片缓存失败")
+
+        try:
+            self._video_store.clear()
+        except Exception:
+            logger.exception(f"{self._tag} 清理视频缓存失败")
 
         mcp_sm = get_mcp_session_manager()
         if mcp_sm is not None:
@@ -485,18 +529,22 @@ class Session:
                 {"role": "assistant", "content": "已了解当前系统上下文。"},
             ]
 
-        # 3. 图片列表提示附加到（副本的）最后一条 user 消息——不修改持久历史
+        # 3. 图片/视频列表提示附加到（副本的）最后一条 user 消息——不修改持久历史
         #    持久历史保持干净，提示文本只在本次 API 请求中生效
         api_messages = [_copy_message(m) for m in self.messages]
-        image_list_prompt = self.build_image_list_prompt()
-        if image_list_prompt:
+        list_prompts = [p for p in (
+            self.build_image_list_prompt(),
+            self.build_video_list_prompt(),
+        ) if p]
+        if list_prompts:
+            extra_prompt = "\n".join(list_prompts)
             for msg in reversed(api_messages):
                 if msg.get("role") == "user":
                     content = msg.get("content", "")
                     if isinstance(content, list):
-                        content.append({"type": "text", "text": image_list_prompt})
+                        content.append({"type": "text", "text": extra_prompt})
                     elif isinstance(content, str):
-                        msg["content"] = content + image_list_prompt
+                        msg["content"] = content + extra_prompt
                     break
 
         # 调试日志

@@ -1,4 +1,5 @@
 """AI 聊天处理模块"""
+import asyncio
 import base64
 import os
 from typing import Any, Dict, List, Optional, Union
@@ -7,8 +8,8 @@ from loguru import logger
 import httpx
 
 from hoshino import Bot, Event
-from hoshino.util import get_event_imageurl, truncate_log
-from hoshino.util.message_util import extract_images_from_reply
+from hoshino.util import get_event_imageurl, get_event_videourl, truncate_log
+from hoshino.util.message_util import extract_images_from_reply, extract_videos_from_reply
 
 from .api import api_manager
 from .config import Config
@@ -19,6 +20,9 @@ from .session import session_manager, Session, parse_choices_from_response, form
 from .shortcuts import shortcuts_manager
 
 conf = Config.get_instance('aichat')
+
+# 用户视频大小上限（100MB，QQ 视频段常见上限内）
+MAX_VIDEO_SIZE = 100 * 1024 * 1024
 
 
 async def download_image_to_base64(image_url: str) -> Optional[str]:
@@ -124,8 +128,19 @@ async def handle_ai_chat(bot: Bot, event: Event):
     try:
         image_urls.extend(await extract_images_from_reply(event, bot))
     except Exception as e:
-        logger.debug(f"提取引用消息图片失败: {e}")
-    logger.info(f"检测到图片URL: {image_urls}")
+        logger.warning(f"提取引用消息图片异常: {type(e).__name__}: {e}")
+
+    video_urls = get_event_videourl(event)
+    try:
+        video_urls.extend(await extract_videos_from_reply(event, bot))
+    except Exception as e:
+        logger.warning(f"提取引用消息视频异常: {type(e).__name__}: {e}")
+
+    if getattr(event, "reply", None):
+        # 引用消息媒体提取计数：便于诊断"转发媒体未进入对话"
+        logger.info(f"引用消息媒体提取：图片 {len(image_urls)} 个，视频 {len(video_urls)} 个")
+    elif image_urls or video_urls:
+        logger.info(f"媒体提取：图片 {len(image_urls)} 个，视频 {len(video_urls)} 个")
 
     persona = persona_manager.get_persona(user_id, group_id)
     # 确定要对话，获取或创建 session
@@ -144,7 +159,32 @@ async def handle_ai_chat(bot: Bot, event: Event):
 
     # 串行化同一会话的消息处理，防止并发消息交错写入历史
     async with session.lock:
-        await _run_chat(bot, event, session, user_input, image_urls, api_config)
+        await _run_chat(bot, event, session, user_input, image_urls, video_urls, api_config)
+
+
+async def download_video(video_url: str) -> Optional[bytes]:
+    """下载视频字节（上限 100MB）"""
+    try:
+        async with httpx.AsyncClient(timeout=60.0, verify=False, follow_redirects=True) as client:
+            resp = await client.get(video_url)
+
+        if resp.status_code != 200:
+            logger.error(f"下载视频失败: {resp.status_code}, URL: {video_url}")
+            return None
+
+        data = resp.content
+        if not data:
+            logger.error(f"视频数据为空: {video_url}")
+            return None
+
+        if len(data) > MAX_VIDEO_SIZE:
+            logger.warning(f"视频过大，跳过: {len(data)} bytes, URL: {video_url}")
+            return None
+
+        return data
+    except Exception as e:
+        logger.exception(f"下载视频失败: {e}, URL: {video_url}")
+        return None
 
 
 async def _run_chat(
@@ -153,15 +193,31 @@ async def _run_chat(
     session: Session,
     user_input: str,
     image_urls: List[str],
+    video_urls: List[str],
     api_config: Dict[str, Any],
 ) -> None:
     """会话锁内的实际对话编排：构建消息 → 执行 → 回写历史 → 发送"""
     supports_multimodal = api_config.get("supports_multimodal", False)
     message_content: Union[str, List[Dict[str, Any]]]
 
+    # 用户视频：并行下载再存储（串行下载大视频会长时间卡住对话）
+    if video_urls:
+        downloaded = await asyncio.gather(*[download_video(u) for u in video_urls])
+        for video_url, video_bytes in zip(video_urls, downloaded):
+            if video_bytes:
+                identifier = await session.store_user_video(video_bytes, url=video_url)
+                logger.info(f"存储用户视频: {identifier}")
+            else:
+                logger.warning(f"视频处理失败，跳过: {video_url}")
+
+        if not user_input:
+            await bot.send(event, "视频已接收并保存。当前无法直接分析视频内容，你可以让我基于它执行任务（如视频续写）。")
+            return
+
     if image_urls and not supports_multimodal:
-        for img_url in image_urls:
-            base64_image = await download_image_to_base64(img_url)
+        # 并行下载（转发多图不再串行卡顿），按原顺序存储
+        downloaded = await asyncio.gather(*[download_image_to_base64(u) for u in image_urls])
+        for img_url, base64_image in zip(image_urls, downloaded):
             if base64_image:
                 identifier = await session.store_user_image(base64_image, url=img_url)
                 logger.info(f"存储用户图片: {identifier} (模型不支持多模态，可通过工具使用)")
@@ -177,8 +233,8 @@ async def _run_chat(
     elif image_urls and supports_multimodal:
         content_parts: List[Dict[str, Any]] = []
 
-        for img_url in image_urls:
-            base64_image = await download_image_to_base64(img_url)
+        downloaded = await asyncio.gather(*[download_image_to_base64(u) for u in image_urls])
+        for img_url, base64_image in zip(image_urls, downloaded):
             if base64_image:
                 identifier = await session.store_user_image(base64_image, url=img_url)
                 content_parts.append({

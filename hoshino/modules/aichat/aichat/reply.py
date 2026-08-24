@@ -27,12 +27,13 @@ from .md_render import render_text_if_markdown
 if TYPE_CHECKING:
     from .session import Session
 
-# 图片/at 标识符（容错空白）。IMAGE_TOKEN_RE 同时被 agent_loop.rehome_images 复用
+# 图片/视频/at 标识符（容错空白）。IMAGE_TOKEN_RE 同时被 agent_loop.rehome_images 复用
 IMAGE_TOKEN_RE = re.compile(r"<\s*(user_image_\d+|ai_image_\d+)\s*>")
 # @ 仅匹配合法 QQ 号长度（5-11 位），避免模型解释语法时输出短数字被误触发
 AT_TOKEN_RE = re.compile(r"<\s*@(\d{5,11})\s*>")
+VIDEO_TOKEN_RE = re.compile(r"<\s*(user_video_\d+|ai_video_\d+)\s*>")
 TOKEN_RE = re.compile(
-    r"<\s*(user_image_\d+|ai_image_\d+|ai_video_\d+)\s*>|<\s*@(\d{5,11})\s*>"
+    r"<\s*(user_image_\d+|ai_image_\d+|user_video_\d+|ai_video_\d+)\s*>|<\s*@(\d{5,11})\s*>"
 )
 
 
@@ -70,13 +71,14 @@ async def build_reply(
                 parts.append(ReplyPart(kind="text", text=norm))
             elif norm in referenced:
                 continue
-            elif norm.startswith("<ai_video_"):
-                # 视频标识符：查视频存储
+            elif VIDEO_TOKEN_RE.fullmatch(norm):
+                # 视频标识符（用户/AI 视频）：查视频存储
                 if session._video_store.get(norm) is None:
                     logger.warning(f"回复引用了不存在的视频标识符，降级为字面文本: {norm}")
                     parts.append(ReplyPart(kind="text", text=norm))
                 else:
                     parts.append(ReplyPart(kind="video", identifier=norm))
+                    session._turn_sent_images.add(norm)
                     referenced.add(norm)
             elif session._image_store.get(norm) is None:
                 logger.warning(f"回复引用了不存在的图片标识符，降级为字面文本: {norm}")
