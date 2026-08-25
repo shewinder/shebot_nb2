@@ -1,5 +1,10 @@
 FROM python:3.11-slim
 
+# 系统依赖：ffmpeg（视频拼接/帧提取/彩噪注入）
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
 # 安装uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
