@@ -114,7 +114,7 @@ class Config(BaseConfig):
     subagent_profiles: List[SubAgentProfile] = []  # 子 Agent 模型配置
     # 工具权限覆盖：{工具名: "SUPERUSER"|"USER"}，覆盖默认权限表（默认全 USER）
     tool_permissions: Dict[str, str] = {}
-    tool_timeout: float = 300.0         # 单次工具执行兜底超时（秒）
+    tool_timeout: float = 600.0         # 单次工具执行兜底超时（秒）
 
     # LLM Gateway 参数
     llm_connect_timeout: float = 10.0   # 连接超时（秒）

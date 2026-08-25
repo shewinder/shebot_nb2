@@ -24,11 +24,13 @@ import copy
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -45,7 +47,7 @@ from _common import (  # noqa: E402
     output_error,
 )
 from comfyui_workflow_loader import (  # noqa: E402
-    load_workflow, apply_prompt, apply_input_images,
+    load_workflow, apply_prompt,
 )
 from comfyui_video import (  # noqa: E402
     COMFYUI_BASE_URL, RESOLUTION_PIXELS, VideoStoreCore, H3_MIN_FRAMES,
@@ -168,9 +170,13 @@ def probe_video_size(ffmpeg: str, video: Path) -> tuple:
 
 def compute_target_size_wh(width: int, height: int, max_pixels: int,
                            alignment: int = 32) -> tuple:
-    """按宽高比计算目标分辨率（32 对齐，像素量不超 max_pixels）"""
+    """按宽高比计算目标分辨率（32 对齐，像素量尽量吃满 max_pixels，允许放大）
+
+    源分辨率低于档位上限时放大到档位面积（如 720×960 → 864×1152），
+    提升清晰度；H3 官方 768p 档面积（~1MP）内安全。
+    """
     aspect = width / height
-    scale = min((max_pixels / (width * height)) ** 0.5, 1.0)
+    scale = (max_pixels / (width * height)) ** 0.5
     out_w = max(alignment, round(width * scale / alignment) * alignment)
     out_h = max(alignment, round(out_w / aspect / alignment) * alignment)
     while out_w * out_h > max_pixels * 1.1 and out_w > alignment and out_h > alignment:
@@ -193,7 +199,10 @@ def plan_source_windows(total_frames: int) -> List[tuple]:
         if remaining < SOURCE_WINDOW_FRAMES:
             # 末段对齐到 H3 网格（17k+5），向下取整
             window = 17 * ((window - 5) // 17) + 5
-            if window < H3_MIN_FRAMES:
+            # 续写段会裁掉 22 帧 context，尾段不足一个有效输出段时直接丢弃，
+            # 避免提交后得到空视频。
+            min_window = H3_MIN_FRAMES if not windows else CONTEXT_FRAMES + H3_MIN_FRAMES
+            if window < min_window:
                 break
         windows.append((start, window))
         if remaining <= SOURCE_WINDOW_FRAMES:
@@ -329,127 +338,81 @@ def concat_videos(ffmpeg: str, paths: List[Path], out_path: Path) -> None:
         raise RuntimeError(f"拼接失败(exit {e.returncode}): {detail}")
 
 
-# ---------- 链式任务状态机（execute_script 300s 超时下分阶段续跑） ----------
+# ---------- 无本地状态续跑 ----------
 
-# 任务状态标记
-STALE_MAX_HOURS = 24.0   # 死任务清理阈值
-MAX_FAIL_COUNT = 3       # 同任务连续失败上限（超出标记 failed）
-
-def _state_root() -> Path:
-    """状态根目录：data/aichat/sessions/{session_id}/chain_state/{key}/"""
-    project = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
-    session_id = os.environ.get("SESSION_ID", "unknown")
-    return project / "data" / "aichat" / "sessions" / session_id / "chain_state"
+STATE_VERSION = 1
+RUN_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
-def new_state_key() -> str:
-    """生成唯一任务 key"""
-    import uuid
-    return time.strftime("%Y%m%d%H%M%S") + "_" + uuid.uuid4().hex[:6]
+def _state_video_path(store: VideoStoreCore, identifier: Any, field: str) -> Path:
+    """从当前会话的视频存储解析 state 中的标识符"""
+    if not isinstance(identifier, str):
+        raise ValueError(f"state.{field} 必须是视频标识符")
+    path = store.get_file_path(identifier)
+    if not path:
+        raise ValueError(f"state.{field} 对应的视频不存在或不属于当前会话")
+    return path
 
 
-def save_state(state: Dict[str, Any]) -> None:
-    """保存任务状态（原子写：先写临时文件再改名）"""
-    state["updated_at"] = time.time()
-    state_dir = Path(state["state_dir"])
-    state_dir.mkdir(parents=True, exist_ok=True)
-    tmp = state_dir / "state.json.tmp"
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.rename(state_dir / "state.json")
-
-
-def load_state(key: str) -> Optional[Dict[str, Any]]:
-    """按 key 加载任务状态"""
-    state_file = _state_root() / key / "state.json"
-    if not state_file.exists():
-        return None
+def _validate_state(raw: str, session_id: str) -> Dict[str, Any]:
+    """校验 LLM 原样回传的续跑 state"""
     try:
-        return json.loads(state_file.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+        state = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"--state 不是有效 JSON: {e.msg}")
+    if not isinstance(state, dict) or state.get("version") != STATE_VERSION:
+        raise ValueError("--state 版本不支持")
+    if state.get("session_id") != session_id:
+        raise ValueError("state 不属于当前会话")
+    if not RUN_ID_RE.fullmatch(str(state.get("run_id", ""))):
+        raise ValueError("state.run_id 非法")
+    total = state.get("segments_total")
+    done = state.get("segments_done")
+    if not isinstance(total, int) or not isinstance(done, int) or not 0 <= done <= total:
+        raise ValueError("state 分段进度非法")
+    if not isinstance(state.get("segment_lengths"), list) or len(state["segment_lengths"]) != total:
+        raise ValueError("state.segment_lengths 非法")
+    if not isinstance(state.get("delivered"), list) or len(state["delivered"]) != done:
+        raise ValueError("state.delivered 与进度不一致")
+    prompt_id = state.get("current_prompt_id")
+    if prompt_id is not None and not isinstance(prompt_id, str):
+        raise ValueError("state.current_prompt_id 非法")
+    if done == total and prompt_id is not None:
+        raise ValueError("已完成任务不能保留 current_prompt_id")
+    if not isinstance(state.get("uploaded_images"), list) or not state["uploaded_images"]:
+        raise ValueError("state.uploaded_images 非法")
+    if state.get("source_windows") is not None:
+        if not isinstance(state.get("source_24_video"), str):
+            raise ValueError("state.source_24_video 缺失")
+        if len(state["source_windows"]) != total:
+            raise ValueError("state.source_windows 与分段数不一致")
+    return state
 
 
-def cleanup_stale(max_age_hours: float = STALE_MAX_HOURS) -> None:
-    """清理过期/失败/损坏的任务状态（每次 main 启动时调用）"""
-    root = _state_root()
-    if not root.exists():
-        return
-    now = time.time()
-    for key in list(root.iterdir()):
-        state_file = root / key / "state.json"
-        if not state_file.exists():
-            shutil.rmtree(root / key, ignore_errors=True)
-            continue
-        try:
-            st = json.loads(state_file.read_text(encoding="utf-8"))
-        except Exception:
-            shutil.rmtree(root / key, ignore_errors=True)
-            continue
-        if st.get("status") == "failed":
-            shutil.rmtree(root / key, ignore_errors=True)
-        elif now - st.get("updated_at", 0) > max_age_hours * 3600:
-            shutil.rmtree(root / key, ignore_errors=True)
-
-
-def find_active_task() -> Optional[str]:
-    """查找会话内活跃任务 key（running 且未过期，取最新更新的）"""
-    root = _state_root()
-    if not root.exists():
-        return None
-    now = time.time()
-    best: Optional[tuple] = None
-    for key in root.iterdir():
-        state_file = root / key / "state.json"
-        if not state_file.exists():
-            continue
-        try:
-            st = json.loads(state_file.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if st.get("status") == "failed":
-            continue
-        if now - st.get("updated_at", 0) > STALE_MAX_HOURS * 3600:
-            continue
-        if st.get("segments_done", 0) < st.get("segments_total", 0):
-            if best is None or st.get("updated_at", 0) > best[1]:
-                best = (key.name, st.get("updated_at", 0))
-    return best[0] if best else None
-
-
-def output_partial(state: Dict[str, Any]) -> None:
-    """输出分阶段进度（LLM 据此继续调用 --resume）"""
-    print(json.dumps({
-        "success": True,
-        "status": "partial",
+def output_state(state: Dict[str, Any], status: str, message: str,
+                 error: str = "") -> None:
+    """输出由 LLM 保存并原样传回的无本地状态续跑信息"""
+    result: Dict[str, Any] = {
+        "success": not error,
+        "status": status,
         "progress": f"{state['segments_done']}/{state['segments_total']}",
-        "resume_key": state["key"],
-        "message": f"链式生成进行中（{state['segments_done']}/{state['segments_total']} 段完成），"
-                   f"继续调用 --resume {state['key']}",
-    }, ensure_ascii=False))
+        "state": state,
+        "message": message,
+    }
+    if error:
+        result["error"] = error
+    print(json.dumps(result, ensure_ascii=False))
 
 
-def output_resumable_error(state: Optional[Dict[str, Any]], error: str) -> None:
-    """输出可恢复错误（保留状态，可 --resume 重试）"""
-    if state:
-        print(json.dumps({
-            "success": False,
-            "error": error,
-            "resume_key": state["key"],
-            "message": f"可用 --resume {state['key']} 重试",
-        }, ensure_ascii=False))
-    else:
-        output_error(error)
-
-
-def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str) -> Dict[str, Any]:
-    """构建第 seg_idx 段的工作流（从状态恢复所有中间产物）"""
-    seg_length = state["seg_lengths"][seg_idx - 1]
+def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
+                           store: VideoStoreCore, work_dir: Path) -> Dict[str, Any]:
+    """构建第 seg_idx 段工作流，所有输入均由 state 中的标识符解析"""
+    seg_length = state["segment_lengths"][seg_idx - 1]
     seed = state["seed"]
     steps = state["steps"]
     prompt = state["prompt"]
     width, height = state["width"], state["height"]
     noise_on = state["noise"] == "on"
-    state_dir = Path(state["state_dir"])
 
     if seg_idx == 1:
         wf = copy.deepcopy(load_workflow(CHAIN_WORKFLOWS["initial"]))
@@ -463,22 +426,20 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str) -> 
         apply_chain_params(wf, prompt, seg_length, steps, seed)
         apply_size(wf, width, height)
         # context：上一段交付尾部 22 帧 →（可选彩噪）→ 上传
-        prev_delivered = Path(state["delivered"][-1])
-        ctx_path = state_dir / f"{state['key']}_ctx_{seg_idx}.mp4"
+        prev_delivered = _state_video_path(store, state["delivered"][-1], "delivered")
+        ctx_path = work_dir / f"{state['run_id']}_ctx_{seg_idx}.mp4"
         prepare_context(ffmpeg, prev_delivered, CONTEXT_FRAMES,
                         noise_on, ctx_path, seed + seg_idx)
         ctx_name = upload_video_to_comfyui(str(ctx_path))
-        state["ctx_names"][str(seg_idx)] = ctx_name
         wf["101"]["inputs"]["file"] = ctx_name
 
     # 源视频切片（角色替换模式）
     if state.get("source_windows"):
         seg_start, seg_window = state["source_windows"][seg_idx - 1]
-        # 本地文件名带任务 key 前缀：并发任务上传到 ComfyUI input 时避免同名冲突
-        slice_path = state_dir / f"{state['key']}_src_seg_{seg_idx}.mp4"
-        slice_source_window(ffmpeg, Path(state["src_24_path"]), seg_start, seg_window, slice_path)
+        src_24_path = _state_video_path(store, state["source_24_video"], "source_24_video")
+        slice_path = work_dir / f"{state['run_id']}_src_seg_{seg_idx}.mp4"
+        slice_source_window(ffmpeg, src_24_path, seg_start, seg_window, slice_path)
         source_name = upload_video_to_comfyui(str(slice_path))
-        state["seg_slice_names"][str(seg_idx)] = source_name
     else:
         source_name = None
 
@@ -496,40 +457,12 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str) -> 
     return wf
 
 
-def run_segment(seg_idx: int, state: Dict[str, Any], ffmpeg: str, wait: int) -> str:
-    """执行第 seg_idx 段：提交（如需）→ 轮询 → 存交付文件
-
-    Returns: "done" / "pending" / "error"
-    """
-    state["current_seg"] = seg_idx
-    prompt_id = state.get("current_prompt_id")
-    if not prompt_id:
-        wf = build_segment_workflow(seg_idx, state, ffmpeg)
-        prompt_id = submit_task(wf)
-        state["current_prompt_id"] = prompt_id
-        save_state(state)
-
-    result = poll_result(prompt_id, wait)
-    if result["status"] == "done":
-        state_dir = Path(state["state_dir"])
-        seg_file = state_dir / f"seg_{seg_idx}.mp4"
-        seg_file.write_bytes(result["data"])
-        state["delivered"].append(str(seg_file))
-        state["segments_done"] = seg_idx
-        state["current_prompt_id"] = None
-        state["fail_count"] = 0  # 段成功重置失败计数
-        save_state(state)
-        return "done"
-    if result["status"] == "pending":
-        save_state(state)
-        return "pending"
-    # error：记录失败次数，超限标记 failed（防 resume 死循环）；状态保留可重试
-    state["current_prompt_id"] = None
-    state["fail_count"] = state.get("fail_count", 0) + 1
-    if state["fail_count"] >= MAX_FAIL_COUNT:
-        state["status"] = "failed"
-    save_state(state)
-    return "error"
+def submit_next_segment(state: Dict[str, Any], ffmpeg: str, store: VideoStoreCore,
+                        work_dir: Path) -> None:
+    """提交 state 指向的下一段，并将 ComfyUI prompt_id 写回 state"""
+    seg_idx = state["segments_done"] + 1
+    workflow = build_segment_workflow(seg_idx, state, ffmpeg, store, work_dir)
+    state["current_prompt_id"] = submit_task(workflow)
 
 
 def main() -> None:
@@ -537,239 +470,178 @@ def main() -> None:
     parser.add_argument("--images", default="", help="身份参考图标识符，逗号分隔（1-4 张，作 <Picture N>）")
     parser.add_argument("--source-video", default="", help="源视频标识符（可选，作 <Video 1> 角色替换）")
     parser.add_argument("--prompt", default="", help="六段式提示词（含 <Picture N> / <Video 1> 引用）")
-    parser.add_argument("--segments", type=int, default=2, help="总段数（默认 2；每段约 1-3 分钟）")
-    parser.add_argument("--duration", type=float, default=5.0, help="每段时长（秒，建议 >=5，默认 5；仅纯续写模式有效）")
-    parser.add_argument("--resolution", choices=list(RESOLUTION_PIXELS.keys()), default="480p",
-                        help="分辨率档位（默认 480p；768p 高清约 3-5 倍耗时）")
-    parser.add_argument("--noise", choices=["on", "off"], default="on",
-                        help="彩噪 taper 注入（默认 on：防链式锐度衰减；off 关闭）")
-    parser.add_argument("--steps", type=int, default=4, help="每段采样步数（默认 4，ref2v turbo LoRA 配置；质量优先可调 8/20）")
-    parser.add_argument("--no-lora", action="store_true",
-                        help="不使用 ref2v turbo LoRA/SigmaShift（工作流直连 UNET，供对照实验）")
-    parser.add_argument("--legacy-sampler", action="store_true",
-                        help="恢复旧采样器 res_multistep/beta（v5 时代配置，供对照实验）")
-    parser.add_argument("--keep-audio", action="store_true",
-                        help="成片保留源视频音轨（mux 原片 BGM/对白，时间轴 1:1 对齐）")
-    parser.add_argument("--seed", type=int, default=0, help="随机种子（0=随机）")
-    parser.add_argument("--wait", type=int, default=280, help="每段等待秒数（默认 280，自动 clamp 到 240 保证单次调用 <300s）")
-    parser.add_argument("--resume", default="", help="续跑已有任务（key 来自上次 partial 返回）")
+    parser.add_argument("--segments", type=int, default=2, help="总段数（默认 2）")
+    parser.add_argument("--duration", type=float, default=5.0, help="每段时长（秒，仅纯续写模式有效）")
+    parser.add_argument("--resolution", choices=list(RESOLUTION_PIXELS.keys()), default="480p")
+    parser.add_argument("--noise", choices=["on", "off"], default="on")
+    parser.add_argument("--steps", type=int, default=4)
+    parser.add_argument("--no-lora", action="store_true")
+    parser.add_argument("--legacy-sampler", action="store_true")
+    parser.add_argument("--keep-audio", action="store_true")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--wait", type=int, default=280)
+    parser.add_argument("--state", default="", help="LLM 上次返回的 state JSON（续跑时原样传回）")
     args = parser.parse_args()
-
-    # 单次调用预算：poll 240s + 提交下一段 ~30s = 270s < execute_script 300s 硬上限
-    args.wait = min(args.wait, 240)
+    args.wait = min(args.wait, 540)
 
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
         output_error("未找到 ffmpeg")
         return
+    session_id = os.environ.get("SESSION_ID", "unknown")
+    store = VideoStoreCore(session_id)
+    state: Optional[Dict[str, Any]] = None
 
-    # 启动时清理过期/失败/损坏的残留任务状态
-    cleanup_stale()
-
-    # ================= 续跑分支 =================
-    if args.resume:
-        state = load_state(args.resume.strip())
-        if not state:
-            output_error(f"任务不存在或状态已清理: {args.resume}")
-            return
-        session_id = os.environ.get("SESSION_ID", "unknown")
-        if state.get("session_id") != session_id:
-            output_error("任务不属于当前会话，无法续跑")
-            return
-        if state.get("status") == "failed":
-            output_error(f"任务 {args.resume} 已标记失败（连续失败超限或状态损坏），请重新发起任务")
-            return
-    else:
-        # ================= 首次提交分支 =================
-        # 会话级互斥：已有活跃任务时拒绝新建，提示 resume 旧任务
-        active_key = find_active_task()
-        if active_key:
-            output_error(f"会话已有进行中的链式任务，请使用 --resume {active_key} 继续（不要重复发起新任务）")
-            return
-        if not args.prompt:
-            output_error("--prompt 参数必填")
-            return
-        if not args.images:
-            output_error("需要提供 --images 身份参考图标识符")
-            return
-        if not 1 <= args.segments <= 10:
-            output_error("--segments 仅支持 1-10 段")
-            return
-        if not 1.0 <= args.duration <= 15.0:
-            output_error("每段时长仅支持 1-15 秒")
-            return
-
-        # ---- 身份参考图解析 + 上传 ----
-        image_paths: List[str] = []
-        for ident in args.images.split(","):
-            ident = ident.strip()
-            if not ident:
-                continue
-            path = resolve_image_file(ident)
-            if path:
-                image_paths.append(path)
-            else:
-                output_error(f"未找到图片标识符: {ident}")
-                return
-        if len(image_paths) > 4:
-            output_error("身份参考图最多 4 张")
-            return
-        try:
-            width, height = compute_target_size(image_paths[0], max_pixels=RESOLUTION_PIXELS[args.resolution])
-        except Exception as e:
-            output_error(f"图片尺寸计算失败: {e}")
-            return
-
-        # ---- 初始化任务状态 ----
-        key = new_state_key()
-        state_dir = _state_root() / key
-        state_dir.mkdir(parents=True, exist_ok=True)
-
-        # ---- 身份参考图上传（上传名唯一化：ComfyUI 同名上传会覆盖） ----
-        try:
-            uploaded_images = []
-            for i, p in enumerate(image_paths):
-                card_path = state_dir / f"{key}_card_{i + 1}{Path(p).suffix}"
-                shutil.copy2(p, card_path)
-                uploaded_images.append(upload_image_to_comfyui(str(card_path)))
-        except Exception as e:
-            output_error(f"图片上传失败: {e}")
-            return
-        state: Dict[str, Any] = {
-            "key": key,
-            "session_id": os.environ.get("SESSION_ID", "unknown"),
-            "created_at": time.time(),
-            "updated_at": time.time(),
-            "status": "running",
-            "fail_count": 0,
-            "state_dir": str(state_dir),
-            "prompt": args.prompt,
-            "segments_total": args.segments,
-            "segments_done": 0,
-            "current_seg": 0,
-            "current_prompt_id": None,
-            "delivered": [],
-            "width": width,
-            "height": height,
-            "seed": args.seed if args.seed else random.getrandbits(63),
-            "steps": args.steps,
-            "noise": args.noise,
-            "no_lora": args.no_lora,
-            "legacy_sampler": args.legacy_sampler,
-            "keep_audio": args.keep_audio,
-            "uploaded_images": uploaded_images,
-            "seg_lengths": [],
-            "source_windows": None,
-            "src_24_path": None,
-            "src_original_path": None,
-            "seg_slice_names": {},
-            "ctx_names": {},
-        }
-
-        # ---- 源视频预处理（可选） ----
-        if args.source_video:
-            store = VideoStoreCore(state["session_id"])
-            src_path = store.get_file_path(args.source_video.strip())
-            if not src_path or not Path(src_path).exists():
-                output_error(f"源视频不存在: {args.source_video}")
-                return
-            state["src_original_path"] = str(Path(src_path))
-            try:
-                src_24_path = state_dir / "src_24fps.mp4"
-                convert_to_24fps(ffmpeg, src_path, src_24_path)
-                sw, sh = probe_video_size(ffmpeg, src_24_path)
-                width, height = compute_target_size_wh(sw, sh, RESOLUTION_PIXELS[args.resolution])
-                state["width"], state["height"] = width, height
-                state["src_24_path"] = str(src_24_path)
-                state["source_windows"] = plan_source_windows(count_frames(ffmpeg, src_24_path))
-                if len(state["source_windows"]) > args.segments:
-                    state["source_windows"] = state["source_windows"][:args.segments]
-                state["segments_total"] = len(state["source_windows"])
-            except Exception as e:
-                output_error(f"源视频预处理失败: {e}")
-                return
-            for _, w in state["source_windows"]:
-                state["seg_lengths"].append(w)
-        else:
-            length = duration_to_frames(args.duration)
-            state["seg_lengths"] = [length] * args.segments
-        save_state(state)
-
-        # 首次调用：提交段 1 后立即返回 partial（不等待）
-        # 原因：execute_script 有 300s 硬超时，预处理+提交段1 可能已占 40s，
-        # 若再 poll 280s 会超时被杀，partial/resume_key 丢失（LLM 拿不到 key）。
-        # 所有等待放到后续 --resume 调用。
-        try:
-            wf = build_segment_workflow(1, state, ffmpeg)
-            prompt_id = submit_task(wf)
-        except RuntimeError as e:
-            output_resumable_error(state, f"段 1 提交失败: {e}")
-            return
-        state["current_prompt_id"] = prompt_id
-        state["current_seg"] = 1
-        save_state(state)
-        output_partial(state)
-        return
-
-    # ================= 通用执行循环（首次/续跑共用） =================
-    # 时间预算：单次调用必须在 execute_script 300s 硬上限内正常退出。
-    # 预算 = poll(wait) + 提交下一段余量(30s)；预算将尽时主动返回 partial
-    # （正常退出、释放锁），不等到被超时杀进程（SIGKILL 会残留锁/丢输出）。
-    call_deadline = time.time() + args.wait + 30
     try:
-        while state["segments_done"] < state["segments_total"]:
-            if time.time() > call_deadline:
-                output_partial(state)
-                return
-            seg_idx = state["segments_done"] + 1
-            result = run_segment(seg_idx, state, ffmpeg, args.wait)
-            if result == "done":
-                continue
-            if result == "pending":
-                output_partial(state)
-                return
-            # error：可恢复（状态保留）
-            output_resumable_error(state, f"第 {seg_idx} 段生成失败")
-            return
+        with tempfile.TemporaryDirectory(prefix="h3chain_") as tmp:
+            work_dir = Path(tmp)
+            if args.state:
+                state = _validate_state(args.state, session_id)
+                prompt_id = state.get("current_prompt_id")
+                if prompt_id:
+                    result = poll_result(prompt_id, args.wait)
+                    if result["status"] == "pending":
+                        output_state(state, "partial", "当前段仍在 ComfyUI 队列中，请原样传回 state 继续查询")
+                        return
+                    if result["status"] == "error":
+                        state["current_prompt_id"] = None
+                        output_state(state, "error", "当前段生成失败，请原样传回 state 重试",
+                                     result.get("error", "ComfyUI 任务失败"))
+                        return
+                    segment = store_video(result["data"])
+                    state["delivered"].append(segment["identifier"])
+                    state["segments_done"] += 1
+                    state["current_prompt_id"] = None
 
-        # ---- 全部段完成：交付文件校验 → 拼接 + 可选音轨 + 交付 ----
-        delivered = [Path(p) for p in state["delivered"]]
-        missing = [str(p) for p in delivered
-                   if not p.exists() or p.stat().st_size == 0]
-        if missing:
-            state["status"] = "failed"
-            save_state(state)
-            output_resumable_error(state, f"交付文件缺失，任务状态损坏: {missing}")
-            return
-        state_dir = Path(state["state_dir"])
-        final_path = state_dir / "final.mp4"
-        if len(delivered) == 1:
-            shutil.copy2(delivered[0], final_path)
+                if state["segments_done"] >= state["segments_total"]:
+                    delivered = [_state_video_path(store, ident, "delivered")
+                                 for ident in state["delivered"]]
+                    final_path = work_dir / "final.mp4"
+                    if len(delivered) == 1:
+                        shutil.copy2(delivered[0], final_path)
+                    else:
+                        concat_videos(ffmpeg, delivered, final_path)
+                    final = store_video(final_path.read_bytes())
+                    source_id = state.get("source_original_video")
+                    if state.get("keep_audio") and source_id:
+                        source = _state_video_path(store, source_id, "source_original_video")
+                        audio_path = work_dir / "final_audio.mp4"
+                        mux_cmd = [ffmpeg, "-y", "-v", "error", "-i", str(final_path),
+                                   "-i", str(source), "-map", "0:v", "-map", "1:a?",
+                                   "-c:v", "copy", "-c:a", "copy", "-movflags", "+faststart",
+                                   "-shortest", str(audio_path)]
+                        try:
+                            run_ffmpeg(ffmpeg, mux_cmd, "音轨合成")
+                            final = store_video(audio_path.read_bytes())
+                        except RuntimeError:
+                            fallback = [item for item in mux_cmd if item != "+faststart"]
+                            try:
+                                run_ffmpeg(ffmpeg, fallback, "音轨合成(无faststart)")
+                                final = store_video(audio_path.read_bytes())
+                            except RuntimeError:
+                                pass
+                    output_result(True, identifier=final["identifier"], path=final["path"],
+                                  model="h3_chain")
+                    return
+
+                submit_next_segment(state, ffmpeg, store, work_dir)
+                output_state(state, "partial", "下一段已提交，请原样传回 state 查询进度")
+                return
+
+            if not args.prompt:
+                output_error("--prompt 参数必填")
+                return
+            if not args.images:
+                output_error("需要提供 --images 身份参考图标识符")
+                return
+            if not 1 <= args.segments <= 10:
+                output_error("--segments 仅支持 1-10 段")
+                return
+            if not 1.0 <= args.duration <= 15.0:
+                output_error("每段时长仅支持 1-15 秒")
+                return
+
+            image_paths: List[str] = []
+            for ident in args.images.split(","):
+                ident = ident.strip()
+                if not ident:
+                    continue
+                path = resolve_image_file(ident)
+                if path:
+                    image_paths.append(path)
+                else:
+                    output_error(f"未找到图片标识符: {ident}")
+                    return
+            if not 1 <= len(image_paths) <= 4:
+                output_error("身份参考图需要 1-4 张")
+                return
+
+            width, height = compute_target_size(image_paths[0],
+                                                max_pixels=RESOLUTION_PIXELS[args.resolution])
+            run_id = uuid.uuid4().hex[:12]
+            uploaded_images = []
+            for i, image_path in enumerate(image_paths, 1):
+                upload_path = work_dir / f"{run_id}_card_{i}{Path(image_path).suffix}"
+                shutil.copy2(image_path, upload_path)
+                uploaded_images.append(upload_image_to_comfyui(str(upload_path)))
+
+            state = {
+                "version": STATE_VERSION,
+                "run_id": run_id,
+                "session_id": session_id,
+                "prompt": args.prompt,
+                "segments_total": args.segments,
+                "segments_done": 0,
+                "current_prompt_id": None,
+                "delivered": [],
+                "width": width,
+                "height": height,
+                "seed": args.seed if args.seed else random.getrandbits(63),
+                "steps": args.steps,
+                "noise": args.noise,
+                "no_lora": args.no_lora,
+                "legacy_sampler": args.legacy_sampler,
+                "keep_audio": args.keep_audio,
+                "uploaded_images": uploaded_images,
+                "segment_lengths": [],
+                "source_windows": None,
+                "source_24_video": None,
+                "source_original_video": None,
+            }
+
+            if args.source_video:
+                source_id = args.source_video.strip()
+                source_path = _state_video_path(store, source_id, "source_video")
+                state["source_original_video"] = source_id
+                src_24_path = work_dir / f"{run_id}_src_24fps.mp4"
+                convert_to_24fps(ffmpeg, source_path, src_24_path)
+                sw, sh = probe_video_size(ffmpeg, src_24_path)
+                state["width"], state["height"] = compute_target_size_wh(
+                    sw, sh, RESOLUTION_PIXELS[args.resolution])
+                windows = plan_source_windows(count_frames(ffmpeg, src_24_path))
+                if len(windows) > args.segments:
+                    windows = windows[:args.segments]
+                if not windows:
+                    output_error("源视频长度不足以生成有效分段")
+                    return
+                state["source_windows"] = windows
+                state["segments_total"] = len(windows)
+                state["segment_lengths"] = [window for _, window in windows]
+                state["source_24_video"] = store_video(src_24_path.read_bytes())["identifier"]
+            else:
+                length = duration_to_frames(args.duration)
+                if args.segments > 1 and length < CONTEXT_FRAMES + H3_MIN_FRAMES:
+                    output_error("多段纯续写每段至少需要 39 帧（约 1.6 秒）")
+                    return
+                state["segment_lengths"] = [length] * args.segments
+
+            submit_next_segment(state, ffmpeg, store, work_dir)
+            output_state(state, "partial", "第 1 段已提交，请原样传回 state 查询进度")
+    except (RuntimeError, ValueError, OSError) as e:
+        if state is not None:
+            output_state(state, "error", "链式任务未完成，请原样传回 state 重试", str(e))
         else:
-            concat_videos(ffmpeg, delivered, final_path)
-
-        if state.get("keep_audio") and state.get("src_original_path"):
-            src_original = Path(state["src_original_path"])
-            if src_original.exists():
-                audio_path = state_dir / "final_audio.mp4"
-                run_ffmpeg(ffmpeg, [
-                    ffmpeg, "-y", "-v", "error",
-                    "-i", str(final_path), "-i", str(src_original),
-                    "-map", "0:v", "-map", "1:a?",
-                    "-c:v", "copy", "-c:a", "aac",
-                    "-movflags", "+faststart", "-shortest",
-                    str(audio_path),
-                ], "音轨合成")
-                final_path = audio_path
-
-        stored = store_video(final_path.read_bytes())
-        # 交付成功：清理状态（锁文件随目录一并删除）
-        shutil.rmtree(state_dir, ignore_errors=True)
-        output_result(True, identifier=stored["identifier"], path=stored["path"],
-                      model="h3_chain")
-    except Exception as e:
-        # 异常：保留状态，可续跑
-        output_resumable_error(state, f"链式生成异常: {e}")
+            output_error(str(e))
 
 
 def main_with_args(argv: list) -> None:

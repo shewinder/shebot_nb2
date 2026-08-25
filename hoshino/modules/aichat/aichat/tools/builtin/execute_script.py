@@ -49,7 +49,7 @@ def _is_path_safe(target: Path, allowed_base: Path) -> bool:
 - skill_name: SKILL 名称（必须从当前激活的 SKILL 中选择）
 - script_path: 脚本文件路径（相对于 SKILL 目录，如 'scripts/calc.py'）
 - args: 传递给脚本的参数列表（字符串数组）
-- timeout: 超时时间（秒，默认180，最大300）
+- timeout: 超时时间（秒，默认180，最大600）
 
 ## 使用示例
 ```python
@@ -76,7 +76,7 @@ async def execute_script(
     skill_name: Annotated[str, Field(description="SKILL 名称（必须从当前激活的 SKILL 中选择）")],
     script_path: Annotated[str, Field(description="脚本文件路径（相对于 SKILL 目录，如 'scripts/calc.py'）")],
     args: Annotated[Optional[List[str]], Field(description="传递给脚本的参数列表")] = None,
-    timeout: Annotated[int, Field(ge=1, le=300, description="超时时间（秒，默认180，最大300）")] = 180,
+    timeout: Annotated[int, Field(ge=1, le=600, description="超时时间（秒，默认180，最大600）")] = 180,
     session: Optional["Session"] = None,
     bot: Optional["Bot"] = None,
     event: Optional["Event"] = None,
@@ -99,7 +99,7 @@ async def execute_script(
         args = []
     
     # 限制超时时间
-    timeout = min(max(timeout, 1), 300)
+    timeout = min(max(timeout, 1), 600)
     
     # 验证 skill_name 是否已激活
     if not session or skill_name not in session.active_skills:

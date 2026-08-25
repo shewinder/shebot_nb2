@@ -77,7 +77,7 @@ non_diegetic_music: 背景音乐描述……
 
 ## 超时与续查机制（重要）
 
-生成耗时 1-2 分钟，脚本单次等待约 280 秒：
+生成耗时 1-2 分钟，脚本单次等待最长 540 秒：
 
 1. **首次调用**：提交并等待。完成返回 `identifier`（如 `<ai_video_1>`），在回复中引用即可。
 2. **返回 `视频仍在生成中，请使用 --prompt-id xxx 继续查询`**：再次调用仅带 `--prompt-id xxx` 续查（幂等，可多次）。
@@ -92,7 +92,7 @@ execute_script(
     script_path="scripts/comfyui_video.py",
     args=["--task", "t2v", "--duration", "5",
           "--prompt", "integrated_multimodal_description: [Shot 1] A red panda walks through a snowy bamboo forest at dawn, soft golden light through mist, camera slowly tracking forward. Gentle snow falling, panda's fur rippling. Audio: soft footsteps on snow.\n\noverall_soundscape: gentle wind, snow crunching, distant birdsong\n\nnon_diegetic_music: soft ambient piano, warm and calm"],
-    timeout=300
+    timeout=600
 )
 
 # 图生视频
@@ -101,7 +101,7 @@ execute_script(
     script_path="scripts/comfyui_video.py",
     args=["--task", "i2v", "--images", "<user_image_1>", "--duration", "5",
           "--prompt", "integrated_multimodal_description: [Shot 1] The woman from the image continues standing on the rooftop, turns her head slowly and smiles, hair moving in wind, camera slowly pushing in. Audio: wind, distant city.\n\noverall_soundscape: gentle wind, distant city ambience\n\nnon_diegetic_music: soft cinematic strings"],
-    timeout=300
+    timeout=600
 )
 
 # 续查
@@ -109,7 +109,7 @@ execute_script(
     skill_name="video_generation",
     script_path="scripts/comfyui_video.py",
     args=["--prompt-id", "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"],
-    timeout=300
+    timeout=600
 )
 ```
 
@@ -156,17 +156,18 @@ execute_script(skill_name="video_generation", script_path="scripts/comfyui_video
         "--source-video", "<user_video_1>",
         "--prompt", "<video editing 六段式>",
         "--segments", "6", "--resolution", "768p", "--keep-audio"],
-  timeout=300)
+  timeout=600)
 ```
 
-**分阶段续跑机制（重要）**：链式任务耗时长（每段 2-7 分钟，多段超过单次脚本 300s 超时），脚本按"段"分阶段执行，**首次调用提交段 1 后立即返回进度**：
-1. 首次调用返回 `{"status": "partial", "progress": "N/M", "resume_key": "xxx"}` → **继续调用**：
-2. `execute_script(..., args=["--resume", "xxx"], timeout=300)` → 推进到完成或再次 partial
-3. 重复 `--resume` 直到 `{"success": true, "identifier": "<ai_video_N>"}`（期间告知用户进度）
-4. 中途失败会带 `resume_key` 返回，可再次 `--resume` 重试（同一段连续失败 3 次后任务标记失败，需重新发起）
-5. **禁止使用 run_background_task 跑链式任务**（后台任务结果无法回传主对话）；必须用前台多轮 `--resume` 完成
-6. **同一会话同时只有一个链式任务**：若返回"会话已有进行中的链式任务"，不要重复发起，改用返回的 resume_key 续跑
-7. 首次调用若超时/异常，可重试一次；不要反复发起首次调用（每次都会创建新任务）
+**前台无本地状态续跑机制（重要）**：链式任务由当前 LLM 会话持续执行，脚本每次只处理一个 ComfyUI prompt，LLM 必须保存并原样传回返回值中的 `state`：
+开始前请将 aichat 的 `max_tool_rounds` 配置调到足以覆盖全部分段调用和必要重试的值。
+1. 首次调用提交第 1 段，返回 `{"status": "partial", "state": {...}}`；保存完整 `state`。
+2. 立即继续调用 `execute_script`，使用 `args=["--state", "<上次返回的完整 state JSON>", "--wait", "540"]`、`timeout=600`。脚本会在内部等待，不要调用 `run_background_task`、`wait_and_resume` 或 shell sleep。
+3. 若仍返回 `partial`，保存最新 `state` 并立即重复 `--state` 调用；不要再次传首轮参数。
+4. 若返回带 `state` 的可重试错误，原样保留该 `state` 并重试一次；任务明确丢失或连续重试仍失败时才告知用户失败。
+5. 段完成时脚本会存储该段、提交下一段并返回更新后的 `state`。不得把中间 `<ai_video_N>` 当成品发送。
+6. 直到返回 `{"success": true, "identifier": "<ai_video_N>"}` 才结束工具调用；最终回复只输出该视频标识符，不附带其他文字，让当前会话把交付结果作为一条视频消息发送。
+7. 脚本不写 `chain_state`、锁文件或 `state.json`，也不使用 `--resume`；`state` 只保存在当前 LLM 工具上下文中，不能手工修改任何字段。
 
 规则：
 - **提示词用 video editing 六段式**：身份（`<Subject 1>` = `<Picture N>`，attribute_transfer）、动作/表情（attribute_transfer）、环境/字幕（fully_preserved）拆成独立 Subject；`<Video 1>` 标 partially_preserved（保留场景构图/动作时序，**只替换身份和服装**）
