@@ -145,6 +145,38 @@ execute_script(
 - 与多图锚定的区别：锚定锁定的是"这一帧长什么样"；ref 是"角色长什么样"，画面构图完全交给提示词
 - 典型用途：角色卡出演、多镜头角色一致性（比锚定模式首帧更自然，无卡片感）
 
+## 链式长视频（角色替换 + 长片续写）
+
+把一段**源视频的角色替换成指定角色**（或纯续写生成），支持超过单段上限的长视频（源视频按 124 帧窗口切段，段间 22 帧 Motion Context 衔接）。**执行脚本是 `scripts/comfyui_video_chain.py`（独立脚本，不是 comfyui_video.py 的任务）：**
+
+```
+# 角色替换：源视频动作/场景/字幕 1:1 保留，人物换成 <Picture N> 角色
+execute_script(skill_name="video_generation", script_path="scripts/comfyui_video_chain.py",
+  args=["--images", "<user_image_1>,<user_image_2>,<user_image_3>",
+        "--source-video", "<user_video_1>",
+        "--prompt", "<video editing 六段式>",
+        "--segments", "6", "--resolution", "768p", "--keep-audio"],
+  timeout=300)
+```
+
+**分阶段续跑机制（重要）**：链式任务耗时长（每段 2-7 分钟，多段超过单次脚本 300s 超时），脚本按"段"分阶段执行，**首次调用提交段 1 后立即返回进度**：
+1. 首次调用返回 `{"status": "partial", "progress": "N/M", "resume_key": "xxx"}` → **继续调用**：
+2. `execute_script(..., args=["--resume", "xxx"], timeout=300)` → 推进到完成或再次 partial
+3. 重复 `--resume` 直到 `{"success": true, "identifier": "<ai_video_N>"}`（期间告知用户进度）
+4. 中途失败会带 `resume_key` 返回，可再次 `--resume` 重试（同一段连续失败 3 次后任务标记失败，需重新发起）
+5. **禁止使用 run_background_task 跑链式任务**（后台任务结果无法回传主对话）；必须用前台多轮 `--resume` 完成
+6. **同一会话同时只有一个链式任务**：若返回"会话已有进行中的链式任务"，不要重复发起，改用返回的 resume_key 续跑
+7. 首次调用若超时/异常，可重试一次；不要反复发起首次调用（每次都会创建新任务）
+
+规则：
+- **提示词用 video editing 六段式**：身份（`<Subject 1>` = `<Picture N>`，attribute_transfer）、动作/表情（attribute_transfer）、环境/字幕（fully_preserved）拆成独立 Subject；`<Video 1>` 标 partially_preserved（保留场景构图/动作时序，**只替换身份和服装**）
+- **采样配置固定 euler + simple**（res_multistep/beta 会导致替换不稳定/失败/圣光/丢字幕，已实测定位）
+- 身份图 3 张左右（正面全身/侧面/脸部特写）
+- 源视频自动转 24fps 并按窗口切片（每段 `<Video 1>` 用对应时间片）；30fps 源无需预处理
+- 每段 124 帧窗口（5.17s）→ 交付 102 帧，段间自动衔接；`--segments` 控制段数（源 25s ≈ 6 段）
+- `--keep-audio`：成片保留源视频原音轨（BGM/对白，时间轴 1:1 对齐；注意对白是原角色的声音）
+- 各段无 H3 生成音轨；时长：段数 × 2-7 分钟（720×960 4 步）
+
 ## 注意事项
 
 - 生成中告知用户"正在生成视频，约 1-2 分钟"

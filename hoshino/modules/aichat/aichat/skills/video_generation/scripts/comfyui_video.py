@@ -127,12 +127,12 @@ def _apply_anchors(wf: Dict[str, Any], first_name: Optional[str] = None,
 
 
 def _apply_ref_images(wf: Dict[str, Any], uploaded: List[str]) -> None:
-    """按参考图数量重建 MiniMaxH3ReferenceToVideo 的 ref_images 输入（就地修改）
+    """按参考图数量重建 MiniMaxH3ReferenceToVideo 的 ref_images.ref_image_* 输入（就地修改）
 
     每张图一个 LoadImage 节点（从 id 15 起），ref_images.ref_image_i 指向对应节点。
-    先清空工作流预置的 ref_images.* 输入，避免残留引用缺失节点的输入。
+    先清空工作流预置的 ref_images.ref_image_* 输入，避免残留引用缺失节点的输入。
     """
-    for key in [k for k in wf["7"]["inputs"] if k.startswith("ref_images.")]:
+    for key in [k for k in wf["7"]["inputs"] if k.startswith("ref_images.ref_image_")]:
         del wf["7"]["inputs"][key]
     for i, fname in enumerate(uploaded):
         img_nid = str(15 + i)
@@ -282,6 +282,25 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
             for key in ("videos", "gifs"):
                 items = node_output.get(key, [])
                 for item in items:
+                    filename = item.get("filename")
+                    if not filename:
+                        continue
+                    subfolder = item.get("subfolder", "")
+                    img_type = item.get("type", "output")
+                    view_url = (
+                        f"{base}/view?filename={quote(filename)}"
+                        f"&subfolder={quote(subfolder)}&type={quote(img_type)}"
+                    )
+                    vid_resp = http_get(view_url)
+                    if vid_resp.get("status") == 200:
+                        content = vid_resp.get("content")
+                        if content:
+                            return {"status": "done", "data": content}
+                        return {"status": "error", "error": "ComfyUI /view 未返回视频数据"}
+
+            # comfy-core SaveVideo：images + animated:[true]（视频以 mp4 存于 output/）
+            if node_output.get("animated") == [True]:
+                for item in node_output.get("images", []):
                     filename = item.get("filename")
                     if not filename:
                         continue

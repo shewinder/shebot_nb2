@@ -28,9 +28,13 @@ def _resolve_script_path(script_path: str, working_dir: Optional[Path] = None) -
 
 
 def _is_path_safe(target: Path, allowed_base: Path) -> bool:
-    """检查目标路径是否在允许的基目录内（防止目录遍历）"""
+    """检查目标路径是否在允许的基目录内（防止目录遍历）
+
+    注意：双方必须统一为绝对路径再比较 —— 用户 skill 的 directory 是相对路径
+    （如 data/skills/xxx），而 target 已经 resolve 过，直接 relative_to 会抛 ValueError。
+    """
     try:
-        target.relative_to(allowed_base)
+        target.resolve().relative_to(allowed_base.resolve())
         return True
     except ValueError:
         return False
