@@ -369,15 +369,40 @@ def load_state(key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+LOCK_MAX_AGE = 360  # 锁最长持有秒数（正常 resume ≤270s；超 360 必为死锁残留，自动清理）
+
+
 def _acquire_lock(state_dir: Path) -> bool:
-    """获取任务目录锁（O_EXCL 原子创建），防并发 resume 同一任务"""
+    """获取任务目录锁（O_EXCL 原子创建 + 时间戳死锁检测）
+
+    进程被 execute_script 超时杀掉（SIGKILL）时 finally 不执行，锁会残留；
+    持有超 LOCK_MAX_AGE 的锁视为死锁，自动清理后重取。
+    """
     lock = state_dir / ".lock"
-    try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.close(fd)
+
+    def try_create() -> bool:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(int(time.time())).encode())
+            os.close(fd)
+            return True
+        except FileExistsError:
+            return False
+
+    if try_create():
         return True
-    except FileExistsError:
-        return False
+    # 已存在：死锁检测
+    try:
+        age = time.time() - float(lock.read_text().strip())
+    except Exception:
+        age = time.time()  # 无有效时间戳的旧锁视为死锁
+    if age > LOCK_MAX_AGE:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+        return try_create()
+    return False
 
 
 def _release_lock(state_dir: Path) -> None:
@@ -483,7 +508,7 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str) -> 
         apply_size(wf, width, height)
         # context：上一段交付尾部 22 帧 →（可选彩噪）→ 上传
         prev_delivered = Path(state["delivered"][-1])
-        ctx_path = state_dir / f"ctx_{seg_idx}.mp4"
+        ctx_path = state_dir / f"{state['key']}_ctx_{seg_idx}.mp4"
         prepare_context(ffmpeg, prev_delivered, CONTEXT_FRAMES,
                         noise_on, ctx_path, seed + seg_idx)
         ctx_name = upload_video_to_comfyui(str(ctx_path))
@@ -494,7 +519,7 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str) -> 
     if state.get("source_windows"):
         seg_start, seg_window = state["source_windows"][seg_idx - 1]
         # 本地文件名带任务 key 前缀：并发任务上传到 ComfyUI input 时避免同名冲突
-        slice_path = state_dir / f"src_seg_{seg_idx}.mp4"
+        slice_path = state_dir / f"{state['key']}_src_seg_{seg_idx}.mp4"
         slice_source_window(ffmpeg, Path(state["src_24_path"]), seg_start, seg_window, slice_path)
         source_name = upload_video_to_comfyui(str(slice_path))
         state["seg_slice_names"][str(seg_idx)] = source_name
@@ -642,15 +667,25 @@ def main() -> None:
             return
         try:
             width, height = compute_target_size(image_paths[0], max_pixels=RESOLUTION_PIXELS[args.resolution])
-            uploaded_images = [upload_image_to_comfyui(p) for p in image_paths]
         except Exception as e:
-            output_error(f"图片上传失败: {e}")
+            output_error(f"图片尺寸计算失败: {e}")
             return
 
         # ---- 初始化任务状态 ----
         key = new_state_key()
         state_dir = _state_root() / key
         state_dir.mkdir(parents=True, exist_ok=True)
+
+        # ---- 身份参考图上传（上传名唯一化：ComfyUI 同名上传会覆盖） ----
+        try:
+            uploaded_images = []
+            for i, p in enumerate(image_paths):
+                card_path = state_dir / f"{key}_card_{i + 1}{Path(p).suffix}"
+                shutil.copy2(p, card_path)
+                uploaded_images.append(upload_image_to_comfyui(str(card_path)))
+        except Exception as e:
+            output_error(f"图片上传失败: {e}")
+            return
         state: Dict[str, Any] = {
             "key": key,
             "session_id": os.environ.get("SESSION_ID", "unknown"),
@@ -728,8 +763,17 @@ def main() -> None:
         return
 
     # ================= 通用执行循环（首次/续跑共用） =================
+    # 时间预算：单次调用必须在 execute_script 300s 硬上限内正常退出。
+    # 预算 = poll(wait) + 提交下一段余量(30s)；预算将尽时主动返回 partial
+    # （正常退出、释放锁），不等到被超时杀进程（SIGKILL 会残留锁/丢输出）。
+    call_deadline = time.time() + args.wait + 30
     try:
         while state["segments_done"] < state["segments_total"]:
+            if time.time() > call_deadline:
+                if lock_dir:
+                    _release_lock(lock_dir)
+                output_partial(state)
+                return
             seg_idx = state["segments_done"] + 1
             result = run_segment(seg_idx, state, ffmpeg, args.wait)
             if result == "done":
