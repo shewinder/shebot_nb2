@@ -336,10 +336,10 @@ STALE_MAX_HOURS = 24.0   # 死任务清理阈值
 MAX_FAIL_COUNT = 3       # 同任务连续失败上限（超出标记 failed）
 
 def _state_root() -> Path:
-    """状态根目录：data/aichat/chain_state/{session_id}/{key}/"""
+    """状态根目录：data/aichat/sessions/{session_id}/chain_state/{key}/"""
     project = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
     session_id = os.environ.get("SESSION_ID", "unknown")
-    return project / "data" / "aichat" / "chain_state" / session_id
+    return project / "data" / "aichat" / "sessions" / session_id / "chain_state"
 
 
 def new_state_key() -> str:
@@ -367,50 +367,6 @@ def load_state(key: str) -> Optional[Dict[str, Any]]:
         return json.loads(state_file.read_text(encoding="utf-8"))
     except Exception:
         return None
-
-
-LOCK_MAX_AGE = 360  # 锁最长持有秒数（正常 resume ≤270s；超 360 必为死锁残留，自动清理）
-
-
-def _acquire_lock(state_dir: Path) -> bool:
-    """获取任务目录锁（O_EXCL 原子创建 + 时间戳死锁检测）
-
-    进程被 execute_script 超时杀掉（SIGKILL）时 finally 不执行，锁会残留；
-    持有超 LOCK_MAX_AGE 的锁视为死锁，自动清理后重取。
-    """
-    lock = state_dir / ".lock"
-
-    def try_create() -> bool:
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, str(int(time.time())).encode())
-            os.close(fd)
-            return True
-        except FileExistsError:
-            return False
-
-    if try_create():
-        return True
-    # 已存在：死锁检测
-    try:
-        age = time.time() - float(lock.read_text().strip())
-    except Exception:
-        age = time.time()  # 无有效时间戳的旧锁视为死锁
-    if age > LOCK_MAX_AGE:
-        try:
-            lock.unlink()
-        except OSError:
-            pass
-        return try_create()
-    return False
-
-
-def _release_lock(state_dir: Path) -> None:
-    lock = state_dir / ".lock"
-    try:
-        lock.unlink()
-    except OSError:
-        pass
 
 
 def cleanup_stale(max_age_hours: float = STALE_MAX_HOURS) -> None:
@@ -610,8 +566,6 @@ def main() -> None:
     # 启动时清理过期/失败/损坏的残留任务状态
     cleanup_stale()
 
-    lock_dir: Optional[Path] = None  # resume 分支获取的锁，退出前释放
-
     # ================= 续跑分支 =================
     if args.resume:
         state = load_state(args.resume.strip())
@@ -625,11 +579,6 @@ def main() -> None:
         if state.get("status") == "failed":
             output_error(f"任务 {args.resume} 已标记失败（连续失败超限或状态损坏），请重新发起任务")
             return
-        # 防并发：独占锁（另一个 resume 进程正在处理时拒绝）
-        if not _acquire_lock(Path(state["state_dir"])):
-            output_error(f"任务 {args.resume} 正在被其他调用处理，请稍后重试")
-            return
-        lock_dir = Path(state["state_dir"])
     else:
         # ================= 首次提交分支 =================
         # 会话级互斥：已有活跃任务时拒绝新建，提示 resume 旧任务
@@ -770,8 +719,6 @@ def main() -> None:
     try:
         while state["segments_done"] < state["segments_total"]:
             if time.time() > call_deadline:
-                if lock_dir:
-                    _release_lock(lock_dir)
                 output_partial(state)
                 return
             seg_idx = state["segments_done"] + 1
@@ -779,13 +726,9 @@ def main() -> None:
             if result == "done":
                 continue
             if result == "pending":
-                if lock_dir:
-                    _release_lock(lock_dir)
                 output_partial(state)
                 return
             # error：可恢复（状态保留）
-            if lock_dir:
-                _release_lock(lock_dir)
             output_resumable_error(state, f"第 {seg_idx} 段生成失败")
             return
 
@@ -822,13 +765,10 @@ def main() -> None:
         stored = store_video(final_path.read_bytes())
         # 交付成功：清理状态（锁文件随目录一并删除）
         shutil.rmtree(state_dir, ignore_errors=True)
-        lock_dir = None
         output_result(True, identifier=stored["identifier"], path=stored["path"],
                       model="h3_chain")
     except Exception as e:
         # 异常：保留状态，可续跑
-        if lock_dir:
-            _release_lock(lock_dir)
         output_resumable_error(state, f"链式生成异常: {e}")
 
 
