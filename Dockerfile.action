@@ -1,8 +1,16 @@
 FROM python:3.11-slim
 
-# 系统依赖：curl（aichat curl 工具）、ffmpeg（视频拼接/帧提取/彩噪注入）
+# 系统依赖：curl（aichat curl 工具）+ 临时 xz-utils（解压静态 ffmpeg 用）
+# ffmpeg 使用静态单二进制（视频拼接/帧提取/彩噪注入），
+# 避免 apt 安装 ffmpeg 全家桶（libavcodec 等共享库约 460MB）；
+# 静态版约 76MB，功能等价（含 x264/x265/aac/opus 等全部编解码器）
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ffmpeg && \
+    apt-get install -y --no-install-recommends curl xz-utils && \
+    curl -fsSL -o /tmp/ffmpeg-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz && \
+    tar xf /tmp/ffmpeg-static.tar.xz -C /tmp && \
+    cp /tmp/ffmpeg-*-static/ffmpeg /tmp/ffmpeg-*-static/ffprobe /usr/local/bin/ && \
+    rm -rf /tmp/ffmpeg-*-static /tmp/ffmpeg-static.tar.xz && \
+    apt-get purge -y xz-utils && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
 # 安装uv
