@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 
-# 系统依赖：ffmpeg（视频拼接/帧提取/彩噪注入）
+# 系统依赖：curl（aichat curl 工具）、ffmpeg（视频拼接/帧提取/彩噪注入）
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends curl ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 # 安装uv

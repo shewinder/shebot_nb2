@@ -85,16 +85,89 @@ class TestBuildMessagesNonMutation(unittest.IsolatedAsyncioTestCase):
         )
         s._image_store = FakeImageStore([img])
 
+        # 模拟 chat.py 的锚定插入：图片的独立标识符消息在历史中
+        s.add_raw_message({"role": "user", "content": "用户发送了图片：<user_image_1>（png 100x100，已保存）"})
+
         msgs = await s._build_messages_for_chat(None)
 
-        # 持久历史不被污染
+        # 持久历史不被污染（构建不修改历史、不附加任何动态清单）
         self.assertEqual(s.messages[0]["content"], "看这张图")
         self.assertEqual(s.messages[1]["content"], "好的")
+        self.assertEqual(s.messages[2]["content"], "用户发送了图片：<user_image_1>（png 100x100，已保存）")
         self.assertNotIn("【当前可用图片】", str(s.messages))
 
-        # API 消息副本中附加了图片列表提示
+        # 构建结果与历史一致（锚定消息随历史进入 API 消息）
         joined = " ".join(str(m.get("content")) for m in msgs)
-        self.assertIn("【当前可用图片】", joined)
+        self.assertIn("用户发送了图片：<user_image_1>", joined)
+        self.assertNotIn("【当前可用图片】", joined)
+
+
+class _FakeMediaEntry:
+    def __init__(self, fmt, width=None, height=None, size_bytes=0):
+        self.format = fmt
+        self.width = width
+        self.height = height
+        self.size_bytes = size_bytes
+
+
+class TestMediaAnchorMerge(unittest.TestCase):
+    """用户媒体锚定：一次用户消息合并为一条锚定消息（与用户行为一致）"""
+
+    class _FakeStore:
+        def __init__(self, entries):
+            self.entries = entries
+
+        def get(self, identifier):
+            return self.entries.get(identifier)
+
+    def _make_session(self, images=None, videos=None):
+        session = SimpleNamespace(
+            _image_store=self._FakeStore(images or {}),
+            _video_store=self._FakeStore(videos or {}),
+        )
+        return session
+
+    def test_single_image_keeps_meta(self):
+        from hoshino.modules.aichat.aichat.chat import _build_media_anchor_message
+
+        s = self._make_session(images={"<user_image_1>": _FakeMediaEntry("png", 100, 100)})
+        text = _build_media_anchor_message(s, ["<user_image_1>"], [])
+        self.assertEqual(text, "用户发送了图片：<user_image_1>（png 100x100，已保存）")
+
+    def test_multiple_images_merge_into_one_anchor(self):
+        from hoshino.modules.aichat.aichat.chat import _build_media_anchor_message
+
+        s = self._make_session(
+            images={
+                "<user_image_1>": _FakeMediaEntry("png"),
+                "<user_image_2>": _FakeMediaEntry("jpg"),
+            }
+        )
+        text = _build_media_anchor_message(s, ["<user_image_1>", "<user_image_2>"], [])
+        self.assertEqual(text, "用户发送了 2 张图片：<user_image_1>、<user_image_2>（已保存）")
+
+    def test_mixed_media_single_anchor(self):
+        from hoshino.modules.aichat.aichat.chat import _build_media_anchor_message
+
+        s = self._make_session(
+            images={
+                "<user_image_1>": _FakeMediaEntry("png"),
+                "<user_image_2>": _FakeMediaEntry("jpg"),
+            },
+            videos={"<user_video_1>": _FakeMediaEntry("mp4", size_bytes=2048)},
+        )
+        text = _build_media_anchor_message(s, ["<user_image_1>", "<user_image_2>"], ["<user_video_1>"])
+        self.assertEqual(
+            text,
+            "用户发送了 2 张图片：<user_image_1>、<user_image_2>（已保存）；"
+            "用户发送了视频：<user_video_1>（mp4 2KB，已保存）",
+        )
+
+    def test_no_media_returns_none(self):
+        from hoshino.modules.aichat.aichat.chat import _build_media_anchor_message
+
+        s = self._make_session()
+        self.assertIsNone(_build_media_anchor_message(s, [], []))
 
 
 class TestImageStoreCore(unittest.TestCase):

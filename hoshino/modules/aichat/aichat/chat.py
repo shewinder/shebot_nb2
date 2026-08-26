@@ -187,6 +187,46 @@ async def download_video(video_url: str) -> Optional[bytes]:
         return None
 
 
+def _build_media_anchor_message(
+    session: "Session",
+    image_ids: List[str],
+    video_ids: List[str],
+) -> Optional[str]:
+    """构建单条用户媒体锚定消息（一次发送合并为一条，与用户行为一致）
+
+    单张/单个带元信息，多张只列标识符（避免消息过长）。
+    """
+    parts: List[str] = []
+
+    if len(image_ids) == 1:
+        entry = session._image_store.get(image_ids[0])
+        if entry:
+            dim = f"{entry.width}x{entry.height}" if entry.width and entry.height else "未知尺寸"
+            parts.append(f"用户发送了图片：{image_ids[0]}（{entry.format} {dim}，已保存）")
+        else:
+            parts.append(f"用户发送了图片：{image_ids[0]}（已保存）")
+    elif image_ids:
+        parts.append(f"用户发送了 {len(image_ids)} 张图片：{'、'.join(image_ids)}（已保存）")
+
+    if len(video_ids) == 1:
+        entry = session._video_store.get(video_ids[0])
+        if entry:
+            size_kb = entry.size_bytes // 1024
+            parts.append(f"用户发送了视频：{video_ids[0]}（{entry.format} {size_kb}KB，已保存）")
+        else:
+            parts.append(f"用户发送了视频：{video_ids[0]}（已保存）")
+    elif video_ids:
+        parts.append(f"用户发送了 {len(video_ids)} 个视频：{'、'.join(video_ids)}（已保存）")
+
+    return "；".join(parts) if parts else None
+
+
+def _insert_media_anchor(session: "Session", anchor: Optional[str]) -> None:
+    """把用户媒体锚定消息插入会话历史（紧随用户消息，一次发送仅一条）"""
+    if anchor:
+        session.add_raw_message({"role": "user", "content": anchor})
+
+
 async def _run_chat(
     bot: Bot,
     event: Event,
@@ -199,6 +239,9 @@ async def _run_chat(
     """会话锁内的实际对话编排：构建消息 → 执行 → 回写历史 → 发送"""
     supports_multimodal = api_config.get("supports_multimodal", False)
     message_content: Union[str, List[Dict[str, Any]]]
+    # 用户媒体标识符（一次用户消息合并为一条锚定消息，与用户行为一致）
+    user_image_ids: List[str] = []
+    user_video_ids: List[str] = []
 
     # 用户视频：并行下载再存储（串行下载大视频会长时间卡住对话）
     if video_urls:
@@ -206,13 +249,10 @@ async def _run_chat(
         for video_url, video_bytes in zip(video_urls, downloaded):
             if video_bytes:
                 identifier = await session.store_user_video(video_bytes, url=video_url)
+                user_video_ids.append(identifier)
                 logger.info(f"存储用户视频: {identifier}")
             else:
                 logger.warning(f"视频处理失败，跳过: {video_url}")
-
-        if not user_input:
-            await bot.send(event, "视频已接收并保存。当前无法直接分析视频内容，你可以让我基于它执行任务（如视频续写）。")
-            return
 
     if image_urls and not supports_multimodal:
         # 并行下载（转发多图不再串行卡顿），按原顺序存储
@@ -220,6 +260,7 @@ async def _run_chat(
         for img_url, base64_image in zip(image_urls, downloaded):
             if base64_image:
                 identifier = await session.store_user_image(base64_image, url=img_url)
+                user_image_ids.append(identifier)
                 logger.info(f"存储用户图片: {identifier} (模型不支持多模态，可通过工具使用)")
             else:
                 logger.warning(f"图片处理失败，跳过: {img_url}")
@@ -228,6 +269,7 @@ async def _run_chat(
             logger.debug(f"模型 {api_config.get('model')} 不支持多模态，图片已存储，仅发送文本")
             message_content = user_input
         else:
+            _insert_media_anchor(session, _build_media_anchor_message(session, user_image_ids, user_video_ids))
             await bot.send(event, f"图片已接收并保存。当前模型不支持直接识别图片，你可以通过工具（如 #编辑图片）来处理这些图片。")
             return
     elif image_urls and supports_multimodal:
@@ -237,6 +279,7 @@ async def _run_chat(
         for img_url, base64_image in zip(image_urls, downloaded):
             if base64_image:
                 identifier = await session.store_user_image(base64_image, url=img_url)
+                user_image_ids.append(identifier)
                 content_parts.append({
                     "type": "image_url",
                     "image_url": {
@@ -266,11 +309,18 @@ async def _run_chat(
         message_content = content_parts if content_parts else user_input
     else:
         if not user_input:
-            await bot.send(event, "请输入要询问的内容（#后面）")
+            if user_video_ids:
+                # 仅媒体（如用户只发视频）：锚定后结束本轮，供后续轮次引用
+                _insert_media_anchor(session, _build_media_anchor_message(session, user_image_ids, user_video_ids))
+                await bot.send(event, "视频已接收并保存。当前无法直接分析视频内容，你可以让我基于它执行任务（如视频续写）。")
+            else:
+                await bot.send(event, "请输入要询问的内容（#后面）")
             return
         message_content = user_input
 
     session.add_message("user", message_content)
+    # 用户媒体锚定：紧随用户消息插入（一次发送合并为一条）
+    _insert_media_anchor(session, _build_media_anchor_message(session, user_image_ids, user_video_ids))
     pre_chat_length = len(session.messages)
 
     async def on_content(content: str):

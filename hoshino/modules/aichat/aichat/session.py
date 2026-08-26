@@ -189,32 +189,6 @@ class Session:
         """列出当前会话所有视频"""
         return self._video_store.list_all()
 
-    def build_video_list_prompt(self) -> str:
-        """构建可用视频列表提示（动态内容，附加到用户消息）"""
-        videos = self._video_store.list_all()
-        if not videos:
-            return ""
-
-        lines = [
-            "",
-            "=" * 40,
-            "【当前可用视频】",
-        ]
-
-        for v in videos:
-            size_kb = v.size_bytes // 1024
-            line = f"{v.identifier} ({v.source}, {v.format}, {size_kb}KB)"
-            if v.url:
-                line += f"\n  url: {v.url}"
-            lines.append(line)
-
-        lines.extend([
-            "=" * 40,
-            ""
-        ])
-
-        return "\n".join(lines)
-
     @staticmethod
     def build_image_rules_prompt() -> str:
         """构建多媒体发送规则提示（固定内容，用于系统消息）"""
@@ -254,32 +228,6 @@ class Session:
   ❌ "好的，让我来帮你查一下，这就去调用天气API..."
 """
 
-    def build_image_list_prompt(self) -> str:
-        """构建可用图片列表提示（动态内容，附加到用户消息）"""
-        images = self._image_store.list_all()
-        if not images:
-            return ""
-        
-        lines = [
-            "",
-            "=" * 40,
-            "【当前可用图片】",
-        ]
-        
-        for img in images:
-            meta = f"{img.width}x{img.height}" if img.width and img.height else "未知尺寸"
-            line = f"{img.identifier} ({img.source}, {img.format}, {meta})"
-            if img.url:
-                line += f"\n  url: {img.url}"
-            lines.append(line)
-        
-        lines.extend([
-            "=" * 40,
-            ""
-        ])
-        
-        return "\n".join(lines)
-    
     def rollback_messages(self, count: int) -> Tuple[int, int]:
         """回溯最近 count 轮对话，返回 (删除的消息数, 实际回溯轮数)
 
@@ -529,23 +477,9 @@ class Session:
                 {"role": "assistant", "content": "已了解当前系统上下文。"},
             ]
 
-        # 3. 图片/视频列表提示附加到（副本的）最后一条 user 消息——不修改持久历史
-        #    持久历史保持干净，提示文本只在本次 API 请求中生效
+        # 3. 用户媒体锚定：历史中已由 chat.py 插入独立的"用户发送了图片/视频"消息，
+        #    不再需要动态附加清单（LLM 能力已可直接按编号引用）。仅浅拷贝历史。
         api_messages = [_copy_message(m) for m in self.messages]
-        list_prompts = [p for p in (
-            self.build_image_list_prompt(),
-            self.build_video_list_prompt(),
-        ) if p]
-        if list_prompts:
-            extra_prompt = "\n".join(list_prompts)
-            for msg in reversed(api_messages):
-                if msg.get("role") == "user":
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        content.append({"type": "text", "text": extra_prompt})
-                    elif isinstance(content, str):
-                        msg["content"] = content + extra_prompt
-                    break
 
         # 调试日志
         system_log = system_content[:2000] + "...[截断]" if len(system_content) > 2000 else system_content
