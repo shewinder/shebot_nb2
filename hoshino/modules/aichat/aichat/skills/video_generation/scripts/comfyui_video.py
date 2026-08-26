@@ -64,6 +64,13 @@ TASK_WORKFLOW = {
 H3_MIN_FRAMES = 5
 H3_MAX_FRAMES = 362  # 官方训练范围 124-362（5-15 秒）
 
+# 任务类型 → 默认采样步数（与对应加速 LoRA 规格匹配）
+DEFAULT_STEPS = {
+    "t2v": 8,   # fl2v_turbo_8step
+    "i2v": 8,   # fl2v_turbo_8step
+    "ref": 4,   # ref2v_turbo_4step
+}
+
 
 def duration_to_frames(duration: float) -> int:
     """秒数 → H3 帧数（snap 到 17k+5 网格）"""
@@ -181,6 +188,16 @@ def apply_size(workflow: Dict[str, Any], width: int, height: int) -> None:
                 node["inputs"][k] = width if v == "{{width}}" else height
 
 
+def apply_steps(workflow: Dict[str, Any], steps: int) -> None:
+    """将工作流中的 {{steps}} 占位符替换为采样步数（int）"""
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        for k, v in node.get("inputs", {}).items():
+            if v == "{{steps}}":
+                node["inputs"][k] = steps
+
+
 # 分辨率档位 → 16:9 基准像素量上限
 RESOLUTION_PIXELS = {
     "480p": 864 * 480,     # 快速档（默认）
@@ -206,6 +223,29 @@ def compute_target_size(image_path: str, max_pixels: int = MAX_PIXELS,
     while width * height > max_pixels * 1.1 and width > alignment and height > alignment:
         width -= alignment
         height = max(alignment, round(width / aspect / alignment) * alignment)
+    return width, height
+
+
+def compute_size_for_aspect(aspect: str, max_pixels: int = MAX_PIXELS,
+                            alignment: int = 32) -> tuple:
+    """按宽高比字符串（如 16:9 / 9:16 / 3:4 / 1:1）计算目标分辨率
+
+    不依赖任何输入图：面积逼近 max_pixels，32 对齐。
+    """
+    try:
+        w_ratio, h_ratio = aspect.lower().replace("：", ":").split(":")
+        w_ratio, h_ratio = float(w_ratio), float(h_ratio)
+    except (ValueError, AttributeError):
+        raise RuntimeError(f"--aspect-ratio 格式应为 W:H（如 16:9、9:16、3:4、1:1），收到: {aspect}")
+    if w_ratio <= 0 or h_ratio <= 0:
+        raise RuntimeError(f"--aspect-ratio 数值必须为正: {aspect}")
+    scale = (max_pixels / (w_ratio * h_ratio)) ** 0.5
+    width = max(alignment, round(w_ratio * scale / alignment) * alignment)
+    height = max(alignment, round(h_ratio * scale / alignment) * alignment)
+    # 面积超限时逐档回退（保持比例）
+    while width * height > max_pixels * 1.1 and width > alignment and height > alignment:
+        width -= alignment
+        height = max(alignment, round(width * h_ratio / w_ratio / alignment) * alignment)
     return width, height
 
 
@@ -348,6 +388,10 @@ def main() -> None:
     parser.add_argument("--guides", default="", help="多图锚定时间点（秒，逗号分隔，须与图片数一致；缺省自动均分）")
     parser.add_argument("--anchor", choices=["first", "last"], default="first",
                         help="单图锚定位置（首帧/尾帧，默认首帧）")
+    parser.add_argument("--aspect-ratio", default="",
+                        help="目标宽高比（如 16:9、9:16、3:4、1:1；ref 模式指定时视频画幅不再跟随参考图比例）")
+    parser.add_argument("--steps", type=int, default=0,
+                        help="采样步数（默认按任务：ref=4、t2v/i2v=8，与加速 LoRA 规格匹配）")
     parser.add_argument("--prompt-id", default="", help="续查已提交任务的 prompt_id（幂等）")
     parser.add_argument("--wait", type=int, default=280, help="本次等待秒数（默认 280）")
     args = parser.parse_args()
@@ -387,6 +431,10 @@ def main() -> None:
         output_error("时长仅支持 1-15 秒")
         return
     apply_length(wf, duration_to_frames(args.duration))
+
+    # 采样步数：显式指定优先，否则按任务默认（与加速 LoRA 规格匹配）
+    steps = args.steps if args.steps > 0 else DEFAULT_STEPS.get(args.task, 8)
+    apply_steps(wf, steps)
 
     # 分辨率：t2v 用档位 16:9 基准；i2v 按输入图比例自适应（上限随档位）
     max_pixels = RESOLUTION_PIXELS[args.resolution]
@@ -438,6 +486,7 @@ def main() -> None:
             apply_prompt(wf, args.prompt)
             apply_length(wf, duration_to_frames(args.duration))
             apply_size(wf, width, height)
+            apply_steps(wf, steps)
             frame_count = duration_to_frames(args.duration)
             try:
                 last_guide = build_multi_guide_workflow(wf, uploaded, frame_count, guides)
@@ -473,7 +522,11 @@ def main() -> None:
             output_error("角色参考模式需要提供 --images 参考图标识符")
             return
         try:
-            width, height = compute_target_size(image_paths[0], max_pixels=max_pixels)
+            if args.aspect_ratio:
+                # 显式指定画幅：视频宽高不跟随参考图（拼接图比例不会被带入）
+                width, height = compute_size_for_aspect(args.aspect_ratio, max_pixels=max_pixels)
+            else:
+                width, height = compute_target_size(image_paths[0], max_pixels=max_pixels)
             uploaded = [upload_image_to_comfyui(p) for p in image_paths]
         except Exception as e:
             output_error(f"图片上传失败: {e}")

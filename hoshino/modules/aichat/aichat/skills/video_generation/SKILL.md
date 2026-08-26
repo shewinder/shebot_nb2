@@ -21,45 +21,33 @@ disable-model_invocation: false
 |------|---------|------|
 | 文生视频 | `--task t2v` | 文本直接生成音视频，约 1-2 分钟 |
 | 图生视频 | `--task i2v --images <标识符>` | 单图=首/尾帧锚定（`--anchor`）；双图=首尾帧；多图=多帧剧情锚定（`--guides`），约 1-2 分钟 |
-| 角色参考 | `--task ref --images <标识符>` | 参考图作 `<Picture N>` 角色/场景参考（ref2va），**无锚定**，首帧自然，角色跟随参考图，约 1-2 分钟 |
+| 角色参考 | `--task ref --images <标识符>` | 参考图作角色/场景参考（ref2va），**无锚定**，首帧自然，角色跟随参考图，约 1-2 分钟 |
 
 **默认优先图生视频**（用户提供图片时）。用户明确"直接生成/从文字生成"时用 t2v。
 
-## 提示词规范（重要：官方格式）
+## 提示词规范（重要：统一三段式）
 
-MiniMax H3 提示词是**自然语言三段式**，顺序固定：
+MiniMax H3 提示词是**自然语言三段式**，**所有任务（t2v/i2v/ref）一律使用三段式**，顺序固定：
 
 ```
-integrated_multimodal_description: [Shot 1] 画面/动作/镜头/对白/环境音描述 ...
-[Shot 2] ...
-
-overall_soundscape: 全片环境音、动作音、非语言人声总结 ...
-
-non_diegetic_music: 背景音乐描述（角色听不到、观众听到的）...
+integrated_multimodal_description: 正文（连续镜头自然语言描述，见下）
+overall_soundscape: 全片环境音、动作音、非语言人声总结（全英文）
+non_diegetic_music: 背景音乐描述（角色听不到、观众听到的，全英文）
 ```
 
-**核心规则**：
-1. **分镜结构**：`[Shot N]` 开头，按时间顺序描述每个镜头（构图/主体/环境/动作/镜头运动/声音）
-2. **声音拆两段**：环境音（overall_soundscape）+ 背景音乐（non_diegetic_music）分开写
-3. **时长匹配**：描述内容的总时长 ≈ 目标视频时长（2 秒 ≈ 1 个短镜头；5 秒 ≈ 2-3 个镜头）
-4. **避免抽象词**：不用 "cinematic"/"beautiful"，用具体细节（光线方向、颜色、材质、具体声音）
-5. **对话原语言**：对白/歌词保持原语言
-6. 引用标签全篇一致（`<Picture 1>` / `<Video 1>` / `<Audio 1>`）
+**正文写法（核心纪律）**：
+1. **不用 `[Shot N]` 分段**，用自然语言连续镜头描述整场内容；切镜用英文连接词推进：`the camera cuts to ...` / `the shot transitions to ...` / `the shot changes to ...` / `the camera dynamically follows ...`
+2. **不写任何时间码**，全部靠自然语言连续镜头推进
+3. 每个镜头只推进一个核心关系，下一镜从上一镜的末态直接接力（姿态/方向/位置/武器/对方状态/余波至少继承四项），不能切后重新起势或无因瞬移
+4. **时长匹配**：镜头数按时长缩放——2 秒 ≈ 1-2 镜；5 秒 ≈ 3-4 镜；10 秒 ≈ 6-8 镜；15 秒 ≈ 10-14 镜（默认 12 镜），每镜 4-8 个原子事件
+5. **声音拆两段**：环境音（overall_soundscape）+ 背景音乐（non_diegetic_music）分开写，**内容一律全英文**；`overall_soundscape:` 英文内容最后一个句点后**不换行**直接续写 `non_diegetic_music:`
+6. **避免抽象词**：不用 "cinematic"/"beautiful"/"情绪很激动"，用具体细节（光线方向、颜色、材质、微表情、身体动作、具体声音）
+7. **对话原语言**：对白/歌词保持原语言，一字不改；不新增台词或旁白
+8. 声音字段名逐字使用 `overall_soundscape:` / `non_diegetic_music:`（英文小写半角冒号），不得翻译、删除或改写大小写
 
 完整官方指南在技能目录 `references/h3-prompt-guide-base-en.txt`（T2V/I2V）与 `h3-prompt-guide-ref-en.txt`（角色参考模式），**写作前应参考**。
 
-**角色参考模式（`--task ref`）必须使用官方六段式格式**（参考图用 `<Picture 1>`/`<Picture 2>` 标签引用），顺序固定：
-
-```
-subject_definitions: <Subject 1> 是 <Picture 1> 中的……（逐张定义角色）
-summary: [reference generation] 目标视频整体内容概述……
-retention_analysis: <Subject 1>（出现在 [Shot 1]）：fully_preserved - 关键外貌特征……
-detailed_description: [Shot 1] 画面/动作/镜头/对白/环境音描述……
-overall_soundscape: 全片环境音总结……
-non_diegetic_music: 背景音乐描述……
-```
-
-六段缺一不可，三段式提示词在 ref 模式下相似度会明显下降。
+**ref 模式的特殊结构**：`integrated_multimodal_description:` 内部先写**资产角色区**（第一行 `资产角色：`），随后接连续镜头正文；`overall_soundscape` / `non_diegetic_music` 与 t2v/i2v 相同。详见"角色参考模式"章节。
 
 ## 调用方式
 
@@ -67,12 +55,14 @@ non_diegetic_music: 背景音乐描述……
 
 ```
 --task t2v|i2v|ref       # 任务类型（默认 t2v）
---prompt "提示词"         # 必填（ref 模式用官方六段式）
+--prompt "提示词"         # 必填（统一三段式；ref 模式含资产角色区）
 --duration 1-15        # 时长（秒，任意值，默认 2）
 --resolution 480p|768p  # 分辨率档位（默认 480p；768p 高清约 3-5 倍耗时，适合最终成片）
 --images <标识符>        # i2v/ref 必填：图片标识符（如 <user_image_1>），多张逗号分隔
 --guides "0,2.5,5"     # i2v 多图锚定时间点（秒，与图片数一致；缺省自动均分）
 --anchor first|last    # i2v 单图锚定位置（默认 first；last=图片作为视频尾帧）
+--aspect-ratio W:H     # ref 指定画幅（如 16:9、3:4；拼接参考图必填，见"拼接参考图"章节）
+--steps N              # 采样步数（默认按任务与加速 LoRA 匹配：ref=4、t2v/i2v=8；一般不用改）
 ```
 
 ## 超时与续查机制（重要）
@@ -86,12 +76,12 @@ non_diegetic_music: 背景音乐描述……
 ## 使用示例
 
 ```
-# 文生视频（5 秒，官方三段式）
+# 文生视频（5 秒，统一三段式，自然语言连续镜头）
 execute_script(
     skill_name="video_generation",
     script_path="scripts/comfyui_video.py",
     args=["--task", "t2v", "--duration", "5",
-          "--prompt", "integrated_multimodal_description: [Shot 1] A red panda walks through a snowy bamboo forest at dawn, soft golden light through mist, camera slowly tracking forward. Gentle snow falling, panda's fur rippling. Audio: soft footsteps on snow.\n\noverall_soundscape: gentle wind, snow crunching, distant birdsong\n\nnon_diegetic_music: soft ambient piano, warm and calm"],
+          "--prompt", "integrated_multimodal_description: A red panda walks through a snowy bamboo forest at dawn, soft golden light through mist, camera slowly tracking forward. Gentle snow falling, panda's fur rippling. the camera cuts to a closer shot of its paws leaving soft prints, breath visible in cold air. Audio: soft footsteps on snow.\n\noverall_soundscape: gentle wind, snow crunching, distant birdsong\n\nnon_diegetic_music: soft ambient piano, warm and calm"],
     timeout=600
 )
 
@@ -100,7 +90,7 @@ execute_script(
     skill_name="video_generation",
     script_path="scripts/comfyui_video.py",
     args=["--task", "i2v", "--images", "<user_image_1>", "--duration", "5",
-          "--prompt", "integrated_multimodal_description: [Shot 1] The woman from the image continues standing on the rooftop, turns her head slowly and smiles, hair moving in wind, camera slowly pushing in. Audio: wind, distant city.\n\noverall_soundscape: gentle wind, distant city ambience\n\nnon_diegetic_music: soft cinematic strings"],
+          "--prompt", "integrated_multimodal_description: The woman from the image continues standing on the rooftop, turns her head slowly and smiles, hair moving in wind, camera slowly pushing in. the camera cuts to a wide shot showing the city below. Audio: wind, distant city.\n\noverall_soundscape: gentle wind, distant city ambience\n\nnon_diegetic_music: soft cinematic strings"],
     timeout=600
 )
 
@@ -130,31 +120,109 @@ execute_script(
 
 ## 角色参考模式（ref2va）
 
-参考图不锚定到具体帧，而是作为 `<Picture N>` 角色/场景参考被模型跟随，**首帧自然、角色还原度高**。适合：角色卡驱动角色出演、保持多镜头人物一致。
+参考图不锚定到具体帧，而是作为角色/场景参考被模型跟随，**首帧自然、角色还原度高**。适合：角色卡驱动角色出演、保持多镜头人物一致。**多张参考图一律先拼接成单图再走本模式**（见"拼接参考图"章节）。
 
 ```
-# 智乃+心爱 角色卡出演（提示词用官方六段式，<Picture 1>/<Picture 2> 引用）
+# 智乃+心爱 角色卡出演（提示词用统一三段式，资产角色区识别角色）
 --task ref --images <user_image_1>,<user_image_2> --duration 5
 ```
 
 规则：
-- **提示词必须用官方六段式**（subject_definitions/summary/retention_analysis/detailed_description/overall_soundscape/non_diegetic_music），见上文"提示词规范"；三段式会显著降低相似度
-- 每张参考图在提示词中用 `<Picture N>` 标签引用（第 N 张图），先 `subject_definitions` 定义角色再在分镜中用 `<Subject N>` 称呼
+- **提示词用统一三段式**：`integrated_multimodal_description:` 内先写**资产角色区**（第一行 `资产角色：`），随后接连续镜头正文；再以 `overall_soundscape:` / `non_diegetic_music:` 全英文收尾
 - 参考图不限于 AI 生成：**用户上传的 `<user_image_N>`、AI 生成的 `<ai_image_N>` 均可**，任何会话内图片标识符都能解析
-- 参考图数量不限（工作流按图数动态扩展），首图决定分辨率比例
 - 与多图锚定的区别：锚定锁定的是"这一帧长什么样"；ref 是"角色长什么样"，画面构图完全交给提示词
 - 典型用途：角色卡出演、多镜头角色一致性（比锚定模式首帧更自然，无卡片感）
+
+### 资产角色绑定（写 ref 提示词前必做）
+
+**核心规则（两条都要做到）**：
+1. 资产角色区（`资产角色：` 后）必须给出**清晰、完整的中文资产描述**，锁定每个角色的身份、服装、材质与主辅色
+2. 正文必须使用**中文身份称呼**，**禁止出现任何图片标签**（`<Picture N>`/`<Subject N>` 都不出现，只用"穿风衣的男人""红裙女人"这类称呼）
+
+**先识别，后写作**：用户提供图片时，必须先完整识别图片内容——图中有几个人物、各自的性别/年龄段/外貌特征、服装与配饰、手持道具、所处场景、光线方向与构图，将识别结果写入资产角色区，**不得跳过识别直接生成正文**。
+
+**资产角色区写法**（每个资产一段简洁但足以锁定身份的中文描述）：
+- 人物身份、性别与年龄段
+- 体型、脸部特征、发型、眼神气质
+- 服装、配饰、手持道具及其主色
+- 关键材质与结构（如丝绸的垂坠感、金属眼镜的冷光、戒指的细节）
+- 在视频中的角色（主角、对话对手、旁观者、场景或道具参考）
+- **不写**对话时间线、镜头安排、气氛宣传语或尚未发生的情绪变化
+
+**正文调用规则**：
+- 正文**不出现图片标签**，直接用识别出的中文身份称呼推动动作/对白（如"穿风衣的男人""红裙女人""主角"）
+- 图片外自然生成的对话对手、环境延伸或道具，直接用稳定中文名称描述
+- 正文用自然语言连续镜头（见"提示词规范"正文写法），不用 `[Shot N]`、不写逐镜时间码
+
+## 拼接参考图（多图 → 单图 ref）
+
+多张参考图**拼成一张图**后，按单图参考跑。典型用途：多角色同框对话、单人多视角（正/侧/背）、角色+场景、双图对比、**角色 + 局部细节（身体部位/特写画法）**等。**所有"多张参考图"场景一律先拼接再走单图 ref**。
+
+### 第一步：拼接参考图（`scripts/compose_ref_image.py`）
+
+```
+execute_script(skill_name="video_generation",
+  script_path="scripts/compose_ref_image.py",
+  args=["--images", "<user_image_1>,<user_image_2>", "--layout", "h", "--gap", "8"],
+  timeout=60)
+```
+
+- `--images`：多张参考图标识符，逗号分隔（至少 2 张）
+- `--layout`：`h` 横向并排（默认，推荐，对应"左=角色A、右=角色B"）；`v` 纵向堆叠
+- `--gap`：图间间隙像素（默认 8）；`--bg`：背景色（PIL 颜色名，默认 white）
+- 返回 `{"success": true, "identifier": "<ai_image_N>", "path": ...}` —— 保存该标识符，第二步引用它
+
+### 第二步：单图参考生成（`comfyui_video.py --task ref`）
+
+```
+execute_script(skill_name="video_generation",
+  script_path="scripts/comfyui_video.py",
+  args=["--task", "ref", "--images", "<ai_image_N>", "--duration", "5",
+        "--resolution", "480p",
+        "--aspect-ratio", "16:9",
+        "--prompt", "<三段式：资产角色区 + 连续镜头正文，见下>"],
+  timeout=600)
+```
+
+- **拼接图会带偏画幅，必须显式指定 `--aspect-ratio`**：先读取原始参考图（拼接前的第一张图）的宽高比，据此传参（如原图 3:4 竖图 → `--aspect-ratio 3:4`；横图 → `16:9` 等）。未指定时视频宽高会跟随拼接图，画幅错误
+- 可选值：`16:9` / `9:16` / `3:4` / `4:3` / `1:1` 等任意 `W:H` 格式，按档位像素量（480p/768p）计算
+
+### 提示词模板（拼接图 + 资产角色绑定，统一三段式）
+
+拼接图整体是一张参考图。**先完整识别图中每个角色/场景**（身份/年龄/外貌/服装/道具/场景/光线），把识别结果写入资产角色区；再按资产角色绑定规范写正文。每个角色给出**锁定身份的中文描述**（含服装配饰及主色）；场景类拼接图（如角色+场景）可给场景单独一段资产：
+
+```
+integrated_multimodal_description:
+资产角色：
+左侧为"<中文身份称呼>"（身份/性别/年龄段；体型/脸/发型/眼神；服装配饰道具及主色；材质结构；视频中的角色）。右侧为"<中文身份称呼>"（同上）。右侧场景为……（若拼接图含场景参考）。
+
+一个中全景定场镜头框住"穿风衣的男人"与"红裙女人"隔桌对坐……（正文：自然语言连续镜头，无 [Shot N] 无时间码，中文身份称呼，不出现图片标签；多角色保持区分，不合并身体、不互换服装）…… the camera cuts to ……（继续连续镜头）
+
+overall_soundscape: <全英文环境音/动作音/对白语气总结，最后一个句点后不换行>
+non_diegetic_music: <全英文配乐描述>
+```
+
+要点：
+- **先识别后写作**：资产角色区前必须先完成图片识别（人物/性别/年龄/外貌/服装配饰/道具/场景/光线/构图），不得跳过识别直接生成正文
+- 资产角色区只写锁定身份的描述（含服装配饰、材质结构、视频角色定位），**不写**对话时间线、镜头安排、气氛宣传语或尚未发生的情绪变化
+- **正文用中文身份称呼**（"穿风衣的男人""红裙女人""主角"），不出现图片标签；图片外自然生成的对话对手/环境/道具直接用稳定中文名称描述
+- 拼接图各部分方位务必与正文一致（"左侧的 X 对右侧的 Y 说话"），多角色时显式写"保持角色区分，不合并身体、不互换服装"
+- **局部细节参考（身体部位/特写画法等）一律拼接进角色图，禁止作为独立参考图**
+- 若需对比拼接与多图的效果差异，用同一提示词分别跑两遍（仅排查用，正式生成一律拼接）
+- **正文用自然语言连续镜头，不用 `[Shot N]` 分段**，切镜用 `the camera cuts to` / `the shot transitions to` / `the shot changes to` / `the camera dynamically follows` 等英文连接词；每镜 4-8 个原子事件，按时长缩放镜头数（见"提示词规范"）
+- **声音字段全英文**：`overall_soundscape:` 内容全英文，最后一个句点后不换行直接续写 `non_diegetic_music:`，配乐内容也全英文
+- 480p 快速测试参数效果；确认后再用 768p 出成片
 
 ## 链式长视频（角色替换 + 长片续写）
 
 把一段**源视频的角色替换成指定角色**（或纯续写生成），支持超过单段上限的长视频（源视频按 124 帧窗口切段，段间 22 帧 Motion Context 衔接）。**执行脚本是 `scripts/comfyui_video_chain.py`（独立脚本，不是 comfyui_video.py 的任务）：**
 
 ```
-# 角色替换：源视频动作/场景/字幕 1:1 保留，人物换成 <Picture N> 角色
+# 角色替换：源视频动作/场景/字幕 1:1 保留，人物换成参考图角色
 execute_script(skill_name="video_generation", script_path="scripts/comfyui_video_chain.py",
   args=["--images", "<user_image_1>,<user_image_2>,<user_image_3>",
         "--source-video", "<user_video_1>",
-        "--prompt", "<video editing 六段式>",
+        "--prompt", "<三段式：资产角色区 + 连续镜头正文，见下>",
         "--segments", "6", "--resolution", "768p", "--keep-audio"],
   timeout=600)
 ```
@@ -170,13 +238,31 @@ execute_script(skill_name="video_generation", script_path="scripts/comfyui_video
 7. 脚本不写 `chain_state`、锁文件或 `state.json`，也不使用 `--resume`；`state` 只保存在当前 LLM 工具上下文中，不能手工修改任何字段。
 
 规则：
-- **提示词用 video editing 六段式**：身份（`<Subject 1>` = `<Picture N>`，attribute_transfer）、动作/表情（attribute_transfer）、环境/字幕（fully_preserved）拆成独立 Subject；`<Video 1>` 标 partially_preserved（保留场景构图/动作时序，**只替换身份和服装**）
+- **提示词用统一三段式**（与 t2v/i2v/ref 一致）：`integrated_multimodal_description:` 内先写**资产角色区**（第一行 `资产角色：`，识别参考图中的身份特征，锁定发型/发色/眼睛/头饰/服装），随后接**连续镜头正文**，最后以 `overall_soundscape:` / `non_diegetic_music:` 全英文收尾
+- **链式替换的核心语义（必须自然语言显式写清）**：正文必须明确"**保持源视频的动作、场景构图与字幕 1:1 保留，只把人物替换为<中文身份称呼>**"，并在正文中用中文身份称呼推动动作；不出现图片标签，不用 `[Shot N]`，不写逐镜时间码
 - **采样配置固定 euler + simple**（res_multistep/beta 会导致替换不稳定/失败/圣光/丢字幕，已实测定位）
 - 身份图 3 张左右（正面全身/侧面/脸部特写）
-- 源视频自动转 24fps 并按窗口切片（每段 `<Video 1>` 用对应时间片）；30fps 源无需预处理
-- 每段 124 帧窗口（5.17s）→ 交付 102 帧，段间自动衔接；`--segments` 控制段数（源 25s ≈ 6 段）
-- `--keep-audio`：成片保留源视频原音轨（BGM/对白，时间轴 1:1 对齐；注意对白是原角色的声音）
+- 源视频自动转 24fps 并按窗口切片（每段用对应时间片）；30fps 源无需预处理
+- 每段 124 帧窗口（5.17s）→ 交付 102 帧，段间自动衔接；`--segments` 控制段数（源 25s ≈ 6 段）；每段正文按"提示词规范"时长匹配（≈5 秒/段 → 3-4 镜）
+- `--keep-audio`：成片保留源视频原音轨（BGM/对白，时间轴 1:1 对齐；注意对白是原角色的声音）；声音字段仅作画面声效参考
 - 各段无 H3 生成音轨；时长：段数 × 2-7 分钟（720×960 4 步）
+
+## 超分（可选，默认不执行）
+
+**默认不超分**：生成的视频直接交付。**仅当用户明确要求"超分/高清/放大/更清晰"时才调用** `scripts/upscale_video.py` 对已生成的视频做 2x 超分（RealESRGAN anime_6B，固定 24 帧/块分块处理防爆显存，保留原音轨）：
+
+```
+execute_script(skill_name="video_generation",
+  script_path="scripts/upscale_video.py",
+  args=["--video", "<ai_video_N>", "--scale", "2"],
+  timeout=600)
+```
+
+- `--video`：会话内视频标识符（`<ai_video_N>`）
+- `--scale`：放大倍数，`2`（默认）或 `4`
+- 返回新标识符 `<ai_video_N>`（超分版），回复中引用新标识符交付
+- 耗时：约 1-3 分钟/段视频（10s 视频 ≈ 2-5 分钟，逐块处理）；超分后视频更清晰但体积增大
+- 生成流程中不要主动建议超分；用户提出"不够清晰/放大"等要求时才使用
 
 ## 注意事项
 

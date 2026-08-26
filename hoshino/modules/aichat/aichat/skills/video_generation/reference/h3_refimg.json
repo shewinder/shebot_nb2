@@ -98,7 +98,7 @@
     1
    ],
    "seed": 20260821,
-   "steps": 8,
+   "steps": "{{steps}}",
    "cfg": 1.0,
    "sampler_name": "euler",
    "scheduler": "simple",

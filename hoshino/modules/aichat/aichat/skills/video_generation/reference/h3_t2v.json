@@ -85,7 +85,7 @@
     1
    ],
    "seed": 42,
-   "steps": 8,
+   "steps": "{{steps}}",
    "cfg": 1.0,
    "sampler_name": "euler",
    "scheduler": "simple",
