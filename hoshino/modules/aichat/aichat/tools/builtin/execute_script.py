@@ -163,6 +163,16 @@ async def execute_script(
             env["SKILL_IMAGES"] = json.dumps(image_map, ensure_ascii=False)
             logger.debug(f"[execute_script] 注入 SKILL_IMAGES: {list(image_map.keys())}")
     
+    # 注入当前会话的视频路径映射（供 Skill 脚本访问视频文件：抽帧/裁剪/规格）
+    if session:
+        video_map = {}
+        for entry in session.list_videos():
+            if entry.file_path.exists():
+                video_map[entry.identifier] = str(entry.file_path)
+        if video_map:
+            env["SKILL_VIDEOS"] = json.dumps(video_map, ensure_ascii=False)
+            logger.debug(f"[execute_script] 注入 SKILL_VIDEOS: {list(video_map.keys())}")
+    
     # 执行脚本
     try:
         logger.info(f"执行脚本: {' '.join(cmd)}, timeout={timeout}, PROJECT_ROOT={env['PROJECT_ROOT']}")
