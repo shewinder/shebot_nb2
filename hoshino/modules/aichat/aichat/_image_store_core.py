@@ -64,25 +64,44 @@ class ImageStoreCore:
     """会话级图像存储核心管理器
 
     每个 session 拥有独立的存储目录：
-        data/aichat/images/{session_id}/
+        data/aichat/sessions/{session_id}/images/
             ├── .meta.json
             ├── user_image_1.png
             └── ai_image_1.jpg
     """
 
-    BASE_DIR: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve() / "data" / "aichat" / "images"
+    BASE_DIR: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve() / "data" / "aichat" / "sessions"
 
     def __init__(self, session_id: str):
+        if not session_id or Path(session_id).name != session_id or session_id in {".", ".."}:
+            raise ValueError(f"非法 session_id: {session_id!r}")
         self.session_id = session_id
-        self._dir = self.BASE_DIR / session_id
+        self._session_dir = self._resolve_session_dir(session_id)
+        self._dir = self._session_dir / "images"
         self._meta_file = self._dir / ".meta.json"
         self._memory_fallback: Dict[str, str] = {}
         # 串行化本实例内的并发存取（并行工具调用同时存图时序号/元数据不互相覆盖）；
         # 跨进程一致性仍由 _next_index 每次从磁盘重读保证
         self._lock = threading.Lock()
         # 惰性建目录：会话创建不再急切 mkdir，首次 store/_save_meta 时才建，
-        # 从未存图的会话不会在 data/aichat/images 留下空目录
+        # 从未存图的会话不会在 data/aichat/sessions 留下空目录
         self._meta: Dict[str, Dict[str, Any]] = self._load_meta()
+
+    @classmethod
+    def _resolve_session_dir(cls, session_id: str) -> Path:
+        """解析当前会话根目录；子进程可通过环境变量显式传入同一目录"""
+        base_dir = cls.BASE_DIR.resolve()
+        configured = os.environ.get("AICHAT_SESSION_DIR")
+        if configured:
+            candidate = Path(configured).resolve()
+            try:
+                candidate.relative_to(base_dir)
+            except ValueError:
+                pass
+            else:
+                if candidate.name == session_id:
+                    return candidate
+        return base_dir / session_id
 
     def _ensure_dir(self) -> None:
         """确保存储目录存在（仅在真正写入时调用）"""
@@ -298,7 +317,7 @@ class ImageStoreCore:
         """清空当前会话所有图像（Session 新建/销毁时调用）
 
         清空后顺手删除空目录（best-effort）：一次性任务会话（子 Agent/后台/
-        定时任务）跑完 dispose 后不会在 data/aichat/images 留下空目录。
+        定时任务）跑完 dispose 后不会在 data/aichat/sessions 留下空目录。
         """
         with self._lock:
             for entry in self._list_entries():

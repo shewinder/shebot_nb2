@@ -1,6 +1,7 @@
 """Session 管理模块"""
 import asyncio
 import re
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from loguru import logger
 
 from .config import Config
 from ._image_store import ImageStore, ImageEntry
+from ._image_store_core import ImageStoreCore
 from ._video_store_core import VideoStoreCore
 from .memory import memory_store
 from .skills import skill_manager
@@ -91,16 +93,18 @@ class Session:
     def __init__(self, session_id: str, user_id: int,
                  persona: Optional[str] = None, group_id: Optional[int] = None,
                  register: bool = False):
+        if not session_id or Path(session_id).name != session_id or session_id in {".", ".."}:
+            raise ValueError(f"非法 session_id: {session_id!r}")
         self.session_id = session_id
         self.persona = persona
         self.messages: List[Dict[str, Any]] = []
         self.last_active = time.time()
         self.continuous_mode = False
+        self._session_dir = ImageStoreCore._resolve_session_dir(session_id)
+        self._clear_session_dir()
         self._image_store = ImageStore(session_id)
-        self._image_store.clear()  # 新建 Session 时清空旧图像缓存
-        # 视频存储（独立标识符 <ai_video_N> / <user_video_N>，目录与图片同级）
+        # 视频存储（独立标识符 <ai_video_N> / <user_video_N>，与图片同属 session 目录）
         self._video_store = VideoStoreCore(session_id)
-        self._video_store.clear()  # 新建 Session 时清空旧视频缓存
         # SKILL 系统：已激活的 SKILL 名称集合
         self.active_skills: Set[str] = set()
         # 当前正在执行的 SKILL（用于工具权限检查）
@@ -244,7 +248,7 @@ class Session:
         return deleted, actual
 
     def dispose(self) -> None:
-        """统一清理会话资源：图片/视频目录 + MCP 状态 + 会话锁
+        """统一清理会话资源：整个 session 目录 + MCP 状态 + 会话锁
 
         删除会话前必须调用（SessionManager._remove_session 已内聚此逻辑）。
         子 Agent 会话在图片重定位/发送完成前不要调用。
@@ -259,6 +263,11 @@ class Session:
         except Exception:
             logger.exception(f"{self._tag} 清理视频缓存失败")
 
+        try:
+            self._clear_session_dir()
+        except Exception:
+            logger.exception(f"{self._tag} 清理会话目录失败")
+
         mcp_sm = get_mcp_session_manager()
         if mcp_sm is not None:
             try:
@@ -268,6 +277,16 @@ class Session:
 
         # 会话锁在会话销毁后不再需要（持锁中的任务持有的仍是原 Lock 引用，安全）
         _session_locks.pop(self.session_id, None)
+
+    def _clear_session_dir(self) -> None:
+        """清理当前会话根目录，覆盖媒体、链式状态和临时文件"""
+        if self._session_dir.exists():
+            shutil.rmtree(self._session_dir)
+
+    @property
+    def session_dir(self) -> Path:
+        """当前会话的本地文件根目录"""
+        return self._session_dir
     
     def is_expired(self) -> bool:
         if conf.session_timeout <= 0:

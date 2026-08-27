@@ -110,7 +110,9 @@ def cmd_inpaint_render(args):
                       width=entry.width,
                       height=entry.height)
     else:
-        out_path = Path("/tmp") / f"manga_translated_{session_id}.png"
+        tmp_dir = Path(os.environ.get("SESSION_TMP_DIR", "/tmp"))
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        out_path = tmp_dir / f"manga_translated_{session_id}.png"
         out_path.write_bytes(img_bytes)
         output_result(True, path=str(out_path))
 

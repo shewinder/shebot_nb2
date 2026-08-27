@@ -152,6 +152,15 @@ async def execute_script(
     # 注入 SESSION_ID（供 Skill 脚本操作 ImageStore）
     if session:
         env["SESSION_ID"] = session.session_id
+        session_dir = session.session_dir
+        session_tmp_dir = session_dir / "tmp"
+        session_tmp_dir.mkdir(parents=True, exist_ok=True)
+        env["AICHAT_SESSION_DIR"] = str(session_dir)
+        env["SESSION_DIR"] = str(session_dir)
+        env["SESSION_TMP_DIR"] = str(session_tmp_dir)
+        env["TMPDIR"] = str(session_tmp_dir)
+        env["TEMP"] = str(session_tmp_dir)
+        env["TMP"] = str(session_tmp_dir)
     
     # 注入当前会话的图片路径映射（供 Skill 脚本直接访问图像文件）
     if session:

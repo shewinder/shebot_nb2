@@ -3,7 +3,7 @@
 
 Skill 脚本直接使用本类以避免 NoneBot 初始化；Session 层通过
 session.py 的轻量封装访问。存储目录与图片分开：
-    data/aichat/videos/{session_id}/
+    data/aichat/sessions/{session_id}/videos/
 """
 import base64
 import json
@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("video_store_core")
 
 # 视频存储根目录（与 _image_store_core.BASE_DIR 同级，优先使用 PROJECT_ROOT 环境变量）
-BASE_DIR: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve() / "data" / "aichat" / "videos"
+BASE_DIR: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve() / "data" / "aichat" / "sessions"
 
 
 @dataclass
@@ -75,14 +75,33 @@ class VideoStoreCore:
     MAX_TOTAL_BYTES = 1 << 30  # 每会话视频总大小上限 1GB
 
     def __init__(self, session_id: str):
+        if not session_id or Path(session_id).name != session_id or session_id in {".", ".."}:
+            raise ValueError(f"非法 session_id: {session_id!r}")
         self.session_id = session_id
-        self._dir = BASE_DIR / session_id
+        self._session_dir = self._resolve_session_dir(session_id)
+        self._dir = self._session_dir / "videos"
         self._meta_file = self._dir / ".meta.json"
         self._lock = threading.Lock()
         self._memory_fallback: Dict[str, str] = {}
         # 惰性建目录：会话创建不再急切 mkdir（与 _image_store_core 对齐），
         # 仅在 store_bytes/_save_meta 真正写入时创建
         self._meta = self._load_meta()
+
+    @staticmethod
+    def _resolve_session_dir(session_id: str) -> Path:
+        """解析当前会话根目录；子进程可通过环境变量显式传入同一目录"""
+        base_dir = BASE_DIR.resolve()
+        configured = os.environ.get("AICHAT_SESSION_DIR")
+        if configured:
+            candidate = Path(configured).resolve()
+            try:
+                candidate.relative_to(base_dir)
+            except ValueError:
+                pass
+            else:
+                if candidate.name == session_id:
+                    return candidate
+        return base_dir / session_id
 
     def _ensure_dir(self) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
