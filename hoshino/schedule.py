@@ -3,10 +3,14 @@ from typing import Dict, Optional
 
 from loguru import logger
 from apscheduler import job
+from nonebot import require
 from .typing import Callable, Any, Awaitable
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 try:
+    # 通过 nonebot 插件管理器加载，避免直接 import 绕过管理器导致
+    # 其他插件的 require("nonebot_plugin_apscheduler") 报 not loaded as a plugin
+    require("nonebot_plugin_apscheduler")
     from nonebot_plugin_apscheduler import scheduler
 except:
     scheduler = AsyncIOScheduler() # fot test

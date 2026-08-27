@@ -26,10 +26,11 @@ driver.register_adapter(Adapter)
 config = driver.config
 
 
-# 商店插件
-nonebot.load_plugin("nonebot_plugin_wordle")
-nonebot.load_plugin("nonebot_plugin_handle")
-nonebot.load_plugin("nonebot_plugin_parser")
+# 商店插件：加载并登记（新增插件只改这里加一行）
+from hoshino.compat import load_nb_plugin
+load_nb_plugin("nonebot_plugin_wordle")
+load_nb_plugin("nonebot_plugin_handle")
+load_nb_plugin("nonebot_plugin_parser")
 
 nonebot.load_plugins(base)
 if modules := config.modules:
@@ -37,6 +38,12 @@ if modules := config.modules:
         module = os.path.join(moduledir, module)
         nonebot.load_plugins(module)
 
+# 商店插件的 matcher 归入同名 Service（群开关 / lssv / enable / disable 可用）
+from hoshino.compat import bind_plugin_matchers
+bind_plugin_matchers()
+# 部分插件在 on_startup 阶段才动态注册 matcher（如 parser 的链接解析），
+# 启动时再补绑一次（幂等，只绑定新增的）
+driver.on_startup(bind_plugin_matchers)
 
 
 if __name__ == '__main__':
