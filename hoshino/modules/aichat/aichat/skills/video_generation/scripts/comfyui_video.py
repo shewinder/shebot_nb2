@@ -277,14 +277,22 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
     history_url = f"{base}/history/{prompt_id}"
     interval = 3
     elapsed = 0
+    consecutive_failures = 0
 
     while elapsed < wait_seconds:
         time.sleep(interval)
         elapsed += interval
 
-        hist_result = http_get(history_url)
+        # 探测用短超时（默认 300s 太久）：失联时快速失败，避免 LLM 长时间收到"未完成"
+        hist_result = http_get(history_url, timeout=10)
         if "error" in hist_result:
+            # ComfyUI 失联（进程挂掉/网络断）：任务已无法恢复，不继续空等到超时
+            consecutive_failures += 1
+            if consecutive_failures >= 3:  # 约 9 秒连续失联即判定任务丢失
+                return {"status": "error",
+                        "error": f"ComfyUI 失联（{hist_result['error'][:100]}），任务已丢失，请确认 ComfyUI 后重新生成"}
             continue
+        consecutive_failures = 0
 
         hist = hist_result.get("json", {})
         if not isinstance(hist, dict):
@@ -293,7 +301,7 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
         entry = hist.get(prompt_id, {})
         if not entry:
             # 不在历史：查队列是否仍在执行/排队；都不在 = 任务已丢失（如服务器重启）
-            q_result = http_get(f"{base}/queue")
+            q_result = http_get(f"{base}/queue", timeout=10)
             q = q_result.get("json", {}) if q_result.get("status") == 200 else {}
             in_queue = any(
                 prompt_id in (item[1] if isinstance(item, list) and len(item) > 1 else ())
@@ -331,7 +339,7 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
                         f"{base}/view?filename={quote(filename)}"
                         f"&subfolder={quote(subfolder)}&type={quote(img_type)}"
                     )
-                    vid_resp = http_get(view_url)
+                    vid_resp = http_get(view_url, timeout=60)
                     if vid_resp.get("status") == 200:
                         content = vid_resp.get("content")
                         if content:
@@ -350,7 +358,7 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
                         f"{base}/view?filename={quote(filename)}"
                         f"&subfolder={quote(subfolder)}&type={quote(img_type)}"
                     )
-                    vid_resp = http_get(view_url)
+                    vid_resp = http_get(view_url, timeout=60)
                     if vid_resp.get("status") == 200:
                         content = vid_resp.get("content")
                         if content:

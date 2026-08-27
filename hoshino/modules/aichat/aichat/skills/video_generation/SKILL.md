@@ -254,7 +254,7 @@ non_diegetic_music: <全英文配乐描述>
 execute_script(skill_name="video_generation", script_path="scripts/comfyui_video_chain.py",
   args=["--images", "<user_image_1>,<user_image_2>,<user_image_3>",
         "--source-video", "<user_video_1>",
-        "--prompt", "<链式三段式：资产角色区 + 连续镜头正文，见下>",
+        "--prompt", "<video editing 六段式，见下>",
         "--segments", "6", "--resolution", "768p", "--keep-audio"],
   timeout=600)
 ```
@@ -276,8 +276,21 @@ execute_script(skill_name="video_generation", script_path="scripts/comfyui_video
 - 若当前轮工具调用超时或中断，下一轮用**同一份** `state` 继续，不得重新发起首轮参数
 
 规则：
-- **提示词用三段式**（与 t2v/i2v 相同，ref 用六段式不适用链式）：`integrated_multimodal_description:` 内先写**资产角色区**（第一行 `资产角色：`，识别参考图中的身份特征，锁定发型/发色/眼睛/头饰/服装），随后接**连续镜头正文**，最后以 `overall_soundscape:` / `non_diegetic_music:` 全英文收尾
-- **链式替换的核心语义（必须自然语言显式写清）**：正文必须明确"**保持源视频的动作、场景构图与字幕 1:1 保留，只把人物替换为<中文身份称呼>**"，并在正文中用中文身份称呼推动动作；不出现图片标签，不用 `[Shot N]`，不写逐镜时间码
+- **提示词用 video editing 六段式**（链式替换专用，与 ref 的 `<Picture N>` 六段式、t2v/i2v 三段式均不同），顺序固定：
+
+```
+subject_definitions: <Subject 1> 是 <Picture N> 中的<中文身份称呼>（身份/性别/年龄/发型/眼眸/服装配饰/主色/体型）；attribute_transfer - 仅替换源视频人物的身份与服装，其余一切跟随源视频
+summary: [video editing] 将源视频中的<原人物>替换为 <Subject 1>，源视频的场景/镜头/动作时序全部 1:1 保留
+retention_analysis: <Video 1>（全程）：partially_preserved - 保留场景构图、镜头运动、动作时序、人物走位与字幕，仅替换人物身份和服装；<Subject 1>（全程）：attribute_transfer - <关键外观锚点>
+detailed_description: 保持源视频的动作、场景构图、镜头角度与节奏 1:1 复刻，只将人物外观替换为<中文身份称呼>；**不描述源视频之外的新动作、新镜头、新场景元素**（自然语言连续镜头，无 [Shot N] 无时间码）
+overall_soundscape: <全英文，源音轨保留>
+non_diegetic_music: <全英文>
+```
+
+- **`<Video 1>` 引用必须存在**：链式替换靠 `<Video 1>` 标签绑定源视频，`retention_analysis` 里标 `partially_preserved`（保留场景/动作/时序，只换身份服装），否则模型不保留源视频内容
+- **`<Subject 1>` 标 `attribute_transfer`**：目标角色只转移外观锚点（发型/发色/眼睛/服装），动作全部来自源视频
+- **`detailed_description` 禁止自由创作（硬性规则）**：正文只写"保持源视频 1:1，只替换人物外观为 X"，**禁止描述源视频之外的新动作、新姿态、新镜头、新场景元素、新光线**（如"仰卧/转身/丝织物缠绕/烛光映照"这类自创画面一律不写）——写越具体，模型越倾向重新生成而非跟随源视频，导致与源视频不一致
+- **先抽帧观察，再写正文**：写 `detailed_description` 前必须用 `video_tools.py --extract-frame` 抽 2-4 个关键时间点帧观察源视频实际内容；正文中如需提及动作/场景，只能描述抽帧观察到的真实内容，不得脑补
 - **采样配置固定 euler + simple**（res_multistep/beta 会导致替换不稳定/失败/圣光/丢字幕，已实测定位）
 - 身份图 3 张左右（正面全身/侧面/脸部特写）
 - 源视频自动转 24fps 并按窗口切片（每段用对应时间片）；30fps 源无需预处理
