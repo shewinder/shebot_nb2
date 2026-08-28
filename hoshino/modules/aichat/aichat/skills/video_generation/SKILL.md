@@ -311,8 +311,11 @@ execute_script(skill_name="video_generation",
 
 - `--video`：会话内视频标识符（`<ai_video_N>`）
 - `--scale`：放大倍数，`2`（默认）或 `4`
-- 返回新标识符 `<ai_video_N>`（超分版），回复中引用新标识符交付
-- 耗时：约 1-3 分钟/段视频（10s 视频 ≈ 2-5 分钟，逐块处理）；超分后视频更清晰但体积增大
+- 首次调用会返回 `status=partial`、`progress` 和 `state`，不会等待整片完成；必须把完整 `state` 原样保存在当前对话上下文中
+- 后续调用使用 `args=["--state", "<上次返回的 state JSON>"]`，每次最多等待一个 24 帧块；`pending` 或 `partial` 都继续原样传回最新 `state`
+- 只有返回 `success=true` 且包含新标识符 `<ai_video_N>` 时才算完成，回复中引用该超分版交付
+- 中间帧和块视频保存在当前会话 `tmp/upscale_<run_id>/`，不会占用 VideoStore 条目；会话失效时随 session 目录清理
+- 每次调用建议 `timeout=600`、`--wait 540`，避免单次工具调用超过执行上限；ComfyUI 任务丢失或失败时会返回 `status=error`，需要根据错误重新提交
 - 生成流程中不要主动建议超分；用户提出"不够清晰/放大"等要求时才使用
 
 ## 注意事项
