@@ -479,7 +479,7 @@ def main() -> None:
     parser.add_argument("--legacy-sampler", action="store_true")
     parser.add_argument("--keep-audio", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--wait", type=int, default=280)
+    parser.add_argument("--wait", type=int, default=240)
     parser.add_argument("--state", default="", help="LLM 上次返回的 state JSON（续跑时原样传回）")
     args = parser.parse_args()
     args.wait = min(args.wait, 540)

@@ -311,7 +311,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="视频超分（2x/4x，ESRGAN anime_6B）")
     parser.add_argument("--video", default="", help="会话内视频标识符（如 <ai_video_N>）")
     parser.add_argument("--scale", type=int, default=2, choices=[2, 4], help="放大倍数（默认 2）")
-    parser.add_argument("--wait", type=int, default=540, help="本次等待秒数（默认 540，最大 540）")
+    parser.add_argument("--wait", type=int, default=240, help="本次等待秒数（默认 240，最大 540）")
     parser.add_argument("--state", default="", help="LLM 上次返回的 state JSON（续跑时原样传回）")
     args = parser.parse_args()
     args.wait = min(max(args.wait, 1), 540)

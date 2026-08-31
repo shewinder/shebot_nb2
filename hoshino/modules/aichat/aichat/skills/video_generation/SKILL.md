@@ -100,7 +100,7 @@ non_diegetic_music: 背景音乐描述……
 
 ## 超时与续查机制（重要）
 
-生成耗时 1-2 分钟，脚本单次等待最长 540 秒：
+生成耗时 1-2 分钟，脚本单次等待最长 240 秒：
 
 1. **首次调用**：提交并等待。完成返回 `identifier`（如 `<ai_video_1>`），在回复中引用即可。
 2. **返回 `视频仍在生成中，请使用 --prompt-id xxx 继续查询`**：再次调用仅带 `--prompt-id xxx` 续查（幂等，可多次）。
@@ -262,7 +262,7 @@ execute_script(skill_name="video_generation", script_path="scripts/comfyui_video
 **前台无本地状态续跑机制（重要）**：链式任务由当前 LLM 会话持续执行，脚本每次只处理一个 ComfyUI prompt，LLM 必须保存并原样传回返回值中的 `state`：
 开始前请将 aichat 的 `max_tool_rounds` 配置调到足以覆盖全部分段调用和必要重试的值。
 1. 首次调用提交第 1 段，返回 `{"status": "partial", "state": {...}}`；保存完整 `state`。
-2. 立即继续调用 `execute_script`，使用 `args=["--state", "<上次返回的完整 state JSON>", "--wait", "540"]`、`timeout=600`。脚本会在内部等待，不要调用 `run_background_task`、`wait_and_resume` 或 shell sleep。
+2. 立即继续调用 `execute_script`，使用 `args=["--state", "<上次返回的完整 state JSON>", "--wait", "240"]`、`timeout=600`。脚本会在内部等待，不要调用 `run_background_task`、`wait_and_resume` 或 shell sleep。
 3. 若仍返回 `partial`，保存最新 `state` 并立即重复 `--state` 调用；不要再次传首轮参数。
 4. 若返回带 `state` 的可重试错误，原样保留该 `state` 并重试一次；任务明确丢失或连续重试仍失败时才告知用户失败。
 5. 段完成时脚本会存储该段、提交下一段并返回更新后的 `state`。不得把中间 `<ai_video_N>` 当成品发送。
@@ -315,7 +315,7 @@ execute_script(skill_name="video_generation",
 - 后续调用使用 `args=["--state", "<上次返回的 state JSON>"]`，每次最多等待一个 24 帧块；`pending` 或 `partial` 都继续原样传回最新 `state`
 - 只有返回 `success=true` 且包含新标识符 `<ai_video_N>` 时才算完成，回复中引用该超分版交付
 - 中间帧和块视频保存在当前会话 `tmp/upscale_<run_id>/`，不会占用 VideoStore 条目；会话失效时随 session 目录清理
-- 每次调用建议 `timeout=600`、`--wait 540`，避免单次工具调用超过执行上限；ComfyUI 任务丢失或失败时会返回 `status=error`，需要根据错误重新提交
+- 每次调用建议 `timeout=600`、`--wait 240`，避免单次工具调用超过执行上限；ComfyUI 任务丢失或失败时会返回 `status=error`，需要根据错误重新提交
 - 生成流程中不要主动建议超分；用户提出"不够清晰/放大"等要求时才使用
 
 ## 注意事项
