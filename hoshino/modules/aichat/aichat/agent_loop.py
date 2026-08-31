@@ -47,6 +47,8 @@ class AgentTask(BaseModel):
     profile: Optional[str] = None
     persona: Optional[str] = None
     image_identifiers: List[str] = field(default_factory=list)
+    # 一次性多模态输入：不写入 ImageStore，不产生可发送的图片标识符
+    image_data_urls: List[str] = field(default_factory=list)
     parent_session: Optional[Session] = None
     preactivate_skills: List[str] = field(default_factory=list)
     blocked_tools: frozenset = field(default_factory=frozenset)
@@ -131,10 +133,19 @@ async def _copy_images_with_map(
 
 
 def _build_multimodal_message(
-    text: str, identifiers: List[str], session: Session
+    text: str,
+    identifiers: List[str],
+    session: Session,
+    image_data_urls: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """构建多模态消息内容（文本 + 图片 data_url）"""
+    """构建多模态消息内容（文本 + 持久或一次性图片 data_url）"""
     content: List[Dict[str, Any]] = []
+    for data_url in image_data_urls or []:
+        if data_url:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            })
     for ident in identifiers:
         data_url = session._image_store.get_data_url(ident)
         if data_url:
@@ -200,8 +211,22 @@ async def _run(task: AgentTask, session: Session) -> AgentResult:
         )
 
     supports_multimodal = api_config.get("supports_multimodal", False)
-    if new_ids and supports_multimodal:
-        message_content = _build_multimodal_message(task.task, new_ids, session)
+    if task.image_data_urls and not supports_multimodal:
+        return AgentResult(
+            result=ChatResult(
+                error=AppError("视觉模型未开启多模态，无法分析视频帧", code="llm.multimodal_unavailable")
+            ),
+            session=session,
+            image_map=image_map,
+        )
+
+    if (new_ids or task.image_data_urls) and supports_multimodal:
+        message_content = _build_multimodal_message(
+            task.task,
+            new_ids,
+            session,
+            image_data_urls=task.image_data_urls,
+        )
         session.add_message("user", message_content)
     else:
         prompt = task.task

@@ -19,5 +19,6 @@ from . import background_task
 from . import memory_tools
 from . import delegate_task
 from . import groupmsg
+from . import analyze_video
 
-__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "skill_admin", "web_search", "execute_script", "curl_tool", "store_images", "file_tools", "preference_tools", "background_task", "memory_tools", "delegate_task", "groupmsg"]
+__all__ = ["scheduler", "weather", "environment", "service_manage", "skill_tools", "skill_admin", "web_search", "execute_script", "curl_tool", "store_images", "file_tools", "preference_tools", "background_task", "memory_tools", "delegate_task", "groupmsg", "analyze_video"]

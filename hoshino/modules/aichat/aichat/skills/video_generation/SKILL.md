@@ -27,6 +27,8 @@ disable-model_invocation: false
 
 ## 视频工具（看视频/查规格/裁剪，禁止自写脚本）
 
+需要直接回答“视频里有什么/发生了什么”等内容分析问题时，优先调用全局 `analyze_video` 工具。该工具会均匀抽取临时帧并交给 vision subagent，抽取帧不会生成或发送 `<ai_image_N>`。当前版本只分析画面，不识别音频。
+
 需要**查看视频内容、查询规格、裁剪片段**时，调用 `scripts/video_tools.py`，**禁止自写 ffmpeg/ffprobe 脚本**：
 
 ```
@@ -34,7 +36,7 @@ disable-model_invocation: false
 execute_script(skill_name="video_generation", script_path="scripts/video_tools.py",
   args=["--probe", "--video", "<user_video_1>"], timeout=60)
 
-# 抽帧（时间点秒 → <ai_image_N>，LLM 引用该图片即可"看"视频画面）
+# 抽帧（仅用于视频生成工作流中需要观察指定画面时；会生成 <ai_image_N>）
 execute_script(skill_name="video_generation", script_path="scripts/video_tools.py",
   args=["--extract-frame", "--video", "<user_video_1>", "--at", "3.0"], timeout=60)
 
