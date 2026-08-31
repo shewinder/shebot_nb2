@@ -2,7 +2,7 @@
 import asyncio
 import base64
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from loguru import logger
 
 import httpx
@@ -16,7 +16,13 @@ from .config import Config
 from .persona import persona_manager
 from ._send_util import send_ai_response
 from .chat_executor import ChatExecutor, ChatResult
-from .session import session_manager, Session, parse_choices_from_response, format_choices_for_display
+from .session import (
+    PendingInput,
+    Session,
+    format_choices_for_display,
+    parse_choices_from_response,
+    session_manager,
+)
 from .shortcuts import shortcuts_manager
 
 conf = Config.get_instance('aichat')
@@ -143,23 +149,101 @@ async def handle_ai_chat(bot: Bot, event: Event):
         logger.info(f"媒体提取：图片 {len(image_urls)} 个，视频 {len(video_urls)} 个")
 
     persona = persona_manager.get_persona(user_id, group_id)
-    # 确定要对话，获取或创建 session
-    if not session:
-        session = session_manager.create_session(user_id, group_id, persona)
+    # 同步获取或创建，避免并发首消息在检查与创建之间覆盖会话。
+    session = session_manager.get_or_create_session(user_id, group_id, persona)
 
-    # 解析最近一轮对话中的选项（在锁外只读，不影响历史）
-    last_choices = session.get_last_choices()
-    if last_choices:
-        if msg in ['1', '2', '3']:
-            choice_num = int(msg)
-            if choice_num in last_choices:
-                # 将数字替换为选项内容
-                user_input = last_choices[choice_num]
-                logger.info(f"用户选择选项 {choice_num}: {user_input}")
+    is_owner, sequence, turn_id, preceding = session.claim_turn_or_enqueue(
+        user_input, image_urls, video_urls, bot, event, msg,
+    )
+    if not is_owner:
+        await _ack_pending_input(session, bot, event, sequence, turn_id)
+        return
 
-    # 串行化同一会话的消息处理，防止并发消息交错写入历史
+    # session.lock 仍保护历史提交；后续入口只访问 pending inbox。
     async with session.lock:
-        await _run_chat(bot, event, session, user_input, image_urls, video_urls, api_config)
+        try:
+            first = PendingInput(
+                user_input=user_input,
+                image_urls=list(image_urls),
+                video_urls=list(video_urls),
+                bot=bot,
+                event=event,
+                raw_message=msg,
+            )
+            await _run_turn(session, first, api_config, preceding)
+        finally:
+            session.end_turn(turn_id)
+
+
+async def _ack_pending_input(
+    session: Session,
+    bot: Bot,
+    event: Event,
+    sequence: Optional[int],
+    turn_id: Optional[str],
+) -> None:
+    """确认消息已进入运行中会话，不等待主会话锁。"""
+    if sequence is None:
+        await bot.send(event, "当前对话的待处理消息已满，请稍后再发")
+        return
+    logger.info(
+        f"[RuntimeInsert] session={session.session_id} turn={turn_id} "
+        f"sequence={sequence} queued={session.pending_input_count()}"
+    )
+    await bot.send(event, "消息已加入当前对话，将在下一个可用节点处理")
+
+
+def _resolve_choice(
+    session: Session,
+    item: PendingInput,
+    choices: Optional[Dict[int, str]] = None,
+) -> str:
+    """在消息真正执行时解析选项，避免入队期间固定过期 choices。"""
+    user_input = item.user_input
+    if item.raw_message not in {'1', '2', '3'}:
+        return user_input
+    if choices is None:
+        choices = session.get_last_choices()
+    choice_num = int(item.raw_message)
+    if choice_num in choices:
+        user_input = choices[choice_num]
+        logger.info(f"用户选择选项 {choice_num}: {user_input}")
+    return user_input
+
+
+async def _run_turn(
+    session: Session,
+    first: PendingInput,
+    api_config: Dict[str, Any],
+    preceding: Optional[List[PendingInput]] = None,
+) -> None:
+    """单一执行者处理首条消息，并在安全边界按 FIFO 续接插入消息。"""
+    current_batch = list(preceding or []) + [first]
+    while current_batch:
+        for index, item in enumerate(current_batch):
+            try:
+                completed = await _run_chat(
+                    item.bot,
+                    item.event,
+                    session,
+                    _resolve_choice(session, item),
+                    item.image_urls,
+                    item.video_urls,
+                    api_config,
+                )
+                if completed is False:
+                    remaining = current_batch[index:]
+                    if item is first:
+                        remaining = current_batch[index + 1:]
+                    session.requeue_pending_inputs(remaining)
+                    return
+            except Exception:
+                remaining = current_batch[index:]
+                if item is first:
+                    remaining = current_batch[index + 1:]
+                session.requeue_pending_inputs(remaining)
+                raise
+        current_batch = session.finish_turn_or_drain_pending_inputs()
 
 
 async def download_video(video_url: str) -> Optional[bytes]:
@@ -227,7 +311,7 @@ def _insert_media_anchor(session: "Session", anchor: Optional[str]) -> None:
         session.add_raw_message({"role": "user", "content": anchor})
 
 
-async def _run_chat(
+async def _append_user_input(
     bot: Bot,
     event: Event,
     session: Session,
@@ -235,8 +319,9 @@ async def _run_chat(
     image_urls: List[str],
     video_urls: List[str],
     api_config: Dict[str, Any],
-) -> None:
-    """会话锁内的实际对话编排：构建消息 → 执行 → 回写历史 → 发送"""
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """准备用户文本与媒体，写入历史并返回本次新增的 API 消息。"""
+    history_start = len(session.messages)
     supports_multimodal = api_config.get("supports_multimodal", False)
     message_content: Union[str, List[Dict[str, Any]]]
     # 用户媒体标识符（一次用户消息合并为一条锚定消息，与用户行为一致）
@@ -271,7 +356,7 @@ async def _run_chat(
         else:
             _insert_media_anchor(session, _build_media_anchor_message(session, user_image_ids, user_video_ids))
             await bot.send(event, f"图片已接收并保存。当前模型不支持直接识别图片，你可以通过工具（如 #编辑图片）来处理这些图片。")
-            return
+            return [dict(message) for message in session.messages[history_start:]], False
     elif image_urls and supports_multimodal:
         content_parts: List[Dict[str, Any]] = []
 
@@ -292,7 +377,7 @@ async def _run_chat(
 
         if not content_parts and not user_input:
             await bot.send(event, "图片处理失败，请重试或提供文本内容")
-            return
+            return [], False
 
         if user_input:
             content_parts.append({
@@ -315,13 +400,36 @@ async def _run_chat(
                 await bot.send(event, "视频已接收并保存。当前无法直接分析视频内容，你可以让我基于它执行任务（如视频续写）。")
             else:
                 await bot.send(event, "请输入要询问的内容（#后面）")
-            return
+            return [dict(message) for message in session.messages[history_start:]], False
         message_content = user_input
 
     session.add_message("user", message_content)
     # 用户媒体锚定：紧随用户消息插入（一次发送合并为一条）
     _insert_media_anchor(session, _build_media_anchor_message(session, user_image_ids, user_video_ids))
-    pre_chat_length = len(session.messages)
+    return [dict(message) for message in session.messages[history_start:]], True
+
+
+async def _run_chat(
+    bot: Bot,
+    event: Event,
+    session: Session,
+    user_input: str,
+    image_urls: List[str],
+    video_urls: List[str],
+    api_config: Dict[str, Any],
+) -> bool:
+    """会话锁内的实际对话编排：构建消息 → 执行 → 回写历史 → 发送。"""
+    history_checkpoint = len(session.messages)
+    absorbed_pending: List[PendingInput] = []
+    try:
+        _, should_invoke = await _append_user_input(
+            bot, event, session, user_input, image_urls, video_urls, api_config,
+        )
+    except Exception:
+        del session.messages[history_checkpoint:]
+        raise
+    if not should_invoke:
+        return True
 
     async def on_content(content: str):
         if content and content.strip():
@@ -331,21 +439,54 @@ async def _run_chat(
                 markdown_min_length=conf.markdown_min_length
             )
 
-    api_result = await ChatExecutor(session).chat(
-        api_config=api_config,
-        bot=bot,
-        event=event,
-        on_content=on_content,
-    )
+    async def before_next_request() -> List[Dict[str, Any]]:
+        """在 tool results 完整写回后吸收当前全部插入消息。"""
+        pending = session.drain_pending_inputs()
+        if not pending:
+            return []
+        inserted: List[Dict[str, Any]] = []
+        pending_choices = session.get_last_choices()
+        for index, item in enumerate(pending):
+            try:
+                messages, _ = await _append_user_input(
+                    item.bot,
+                    item.event,
+                    session,
+                    _resolve_choice(session, item, pending_choices),
+                    item.image_urls,
+                    item.video_urls,
+                    api_config,
+                )
+                inserted.extend(messages)
+                absorbed_pending.append(item)
+            except Exception:
+                session.requeue_pending_inputs(pending[index:])
+                raise
+        return inserted
+
+    try:
+        api_result = await ChatExecutor(session).chat(
+            api_config=api_config,
+            bot=bot,
+            event=event,
+            on_content=on_content,
+            before_next_request=before_next_request,
+        )
+    except Exception:
+        # 媒体准备或 API 编排异常时，回滚本批次并保留已吸收的插入消息。
+        del session.messages[history_checkpoint:]
+        session.requeue_pending_inputs(absorbed_pending)
+        raise
 
     # 工具图片输出已由 send_response 通过标识符处理，无需重复发送
     # 注意：旧版 _image_urls 机制已废弃，请使用标识符机制 <ai_image_N>
 
     if api_result.error and not api_result.content:
+        # 仅回滚本批次；插入消息重新入队，等待下一次可用回合。
+        del session.messages[history_checkpoint:]
+        session.requeue_pending_inputs(absorbed_pending)
         await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result.error}")
-        # 回滚到本轮 chat 之前的状态
-        session.messages = session.messages[:pre_chat_length - 1]
-        return
+        return False
 
     response = api_result.content or ""
     assistant_msg = {"role": "assistant", "content": response}
@@ -365,7 +506,7 @@ async def _run_chat(
     try:
         if not display_response:
             await bot.send(event, "抱歉，我没有生成任何内容，请重试")
-            return
+            return True
 
         await send_response(
             bot, event, display_response, session,
@@ -375,3 +516,4 @@ async def _run_chat(
     except Exception as e:
         logger.error(truncate_log(str(display_response)))
         logger.error(f"发送AI回复失败: {e}")
+    return True

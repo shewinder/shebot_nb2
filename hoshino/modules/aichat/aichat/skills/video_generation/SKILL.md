@@ -96,6 +96,7 @@ non_diegetic_music: 背景音乐描述……
 --anchor first|last    # i2v 单图锚定位置（默认 first；last=图片作为视频尾帧）
 --aspect-ratio W:H     # ref 指定画幅（如 16:9、3:4；拼接参考图必填，见"拼接参考图"章节）
 --steps N              # 采样步数（默认按任务与加速 LoRA 匹配：ref=4、t2v/i2v=8；一般不用改）
+--lora-strength 0-1    # MysticXXX LoRA 强度（仅 t2v/i2v 生效；0=关闭该 LoRA，默认 0.5）
 ```
 
 ## 超时与续查机制（重要）

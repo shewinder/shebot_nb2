@@ -400,6 +400,8 @@ def main() -> None:
                         help="目标宽高比（如 16:9、9:16、3:4、1:1；ref 模式指定时视频画幅不再跟随参考图比例）")
     parser.add_argument("--steps", type=int, default=0,
                         help="采样步数（默认按任务：ref=4、t2v/i2v=8，与加速 LoRA 规格匹配）")
+    parser.add_argument("--lora-strength", type=float, default=0.5,
+                        help="MysticXXX LoRA 强度（t2v/i2v 生效；0 = 关闭该 LoRA 节点，默认 0.5）")
     parser.add_argument("--prompt-id", default="", help="续查已提交任务的 prompt_id（幂等）")
     parser.add_argument("--wait", type=int, default=280, help="本次等待秒数（默认 280）")
     args = parser.parse_args()
@@ -443,6 +445,15 @@ def main() -> None:
     # 采样步数：显式指定优先，否则按任务默认（与加速 LoRA 规格匹配）
     steps = args.steps if args.steps > 0 else DEFAULT_STEPS.get(args.task, 8)
     apply_steps(wf, steps)
+
+    # MysticXXX LoRA：t2v/i2v 工作流带节点 70；强度 0 时关闭（SigmaShift 绕过 70 直连 turbo）
+    if "70" in wf and wf["70"].get("class_type") == "LoraLoaderModelOnly":
+        if args.lora_strength <= 0:
+            # 节点6(SigmaShift) 的 model 原指向 70，改为指向 turbo LoRA 节点5
+            wf["6"]["inputs"]["model"] = ["5", 0]
+            wf.pop("70", None)
+        else:
+            wf["70"]["inputs"]["strength_model"] = args.lora_strength
 
     # 分辨率：t2v 用档位 16:9 基准；i2v 按输入图比例自适应（上限随档位）
     max_pixels = RESOLUTION_PIXELS[args.resolution]

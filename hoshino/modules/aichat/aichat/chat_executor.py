@@ -10,7 +10,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
 from pydantic import ValidationError
@@ -71,6 +71,9 @@ class ChatExecutor:
         on_content: Optional[Callable[[str], Any]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         max_rounds: Optional[int] = None,
+        before_next_request: Optional[
+            Callable[[], Awaitable[List[Dict[str, Any]]]]
+        ] = None,
     ) -> "ChatResult":
         """执行对话调用，自动处理消息构建和工具获取
 
@@ -96,6 +99,7 @@ class ChatExecutor:
             max_tool_rounds=max_rounds,
             context=chat_context,
             on_content=on_content,
+            before_next_request=before_next_request,
         )
 
         if result.usage:
@@ -320,6 +324,9 @@ class ChatExecutor:
         max_tool_rounds: Optional[int] = None,
         context: Optional[Dict[str, Any]] = None,
         on_content: Optional[Callable[[str], Any]] = None,
+        before_next_request: Optional[
+            Callable[[], Awaitable[List[Dict[str, Any]]]]
+        ] = None,
     ) -> "ChatResult":
         """与 AI API 进行对话，支持多轮工具调用"""
         if max_tool_rounds is None:
@@ -398,6 +405,15 @@ class ChatExecutor:
                 except Exception:
                     pass
                 logger.info(f"{self._tag} 工具调用结果: {truncate_log(tool_result['content'])}")
+
+            if before_next_request and round_num + 1 < max_tool_rounds:
+                inserted_messages = await before_next_request()
+                if inserted_messages:
+                    current_messages.extend(inserted_messages)
+                    logger.info(
+                        f"{self._tag} 运行时插入 {len(inserted_messages)} 条消息，"
+                        "将在下一次 LLM 请求生效"
+                    )
 
         logger.warning(f"达到最大工具调用轮数限制: {max_tool_rounds}")
         return ChatResult(

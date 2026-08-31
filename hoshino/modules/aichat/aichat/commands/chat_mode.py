@@ -63,13 +63,23 @@ async def check_chat_mode(bot: Bot, event: Event):
         await check_chat_mode_cmd.finish("当前处于「普通模式」，需要使用 # 前缀触发AI对话\n发送「进入对话模式」开启免#触发")
 
 
-clear_cmd = sv.on_command('清除对话', aliases=('清空对话', '重置对话', '清除上下文', '清空上下文'), only_group=False)
+clear_cmd = sv.on_command(
+    '清除对话',
+    aliases=('清空对话', '重置对话', '清除上下文', '清空上下文'),
+    only_group=False,
+    block=True,
+)
 
 
 @clear_cmd.handle()
 async def clear_session(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
+
+    session = session_manager.get_session(user_id, group_id)
+    if session and session.turn_active:
+        await clear_cmd.finish("当前对话仍在执行，暂不能清除；请等待本轮完成后再试")
+        return
 
     if session_manager.clear_session(user_id, group_id):
         await bot.send(event, "对话历史已清除")
@@ -104,6 +114,10 @@ async def rollback_session(bot: Bot, event: Event):
     session = session_manager.get_session(user_id, group_id)
     if not session:
         await rollback_cmd.finish("没有可回溯的对话记录")
+        return
+
+    if session.turn_active:
+        await rollback_cmd.finish("当前对话仍在执行，暂不能回溯；请等待本轮完成后再试")
         return
 
     deleted, actual_rounds = session.rollback_messages(count)

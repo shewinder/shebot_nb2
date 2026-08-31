@@ -2,7 +2,11 @@
 import asyncio
 import re
 import shutil
+import threading
 import time
+import uuid
+from collections import deque
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -24,6 +28,19 @@ conf = Config.get_instance('aichat')
 # per-session 异步锁注册表：串行化同一会话的并发消息处理，
 # 防止历史消息交错、回滚错位（chat.py 在消息编排前获取 session.lock）。
 _session_locks: Dict[str, asyncio.Lock] = {}
+
+
+@dataclass
+class PendingInput:
+    """运行中会话暂存的用户消息快照，不持有可变消息对象。"""
+
+    user_input: str
+    image_urls: List[str]
+    video_urls: List[str]
+    bot: Any
+    event: Any
+    raw_message: str = ""
+    sequence: int = 0
 
 
 def _get_session_lock(session_id: str) -> asyncio.Lock:
@@ -90,6 +107,8 @@ def format_choices_for_display(choices: Dict[int, str]) -> str:
 
 
 class Session:
+    MAX_PENDING_INPUTS = 32
+
     def __init__(self, session_id: str, user_id: int,
                  persona: Optional[str] = None, group_id: Optional[int] = None,
                  register: bool = False):
@@ -120,6 +139,11 @@ class Session:
         # 本轮已发送的图片标识符（会话级去重）
         self.last_user_msg_at: float = time.time()
         self._turn_sent_images: Set[str] = set()
+        self._turn_state_lock = threading.Lock()
+        self._turn_active = False
+        self._turn_id: Optional[str] = None
+        self._pending_inputs: deque[PendingInput] = deque()
+        self._pending_sequence = 0
 
         if register:
             session_manager.sessions[self.session_id] = self
@@ -149,6 +173,137 @@ class Session:
     def add_raw_message(self, message: Dict[str, Any]) -> None:
         """添加完整 API 格式消息（支持 tool_calls、tool 等）"""
         self._append_message(message)
+
+    def try_begin_turn(self) -> bool:
+        """兼容旧调用方，原子登记当前会话的执行者。"""
+        with self._turn_state_lock:
+            if self._turn_active:
+                return False
+            self._turn_active = True
+            self._turn_id = uuid.uuid4().hex[:12]
+            self.last_active = time.time()
+            return True
+
+    def claim_turn_or_enqueue(
+        self,
+        user_input: str,
+        image_urls: List[str],
+        video_urls: List[str],
+        bot: Any,
+        event: Any,
+        raw_message: str = "",
+    ) -> Tuple[bool, Optional[int], Optional[str], List[PendingInput]]:
+        """原子地成为执行者或加入当前回合，消除入口检查竞态。"""
+        with self._turn_state_lock:
+            if not self._turn_active:
+                preceding = list(self._pending_inputs)
+                self._pending_inputs.clear()
+                self._turn_active = True
+                self._turn_id = uuid.uuid4().hex[:12]
+                self.last_active = time.time()
+                return True, None, self._turn_id, preceding
+            if len(self._pending_inputs) >= self.MAX_PENDING_INPUTS:
+                return False, None, self._turn_id, []
+            self._pending_sequence += 1
+            self._pending_inputs.append(PendingInput(
+                user_input=str(user_input),
+                image_urls=list(image_urls),
+                video_urls=list(video_urls),
+                bot=bot,
+                event=event,
+                raw_message=str(raw_message),
+                sequence=self._pending_sequence,
+            ))
+            self.last_active = time.time()
+            return False, self._pending_sequence, self._turn_id, []
+
+    @property
+    def turn_active(self) -> bool:
+        """当前是否已有前台对话回合在执行。"""
+        with self._turn_state_lock:
+            return self._turn_active
+
+    @property
+    def turn_id(self) -> Optional[str]:
+        """当前前台对话回合 ID，用于日志和诊断。"""
+        with self._turn_state_lock:
+            return self._turn_id
+
+    def enqueue_pending_input(
+        self,
+        user_input: str,
+        image_urls: List[str],
+        video_urls: List[str],
+        bot: Any,
+        event: Any,
+        raw_message: str = "",
+    ) -> Optional[int]:
+        """运行中暂存一条消息，返回队列序号；非活跃或队列满返回 None。"""
+        with self._turn_state_lock:
+            if not self._turn_active or len(self._pending_inputs) >= self.MAX_PENDING_INPUTS:
+                return None
+            self._pending_sequence += 1
+            self._pending_inputs.append(PendingInput(
+                user_input=str(user_input),
+                image_urls=list(image_urls),
+                video_urls=list(video_urls),
+                bot=bot,
+                event=event,
+                raw_message=str(raw_message),
+                sequence=self._pending_sequence,
+            ))
+            self.last_active = time.time()
+            return self._pending_sequence
+
+    def drain_pending_inputs(self) -> List[PendingInput]:
+        """按 FIFO 取出当前待插入消息。"""
+        with self._turn_state_lock:
+            items = list(self._pending_inputs)
+            self._pending_inputs.clear()
+            if items:
+                self.last_active = time.time()
+            return items
+
+    def finish_turn_or_drain_pending_inputs(self) -> Optional[List[PendingInput]]:
+        """原子地取出 pending；队列为空时释放执行权。"""
+        with self._turn_state_lock:
+            if self._pending_inputs:
+                items = list(self._pending_inputs)
+                self._pending_inputs.clear()
+                self.last_active = time.time()
+                return items
+            self._turn_active = False
+            self._turn_id = None
+            return None
+
+    def requeue_pending_inputs(self, items: List[PendingInput]) -> None:
+        """处理失败时将消息按原顺序放回队首，避免媒体准备异常导致丢消息。"""
+        if not items:
+            return
+        with self._turn_state_lock:
+            for item in reversed(items):
+                self._pending_inputs.appendleft(item)
+            self.last_active = time.time()
+
+    def pending_input_count(self) -> int:
+        """返回当前待处理消息数量。"""
+        with self._turn_state_lock:
+            return len(self._pending_inputs)
+
+    def end_turn(self, expected_turn_id: Optional[str] = None) -> None:
+        """释放当前回合执行权，可避免旧执行者覆盖新执行者状态。"""
+        with self._turn_state_lock:
+            if expected_turn_id is not None and self._turn_id != expected_turn_id:
+                return
+            self._turn_active = False
+            self._turn_id = None
+
+    def clear_pending_inputs(self) -> int:
+        """清空尚未进入上下文的消息，返回清理数量。"""
+        with self._turn_state_lock:
+            count = len(self._pending_inputs)
+            self._pending_inputs.clear()
+            return count
     
     async def store_user_image(self, image_data: str, url: Optional[str] = None) -> str:
         entry = await self._image_store.store(image_data, "user", url=url)
@@ -263,6 +418,9 @@ class Session:
         except Exception:
             logger.exception(f"{self._tag} 清理视频缓存失败")
 
+        self.clear_pending_inputs()
+        self.end_turn()
+
         try:
             self._clear_session_dir()
         except Exception:
@@ -290,6 +448,8 @@ class Session:
     
     def is_expired(self) -> bool:
         if conf.session_timeout <= 0:
+            return False
+        if self.turn_active or self.pending_input_count() > 0:
             return False
         return time.time() - self.last_active > conf.session_timeout
     
