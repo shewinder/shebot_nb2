@@ -21,6 +21,7 @@ nonebot.init()
 
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+from hoshino.modules.aichat.aichat._image_store_core import ImageStoreCore  # noqa: E402
 from hoshino.modules.aichat.aichat.session import Session, session_manager  # noqa: E402
 
 
@@ -171,6 +172,23 @@ class TestMediaAnchorMerge(unittest.TestCase):
 
 
 class TestImageStoreCore(unittest.TestCase):
+    def test_get_data_url_refreshes_meta_written_by_another_instance(self):
+        """跨实例写入后，已有实例首次读取即可获取图像"""
+        tmp = tempfile.TemporaryDirectory()
+        old_base = ImageStoreCore.BASE_DIR
+        ImageStoreCore.BASE_DIR = Path(tmp.name)
+        try:
+            reader = ImageStoreCore("cross_process_sess")
+            writer = ImageStoreCore("cross_process_sess")
+            png = b"\x89PNG\r\n\x1a\n" + b"x" * 16
+
+            entry = writer.store_bytes(png, "ai")
+
+            self.assertIsNotNone(reader.get_data_url(entry.identifier))
+        finally:
+            ImageStoreCore.BASE_DIR = old_base
+            tmp.cleanup()
+
     def test_store_cleanup_and_concurrent_lock(self):
         from hoshino.modules.aichat.aichat._image_store_core import ImageStoreCore
 

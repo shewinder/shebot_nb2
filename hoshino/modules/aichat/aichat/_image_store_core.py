@@ -242,12 +242,10 @@ class ImageStoreCore:
 
     def get_data_url(self, identifier: str) -> Optional[str]:
         """根据标识符获取 base64 data URL"""
-        clean_id = identifier.lstrip("<").rstrip(">")
-
         # 1. 尝试从文件读取
-        if clean_id in self._meta:
+        entry = self.get(identifier)
+        if entry is not None:
             try:
-                entry = ImageEntry.from_dict(self._meta[clean_id])
                 if entry.file_path.exists():
                     with open(entry.file_path, "rb") as f:
                         data = f.read()
