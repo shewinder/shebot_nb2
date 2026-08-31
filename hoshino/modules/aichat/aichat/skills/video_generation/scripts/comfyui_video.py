@@ -66,8 +66,8 @@ H3_MAX_FRAMES = 362  # 官方训练范围 124-362（5-15 秒）
 
 # 任务类型 → 默认采样步数（与对应加速 LoRA 规格匹配）
 DEFAULT_STEPS = {
-    "t2v": 8,   # fl2v_turbo_8step
-    "i2v": 8,   # fl2v_turbo_8step
+    "t2v": 8,   # turbo v4（4-8 步有效，8 步最稳）
+    "i2v": 8,   # turbo v4（4-8 步有效，8 步最稳）
     "ref": 4,   # ref2v_turbo_4step
 }
 
@@ -512,7 +512,8 @@ def main() -> None:
             except RuntimeError as e:
                 output_error(str(e))
                 return
-            wf["8"]["inputs"]["positive"] = [last_guide, 0]
+            # 多图锚定：AddGuide 链接 BasicGuider(83) 的 conditioning
+            wf["83"]["inputs"]["conditioning"] = [last_guide, 0]
         elif len(uploaded) == 2:
             # 两张图：原生首尾帧（FLF2V）
             apply_size(wf, width, height)
