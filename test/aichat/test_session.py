@@ -246,6 +246,17 @@ class TestImageStoreCore(unittest.TestCase):
             tmp.cleanup()
 
 
+class TestMediaPrompt(unittest.TestCase):
+    def test_media_identifiers_are_restricted_to_explicit_delivery(self):
+        prompt = Session.build_image_rules_prompt()
+
+        self.assertIn("只有在用户明确要求发送、展示或重新发送某个媒体", prompt)
+        self.assertIn("分析、描述、比较、确认收到图片或视频时", prompt)
+        self.assertIn("调用工具或子 Agent 时，可以按工具参数要求传入媒体标识符", prompt)
+        self.assertIn("删除回复中的所有图片和视频标识符", prompt)
+        self.assertNotIn("这是<user_image_1>，一只可爱的猫", prompt)
+
+
 class TestVideoStoreCore(unittest.TestCase):
     def test_lazy_dir_user_source_and_clear(self):
         """视频存储与图片对齐：惰性建目录、user 源标识符、clear 删目录"""
