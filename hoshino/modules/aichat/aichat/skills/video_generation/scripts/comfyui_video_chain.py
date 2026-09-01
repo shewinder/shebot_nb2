@@ -84,20 +84,8 @@ FRAME_RATE = 24
 
 
 def find_ffmpeg() -> Optional[str]:
-    """探测 ffmpeg：imageio_ffmpeg → 系统 → ComfyUI venv 二进制"""
-    try:
-        import imageio_ffmpeg
-        exe = imageio_ffmpeg.get_ffmpeg_exe()
-        if exe and Path(exe).exists():
-            return exe
-    except ImportError:
-        pass
-    exe = shutil.which("ffmpeg")
-    if exe:
-        return exe
-    for candidate in sorted(Path("/root/bot/comfyui/.venv").glob("lib/*/site-packages/imageio_ffmpeg/binaries/ffmpeg-*")):
-        return str(candidate)
-    return None
+    """探测 ffmpeg：系统 PATH"""
+    return shutil.which("ffmpeg")
 
 
 def upload_video_to_comfyui(video_path: str) -> str:

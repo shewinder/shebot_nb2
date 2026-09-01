@@ -49,20 +49,11 @@ RUN_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
 def find_ffmpeg() -> str:
-    """定位 ffmpeg：优先 ComfyUI venv 的 imageio-ffmpeg，其次 PATH。"""
-    candidates: List[str] = []
-    comfyui_venv = Path("/root/bot/comfyui/.venv")
-    if comfyui_venv.exists():
-        for site_packages in sorted((comfyui_venv / "lib").glob("*/site-packages")):
-            bins = sorted((site_packages / "imageio_ffmpeg" / "binaries").glob("ffmpeg-*"))
-            if bins:
-                candidates.append(str(bins[0]))
+    """定位 ffmpeg：系统 PATH"""
     which = shutil.which("ffmpeg")
     if which:
-        candidates.append(which)
-    if not candidates:
-        raise RuntimeError("未找到 ffmpeg（ComfyUI venv 与 PATH 均无）")
-    return candidates[0]
+        return which
+    raise RuntimeError("未找到 ffmpeg")
 
 
 def build_upscale_workflow(fname: str, width: int, height: int, prefix: str) -> dict:

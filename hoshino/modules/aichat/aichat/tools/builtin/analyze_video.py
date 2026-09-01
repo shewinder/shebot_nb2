@@ -19,11 +19,6 @@ from ..registry import tool_registry, ok, fail
 if TYPE_CHECKING:
     from ...session import Session
 
-try:
-    import imageio_ffmpeg
-except ImportError:
-    imageio_ffmpeg = None
-
 
 MAX_FRAMES = 8
 MAX_FRAME_BYTES = 1_500_000
@@ -55,25 +50,8 @@ class AnalyzeVideoInput(BaseModel):
 
 
 def _find_ffmpeg() -> Optional[str]:
-    """定位 ffmpeg：优先 imageio-ffmpeg，其次系统 PATH 与 ComfyUI venv。"""
-    if imageio_ffmpeg is not None:
-        try:
-            executable = imageio_ffmpeg.get_ffmpeg_exe()
-        except (OSError, RuntimeError):
-            executable = None
-        if executable and Path(executable).exists():
-            return executable
-
-    executable = shutil.which("ffmpeg")
-    if executable:
-        return executable
-
-    for candidate in sorted(
-        Path("/root/bot/comfyui/.venv").glob("lib/*/site-packages/imageio_ffmpeg/binaries/ffmpeg-*")
-    ):
-        if candidate.is_file():
-            return str(candidate)
-    return None
+    """定位 ffmpeg：系统 PATH。"""
+    return shutil.which("ffmpeg")
 
 
 async def _probe_duration(ffmpeg: str, video_path: Path) -> Optional[float]:

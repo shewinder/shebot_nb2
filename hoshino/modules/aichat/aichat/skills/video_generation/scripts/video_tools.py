@@ -59,19 +59,10 @@ def resolve_video_file(identifier: str) -> Optional[str]:
 
 
 def find_ffmpeg() -> str:
-    """定位 ffmpeg：imageio_ffmpeg → PATH → ComfyUI venv"""
-    try:
-        import imageio_ffmpeg
-        exe = imageio_ffmpeg.get_ffmpeg_exe()
-        if exe and Path(exe).exists():
-            return exe
-    except ImportError:
-        pass
+    """定位 ffmpeg：系统 PATH"""
     which = shutil.which("ffmpeg")
     if which:
         return which
-    for candidate in sorted(Path("/root/bot/comfyui/.venv").glob("lib/*/site-packages/imageio_ffmpeg/binaries/ffmpeg-*")):
-        return str(candidate)
     raise RuntimeError("未找到 ffmpeg")
 
 
