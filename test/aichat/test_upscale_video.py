@@ -7,7 +7,9 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -158,6 +160,27 @@ class TestUpscaleState(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["identifier"], "<ai_video_final>")
         self.assertEqual(result["model"], "upscale_2x")
+
+    def test_prepare_source_normalizes_non_24fps(self):
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if not ffmpeg or not ffprobe:
+            self.skipTest("ffmpeg/ffprobe 未安装")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source_30fps.mp4"
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+                "-i", "testsrc=size=160x90:rate=30:duration=1", "-c:v", "libx264",
+                "-pix_fmt", "yuv420p", "-y", str(source),
+            ], check=True, capture_output=True)
+            metadata = upscale._prepare_source(root, source, ffmpeg)
+            duration = float(subprocess.check_output([
+                ffprobe, "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=nw=1:nk=1", str(root / "source_24fps.mp4"),
+            ], text=True).strip())
+            self.assertEqual(metadata["total_frames"], 24)
+            self.assertAlmostEqual(duration, 1.0, delta=0.1)
 
 
 if __name__ == "__main__":

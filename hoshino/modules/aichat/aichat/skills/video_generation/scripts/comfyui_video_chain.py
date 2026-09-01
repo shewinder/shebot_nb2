@@ -50,7 +50,7 @@ from comfyui_workflow_loader import (  # noqa: E402
     load_workflow, apply_prompt,
 )
 from comfyui_video import (  # noqa: E402
-    COMFYUI_BASE_URL, RESOLUTION_PIXELS, VideoStoreCore, H3_MIN_FRAMES,
+    COMFYUI_BASE_URL, RESOLUTION_PIXELS, VideoStoreCore, H3_MIN_FRAMES, H3_MAX_FRAMES,
     duration_to_frames, compute_target_size,
     upload_image_to_comfyui, submit_task, poll_result,
     store_video, apply_length, apply_size, http_post,
@@ -374,24 +374,63 @@ def _validate_state(raw: str, session_id: str) -> Dict[str, Any]:
         raise ValueError("state.run_id 非法")
     total = state.get("segments_total")
     done = state.get("segments_done")
-    if not isinstance(total, int) or not isinstance(done, int) or not 0 <= done <= total:
+    if (isinstance(total, bool) or isinstance(done, bool)
+            or not isinstance(total, int) or not isinstance(done, int)
+            or not 1 <= total <= 10 or not 0 <= done <= total):
         raise ValueError("state 分段进度非法")
-    if not isinstance(state.get("segment_lengths"), list) or len(state["segment_lengths"]) != total:
+    if not isinstance(state.get("prompt"), str) or not state["prompt"].strip():
+        raise ValueError("state.prompt 非法")
+    for field in ("width", "height", "seed", "steps"):
+        value = state.get(field)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"state.{field} 非法")
+    if state["width"] <= 0 or state["height"] <= 0 or state["steps"] <= 0:
+        raise ValueError("state 视频尺寸或采样步数非法")
+    if state.get("noise") not in ("on", "off"):
+        raise ValueError("state.noise 非法")
+    if state.get("model", "hybrid") not in ("hybrid", "official"):
+        raise ValueError("state.model 非法")
+    for field in ("no_lora", "legacy_sampler", "keep_audio"):
+        if not isinstance(state.get(field), bool):
+            raise ValueError(f"state.{field} 非法")
+    if (not isinstance(state.get("segment_lengths"), list)
+            or len(state["segment_lengths"]) != total
+            or any(isinstance(length, bool) or not isinstance(length, int)
+                   or not H3_MIN_FRAMES <= length <= H3_MAX_FRAMES
+                   for length in state["segment_lengths"])):
         raise ValueError("state.segment_lengths 非法")
-    if not isinstance(state.get("delivered"), list) or len(state["delivered"]) != done:
+    if (not isinstance(state.get("delivered"), list)
+            or len(state["delivered"]) != done
+            or any(not isinstance(identifier, str) or not identifier.strip()
+                   for identifier in state["delivered"])):
         raise ValueError("state.delivered 与进度不一致")
     prompt_id = state.get("current_prompt_id")
-    if prompt_id is not None and not isinstance(prompt_id, str):
+    if (prompt_id is not None
+            and (not isinstance(prompt_id, str) or not prompt_id.strip())):
         raise ValueError("state.current_prompt_id 非法")
     if done == total and prompt_id is not None:
         raise ValueError("已完成任务不能保留 current_prompt_id")
-    if not isinstance(state.get("uploaded_images"), list) or not state["uploaded_images"]:
+    if (not isinstance(state.get("uploaded_images"), list)
+            or not 1 <= len(state["uploaded_images"]) <= 4
+            or any(not isinstance(image, str) or not image.strip()
+                   for image in state["uploaded_images"])):
         raise ValueError("state.uploaded_images 非法")
-    if state.get("source_windows") is not None:
-        if not isinstance(state.get("source_24_video"), str):
+    source_windows = state.get("source_windows")
+    if source_windows is not None:
+        if (not isinstance(source_windows, list) or len(source_windows) != total
+                or any(not isinstance(window, list) or len(window) != 2
+                       or any(isinstance(value, bool) or not isinstance(value, int)
+                              or value < 0 for value in window)
+                       or window[1] < H3_MIN_FRAMES or window[1] > 124
+                       for window in source_windows)):
+            raise ValueError("state.source_windows 非法")
+        if (not isinstance(state.get("source_24_video"), str)
+                or not state["source_24_video"].strip()
+                or not isinstance(state.get("source_original_video"), str)
+                or not state["source_original_video"].strip()):
             raise ValueError("state.source_24_video 缺失")
-        if len(state["source_windows"]) != total:
-            raise ValueError("state.source_windows 与分段数不一致")
+    elif state.get("source_24_video") is not None or state.get("source_original_video") is not None:
+        raise ValueError("纯续写 state 不应包含源视频")
     return state
 
 
@@ -532,7 +571,6 @@ def main() -> None:
                         shutil.copy2(delivered[0], final_path)
                     else:
                         concat_videos(ffmpeg, delivered, final_path)
-                    final = store_video(final_path.read_bytes())
                     source_id = state.get("source_original_video")
                     if state.get("keep_audio") and source_id:
                         source = _state_video_path(store, source_id, "source_original_video")
@@ -543,14 +581,17 @@ def main() -> None:
                                    "-shortest", str(audio_path)]
                         try:
                             run_ffmpeg(ffmpeg, mux_cmd, "音轨合成")
-                            final = store_video(audio_path.read_bytes())
                         except RuntimeError:
-                            fallback = [item for item in mux_cmd if item != "+faststart"]
+                            fallback = mux_cmd.copy()
+                            movflags_index = fallback.index("-movflags")
+                            del fallback[movflags_index:movflags_index + 2]
                             try:
                                 run_ffmpeg(ffmpeg, fallback, "音轨合成(无faststart)")
-                                final = store_video(audio_path.read_bytes())
-                            except RuntimeError:
-                                pass
+                            except RuntimeError as fallback_error:
+                                output_error(f"音轨合成失败: {fallback_error}")
+                                return
+                        final_path = audio_path
+                    final = store_video(final_path.read_bytes())
                     output_result(True, identifier=final["identifier"], path=final["path"],
                                   model="h3_chain")
                     return
@@ -570,6 +611,9 @@ def main() -> None:
                 return
             if not 1.0 <= args.duration <= 15.0:
                 output_error("每段时长仅支持 1-15 秒")
+                return
+            if args.steps <= 0:
+                output_error("--steps 必须是正整数")
                 return
 
             image_paths: List[str] = []

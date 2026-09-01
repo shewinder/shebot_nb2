@@ -325,6 +325,7 @@ execute_script(skill_name="video_generation",
 
 - `--video`：会话内视频标识符（`<ai_video_N>`）
 - `--scale`：放大倍数，`2`（默认）或 `4`
+- 输入视频会先统一转换为 24fps 后再分块超分，保持原始时长；有音轨时从源视频重新合成，避免帧率变化造成音画错位
 - 首次调用会返回 `status=partial`、`progress` 和 `state`，不会等待整片完成；必须把完整 `state` 原样保存在当前对话上下文中
 - 后续调用使用 `args=["--state", "<上次返回的 state JSON>"]`，每次最多等待一个 24 帧块；`pending` 或 `partial` 都继续原样传回最新 `state`
 - 只有返回 `success=true` 且包含新标识符 `<ai_video_N>` 时才算完成，回复中引用该超分版交付

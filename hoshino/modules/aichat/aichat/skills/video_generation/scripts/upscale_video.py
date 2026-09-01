@@ -147,7 +147,8 @@ def _validate_state(raw: str, session_id: str) -> Dict[str, Any]:
     if state["current_chunk"] != state["chunks_done"]:
         raise ValueError("state.current_chunk 与 chunks_done 不一致")
     prompt_id = state.get("current_prompt_id")
-    if prompt_id is not None and not isinstance(prompt_id, str):
+    if (prompt_id is not None
+            and (not isinstance(prompt_id, str) or not prompt_id.strip())):
         raise ValueError("state.current_prompt_id 非法")
     if state["chunks_done"] >= state["chunks_total"] and prompt_id is not None:
         raise ValueError("已完成任务不能保留 current_prompt_id")
@@ -187,12 +188,21 @@ def _run_ffmpeg(ffmpeg: str, args: List[str], description: str) -> None:
 
 
 def _prepare_source(run_dir: Path, src_path: Path, ffmpeg: str) -> Dict[str, int]:
-    """拆源视频帧并探测尺寸；已有完整帧目录时直接复用。"""
+    """将源视频统一到 24fps 后拆帧；已有完整帧目录时直接复用。"""
+    normalized_path = run_dir / "source_24fps.mp4"
+    if not normalized_path.exists():
+        _run_ffmpeg(ffmpeg, [
+            ffmpeg, "-y", "-i", str(src_path), "-vf", f"fps={FRAME_RATE}",
+            "-an", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+            str(normalized_path),
+        ], "源视频转 24fps")
     frames_dir = run_dir / "source_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     frames = sorted(frames_dir.glob("f_*.png"))
     if not frames:
-        _run_ffmpeg(ffmpeg, [ffmpeg, "-y", "-i", str(src_path), str(frames_dir / "f_%05d.png")], "视频拆帧")
+        _run_ffmpeg(ffmpeg, [
+            ffmpeg, "-y", "-i", str(normalized_path), str(frames_dir / "f_%05d.png"),
+        ], "视频拆帧")
         frames = sorted(frames_dir.glob("f_*.png"))
     if not frames:
         raise RuntimeError("拆帧失败：0 帧")

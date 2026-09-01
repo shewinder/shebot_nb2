@@ -15,6 +15,7 @@ Description: MiniMax H3 视频生成脚本（文生视频/图生视频/角色参
 import argparse
 import copy
 import json
+import math
 import os
 import sys
 import time
@@ -86,8 +87,8 @@ def duration_to_frames(duration: float) -> int:
 
 
 def build_multi_guide_workflow(base_wf: Dict[str, Any], uploaded: List[str],
-                               frame_count: int, guides: Optional[List[int]] = None,
-                               start_nid: int = 100) -> None:
+                               frame_count: int, guides: Optional[List[float]] = None,
+                               start_nid: int = 100) -> Optional[str]:
     """在基础 T2V 工作流上动态插入多图 AddGuide 锚定链（就地修改）
 
     - 每张图：一个 LoadImage 节点 + 一个 MiniMaxH3AddGuide 节点
@@ -205,6 +206,18 @@ def apply_steps(workflow: Dict[str, Any], steps: int) -> None:
                 node["inputs"][k] = steps
 
 
+def apply_mystic_lora(workflow: Dict[str, Any], strength: float) -> None:
+    """按指定强度启用或移除 MysticXXX LoRA。"""
+    if "70" not in workflow or workflow["70"].get("class_type") != "LoraLoaderModelOnly":
+        return
+    if strength <= 0:
+        # 节点 6(SigmaShift) 的 model 原指向 70，改为指向 turbo LoRA 节点 5
+        workflow["6"]["inputs"]["model"] = ["5", 0]
+        workflow.pop("70", None)
+    else:
+        workflow["70"]["inputs"]["strength_model"] = strength
+
+
 # 两阶段 latent 超分：低清生成 -> 2x latent 放大 -> 精炼采样
 LATENT_UPSCALE_MODEL = "minimax_h3_latent_upscaler_3d_bf16.safetensors"
 LATENT_UPSCALE_REFINE_STEPS = 4
@@ -227,6 +240,8 @@ def apply_latent_upscale(workflow: Dict[str, Any], low_w: int, low_h: int,
     采样链分流：turbo 工作流（t2v/i2v，节点 81）用 TurboSampler 精炼；
     ref 工作流（KSampler，节点 8）用 KSampler 精炼。
     """
+    if not math.isfinite(scale) or not 1.0 <= scale <= 4.0:
+        raise ValueError("latent 放大倍数必须是 1-4 之间的有限数值")
     hi_w = round(low_w * scale / 32) * 32  # 放大后尺寸（Phase 2 全部节点以此为准）
     hi_h = round(low_h * scale / 32) * 32
     apply_size(workflow, low_w, low_h)
@@ -558,14 +573,12 @@ def main() -> None:
     steps = args.steps if args.steps > 0 else DEFAULT_STEPS.get(args.task, 8)
     apply_steps(wf, steps)
 
-    # MysticXXX LoRA：t2v/i2v 工作流带节点 70；强度 0 时关闭（SigmaShift 绕过 70 直连 turbo）
-    if "70" in wf and wf["70"].get("class_type") == "LoraLoaderModelOnly":
-        if args.lora_strength <= 0:
-            # 节点6(SigmaShift) 的 model 原指向 70，改为指向 turbo LoRA 节点5
-            wf["6"]["inputs"]["model"] = ["5", 0]
-            wf.pop("70", None)
-        else:
-            wf["70"]["inputs"]["strength_model"] = args.lora_strength
+    # MysticXXX LoRA：t2v/i2v 工作流带节点 70；强度 0 时关闭
+    apply_mystic_lora(wf, args.lora_strength)
+
+    if not math.isfinite(args.latent_scale) or not 1.0 <= args.latent_scale <= 4.0:
+        output_error("--latent-scale 必须是 1-4 之间的有限数值")
+        return
 
     # 分辨率：t2v 用档位 16:9 基准；i2v 按输入图比例自适应（上限随档位）
     # latent 超分：--resolution 作为低清生成档，输出 = 低清 × --latent-scale；--latent-upscale 是独立开关
@@ -609,11 +622,13 @@ def main() -> None:
                     output_error(f"--guides 含非法数值: {g}")
                     return
 
-        multi = len(uploaded) > 1 or guides is not None
+        # 两张图且未显式指定 guides 时使用原生首尾帧；三张以上或显式 guides 才走 AddGuide。
+        multi = len(uploaded) > 2 or guides is not None
         if multi:
-            # 多图多帧锚定：以 h3_t2v 为基础动态构造 AddGuide 链
+            # 多图多帧锚定：以对应模型的 t2v 工作流为基础动态构造 AddGuide 链
             try:
-                wf = copy.deepcopy(load_workflow("h3_t2v"))
+                t2v_workflow = TASK_WORKFLOW_HYBRID if args.model == "hybrid" else TASK_WORKFLOW
+                wf = copy.deepcopy(load_workflow(t2v_workflow["t2v"]))
             except RuntimeError as e:
                 output_error(str(e))
                 return
@@ -621,6 +636,7 @@ def main() -> None:
             apply_length(wf, duration_to_frames(args.duration))
             apply_size(wf, width, height)
             apply_steps(wf, steps)
+            apply_mystic_lora(wf, args.lora_strength)
             frame_count = duration_to_frames(args.duration)
             try:
                 last_guide = build_multi_guide_workflow(wf, uploaded, frame_count, guides)
