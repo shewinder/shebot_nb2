@@ -60,6 +60,13 @@ TASK_WORKFLOW = {
     "ref": "h3_refimg",  # MiniMax H3 角色参考模式（ref2va，无锚定，首帧自然+角色跟随）
 }
 
+# 融合模型（fl2va 基座 + ref2va 后段 adaln_proj）：单模型通吃 t2v/i2v/ref
+TASK_WORKFLOW_HYBRID = {
+    "t2v": "h3_t2v_hybrid",
+    "i2v": "h3_i2v_hybrid",
+    "ref": "h3_refimg_hybrid",
+}
+
 # H3 帧数网格：17k+5（24fps 下 124≈5.2s, 243≈10.1s）
 H3_MIN_FRAMES = 5
 H3_MAX_FRAMES = 362  # 官方训练范围 124-362（5-15 秒）
@@ -198,6 +205,92 @@ def apply_steps(workflow: Dict[str, Any], steps: int) -> None:
                 node["inputs"][k] = steps
 
 
+# 两阶段 latent 超分：低清生成 -> 2x latent 放大 -> 精炼采样
+LATENT_UPSCALE_MODEL = "minimax_h3_latent_upscaler_3d_bf16.safetensors"
+LATENT_UPSCALE_REFINE_STEPS = 4
+LATENT_UPSCALE_REFINE_DENOISE = 0.5
+# 16GB 显存实测上限（输出像素）：t2v 1728×960(1.62M) 通过；i2v 896×1920(1.72M) OOM、832×1216(1.01M) 通过
+LATENT_UPSCALE_MAX_PIXELS = {"t2v": 1650 * 1024, "i2v": 1300 * 1024, "ref": 1300 * 1024}
+
+
+def apply_latent_upscale(workflow: Dict[str, Any], low_w: int, low_h: int,
+                         prompt: str, length: int, scale: float = 2.0) -> None:
+    """把生成工作流改造成两阶段 latent 超分（低清 latent 放大后精炼）
+
+    语义：传入的 low_w/low_h 是低清生成档（--resolution 档或按图比例），
+    输出 = 低清 × scale（32 对齐），与原生直出分辨率不同可区分。
+
+    Phase 2 的 conditioning 必须按放大尺寸重编码（复用 Phase 1 的条件会导致
+    布局行数与放大后 latent 不匹配，数值爆炸输出黑视频），故新建生成节点重编码
+    条件（i2v 的首尾帧锚定、ref 的参考图随图保留）。
+
+    采样链分流：turbo 工作流（t2v/i2v，节点 81）用 TurboSampler 精炼；
+    ref 工作流（KSampler，节点 8）用 KSampler 精炼。
+    """
+    hi_w = round(low_w * scale / 32) * 32  # 放大后尺寸（Phase 2 全部节点以此为准）
+    hi_h = round(low_h * scale / 32) * 32
+    apply_size(workflow, low_w, low_h)
+    # 占位符可能已被上游替换成最终尺寸，直接覆盖 Phase 1 生成节点
+    workflow["7"]["inputs"]["width"] = low_w
+    workflow["7"]["inputs"]["height"] = low_h
+
+    workflow["90"] = {"class_type": "MinimaxH3LatentUpscaler3D", "inputs": {
+        "latent": ["81", 0],
+        "model_name": LATENT_UPSCALE_MODEL,
+        "mode": "scale by multiplier",
+        "mode.scale": scale,
+        "align": 32,
+        "enable_temporal_chunking": True,
+        "force_unload": True,
+        "device": "cuda",
+        "precision": "bf16",
+    }}
+
+    if workflow.get("8", {}).get("class_type") == "KSampler":
+        # ---- ref：ReferenceToVideo 重编码条件 + KSampler 精炼 ----
+        workflow["90"]["inputs"]["latent"] = ["8", 0]
+        cond_inputs = dict(workflow["7"]["inputs"])
+        cond_inputs["prompt"] = prompt
+        cond_inputs["width"] = hi_w
+        cond_inputs["height"] = hi_h
+        cond_inputs["length"] = length
+        workflow["96"] = {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": cond_inputs}
+        refine = dict(workflow["8"]["inputs"])
+        refine["positive"] = ["96", 0]
+        refine["latent_image"] = ["90", 0]
+        refine["steps"] = LATENT_UPSCALE_REFINE_STEPS
+        refine["denoise"] = LATENT_UPSCALE_REFINE_DENOISE
+        workflow["97"] = {"class_type": "KSampler", "inputs": refine}
+        workflow["9"]["inputs"]["samples"] = ["97", 0]
+        workflow["10"]["inputs"]["samples"] = ["97", 0]
+        return
+
+    # ---- t2v/i2v：ImageToVideo 重编码条件 + TurboSampler 精炼 ----
+    # Phase 2 conditioning：按放大尺寸重编码（i2v 保留首尾帧锚定）
+    cond_inputs = {
+        "clip": ["2", 0], "vae": ["3", 0], "prompt": prompt,
+        "width": hi_w, "height": hi_h, "length": length,
+    }
+    if "13" in workflow:  # i2v 首帧
+        cond_inputs["first_frame"] = ["13", 0]
+    if "14" in workflow:  # i2v 尾帧
+        cond_inputs["last_frame"] = ["14", 0]
+    workflow["96"] = {"class_type": "MiniMaxH3ImageToVideo", "inputs": cond_inputs}
+
+    workflow["91"] = {"class_type": "MiniMaxH3TurboSampler", "inputs": {}}
+    workflow["92"] = {"class_type": "SamplerCustomAdvanced", "inputs": {
+        "noise": ["93", 0], "guider": ["94", 0], "sampler": ["91", 0],
+        "sigmas": ["95", 0], "latent_image": ["90", 0]}}
+    workflow["93"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": 20260917}}
+    workflow["94"] = {"class_type": "BasicGuider", "inputs": {"model": ["6", 0], "conditioning": ["96", 0]}}
+    workflow["95"] = {"class_type": "BasicScheduler", "inputs": {
+        "model": ["6", 0], "scheduler": "simple",
+        "steps": LATENT_UPSCALE_REFINE_STEPS, "denoise": LATENT_UPSCALE_REFINE_DENOISE}}
+    # 解码改接 Phase 2 输出
+    workflow["9"]["inputs"]["samples"] = ["92", 0]
+    workflow["10"]["inputs"]["samples"] = ["92", 0]
+
+
 # 分辨率档位 → 16:9 基准像素量上限
 RESOLUTION_PIXELS = {
     "480p": 864 * 480,     # 快速档（默认）
@@ -249,8 +342,18 @@ def compute_size_for_aspect(aspect: str, max_pixels: int = MAX_PIXELS,
     return width, height
 
 
+def free_gpu_memory() -> None:
+    """提交前释放 ComfyUI 显存缓存（任务完成后模型驻留显存，累积会导致下个任务 OOM）"""
+    base = COMFYUI_BASE_URL.rstrip("/")
+    try:
+        http_post(f"{base}/free", json_data={"unload_models": True, "free_memory": True})
+    except Exception:
+        pass  # 释放失败不阻塞提交，让 ComfyUI 自行处理
+
+
 def submit_task(workflow: Dict[str, Any]) -> str:
     """提交工作流到 ComfyUI，返回 prompt_id"""
+    free_gpu_memory()
     base = COMFYUI_BASE_URL.rstrip("/")
     url = f"{base}/prompt"
     payload = {"prompt": workflow, "client_id": "video_generation_skill"}
@@ -387,6 +490,12 @@ def store_video(data: bytes) -> Dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="ComfyUI 视频生成")
     parser.add_argument("--task", choices=["t2v", "i2v", "ref"], default="t2v", help="任务类型")
+    parser.add_argument("--model", choices=["hybrid", "official"], default="hybrid",
+                        help="模型版本：hybrid=融合模型（默认），official=官方 fl2va/ref2va")
+    parser.add_argument("--latent-upscale", action="store_true",
+                        help="两阶段 latent 超分（t2v/i2v/ref）：低清生成->latent 放大->精炼，直接产出高清")
+    parser.add_argument("--latent-scale", type=float, default=2.0,
+                        help="latent 放大倍数（默认 2；范围由 upscaler 节点校验 1-4）")
     parser.add_argument("--prompt", default="", help="视频描述（已调优）")
     parser.add_argument("--duration", type=float, default=2.0,
                         help="时长（秒，1-15，默认 2）")
@@ -424,7 +533,7 @@ def main() -> None:
         output_error("--prompt 参数必填")
         return
 
-    workflow_name = TASK_WORKFLOW.get(args.task)
+    workflow_name = (TASK_WORKFLOW_HYBRID if args.model == "hybrid" else TASK_WORKFLOW).get(args.task)
     if not workflow_name:
         output_error(f"不支持的任务类型: {args.task}")
         return
@@ -456,7 +565,10 @@ def main() -> None:
             wf["70"]["inputs"]["strength_model"] = args.lora_strength
 
     # 分辨率：t2v 用档位 16:9 基准；i2v 按输入图比例自适应（上限随档位）
-    max_pixels = RESOLUTION_PIXELS[args.resolution]
+    # latent 超分：--resolution 作为低清生成档，输出 = 低清 × --latent-scale；--latent-upscale 是独立开关
+    eff_resolution = args.resolution
+    max_pixels = RESOLUTION_PIXELS[eff_resolution]
+    final_w = final_h = 0  # 输出尺寸：普通生成=最终尺寸；latent 超分=低清档（输出为低清 × scale）
 
     if args.task == "i2v":
         image_paths: List[str] = []
@@ -514,17 +626,19 @@ def main() -> None:
                 return
             # 多图锚定：AddGuide 链接 BasicGuider(83) 的 conditioning
             wf["83"]["inputs"]["conditioning"] = [last_guide, 0]
-        elif len(uploaded) == 2:
-            # 两张图：原生首尾帧（FLF2V）
-            apply_size(wf, width, height)
-            _apply_anchors(wf, first_name=uploaded[0], last_name=uploaded[1])
         else:
-            # 单图：按 --anchor 指定首帧或尾帧锚定
-            apply_size(wf, width, height)
-            if args.anchor == "first":
-                _apply_anchors(wf, first_name=uploaded[0])
+            final_w, final_h = width, height
+            if len(uploaded) == 2:
+                # 两张图：原生首尾帧（FLF2V）
+                apply_size(wf, width, height)
+                _apply_anchors(wf, first_name=uploaded[0], last_name=uploaded[1])
             else:
-                _apply_anchors(wf, last_name=uploaded[0])
+                # 单图：按 --anchor 指定首帧或尾帧锚定
+                apply_size(wf, width, height)
+                if args.anchor == "first":
+                    _apply_anchors(wf, first_name=uploaded[0])
+                else:
+                    _apply_anchors(wf, last_name=uploaded[0])
     elif args.task == "ref":
         # 角色参考模式（ref2va）：多图作 <Picture N> 参考，无锚定，首帧自然
         image_paths = []
@@ -552,11 +666,31 @@ def main() -> None:
             output_error(f"图片上传失败: {e}")
             return
         apply_size(wf, width, height)
+        final_w, final_h = width, height
         _apply_ref_images(wf, uploaded)
     else:
         # t2v：档位 16:9 基准尺寸（32 对齐）
         base_sizes = {"480p": (864, 480), "768p": (1344, 768)}
-        apply_size(wf, *base_sizes[args.resolution])
+        final_w, final_h = base_sizes[eff_resolution]
+        apply_size(wf, *base_sizes[eff_resolution])
+
+    # 两阶段 latent 超分（t2v/i2v/ref；多图 AddGuide 暂不支持；仅 480p 低清档）
+    if args.latent_upscale:
+        if args.task not in ("t2v", "i2v", "ref"):
+            output_error("--latent-upscale 仅支持 t2v/i2v/ref")
+            return
+        if args.task == "i2v" and multi:
+            output_error("--latent-upscale 暂不支持多图多帧锚定（AddGuide）")
+            return
+        hi_w = round(final_w * args.latent_scale / 32) * 32
+        hi_h = round(final_h * args.latent_scale / 32) * 32
+        limit = LATENT_UPSCALE_MAX_PIXELS[args.task]
+        if hi_w * hi_h > limit:
+            output_error(f"--latent-upscale 输出 {hi_w}×{hi_h} 超过 16GB 显存上限"
+                         f"（{args.task} 任务上限 {limit // 1024}K 像素）；请降低 --latent-scale 或换更小的图")
+            return
+        apply_latent_upscale(wf, final_w, final_h, args.prompt,
+                             duration_to_frames(args.duration), args.latent_scale)
 
     # 提交并等待
     try:

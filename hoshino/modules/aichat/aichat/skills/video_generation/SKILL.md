@@ -99,6 +99,8 @@ non_diegetic_music: 背景音乐描述……
 --aspect-ratio W:H     # ref 指定画幅（如 16:9、3:4；拼接参考图必填，见"拼接参考图"章节）
 --steps N              # 采样步数（默认按任务与加速 LoRA 匹配：ref=4、t2v/i2v=8；一般不用改）
 --lora-strength 0-1    # MysticXXX LoRA 强度（仅 t2v/i2v 生效；0=关闭该 LoRA，默认 0.5）
+--latent-upscale       # 两阶段 latent 超分（t2v/i2v/ref）：低清生成→latent 放大→精炼，直接产出高清（见"超分"章节）
+--latent-scale 1-4     # latent 放大倍数（配合 --latent-upscale 使用，默认 2）
 ```
 
 ## 超时与续查机制（重要）
@@ -303,7 +305,16 @@ non_diegetic_music: <全英文>
 
 ## 超分（可选，默认不执行）
 
-**默认不超分**：生成的视频直接交付。**仅当用户明确要求"超分/高清/放大/更清晰"时才调用** `scripts/upscale_video.py` 对已生成的视频做 2x 超分（RealESRGAN anime_6B，固定 24 帧/块分块处理防爆显存，保留原音轨）：
+**默认不超分**：生成的视频直接交付。**仅当用户明确要求"超分/高清/放大/更清晰"时**才超分，按场景二选一：
+
+**判定规则（重要，防止误解）**：
+- 用户要求**新生成**内容且提到"高清/超分/放大/更清晰/2倍"等 → **生成脚本直接加 `--latent-upscale`（A）**，一次调用产出高清；**禁止**先普通生成再调用 upscale_video.py
+- 用户要求对**已交付的视频**（明确引用 `<ai_video_N>` 标识符）放大 → 才用 upscale_video.py（B）
+- 用户同时要求生成和放大但未明确方式 → 默认 A（生成即高清），不要先出低清版再超分；拿不准时先问用户"是要生成时就高清，还是对已有视频放大"
+
+**A. 新生成任务（首选）**：生成脚本加 `--latent-upscale`（t2v/i2v/ref 通用）——`--resolution` 作为**低清生成档**，latent 放大 `--latent-scale` 倍（默认 2，1-4）后精炼，一次调用直接产出高清。如 `--resolution 480p --latent-upscale` → 输出 1728×960；`--latent-scale 1.5` → 1280×704；i2v/ref 按图比例算低清后放大。耗时约 2 倍。生成中不要主动建议；用户要求高清且是新生成时使用。
+
+**B. 已有视频**：对已交付的 `<ai_video_N>` 用 `scripts/upscale_video.py` 做 2x 超分（RealESRGAN anime_6B，固定 24 帧/块分块处理防爆显存，保留原音轨）：
 
 ```
 execute_script(skill_name="video_generation",

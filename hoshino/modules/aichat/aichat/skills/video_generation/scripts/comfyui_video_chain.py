@@ -62,6 +62,12 @@ CHAIN_WORKFLOWS = {
     "segment": "h3_chain_segment",   # 续写段：22 帧 Motion Context + LoopTrim
 }
 
+# 融合模型版（fl2va 基座 + ref2va 后段 adaln_proj）
+CHAIN_WORKFLOWS_HYBRID = {
+    "initial": "h3_chain_initial_hybrid",
+    "segment": "h3_chain_segment_hybrid",
+}
+
 CONTEXT_FRAMES = 22  # Motion Context 帧数（与工作流 ChainPlan context_length 一致）
 
 # 彩噪注入参数（仓库验证的 T3 taper 配方）
@@ -413,16 +419,18 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
     prompt = state["prompt"]
     width, height = state["width"], state["height"]
     noise_on = state["noise"] == "on"
+    # 模型版本写入 state，续跑段间保持一致；老 state 无该字段时默认 hybrid
+    wf_map = CHAIN_WORKFLOWS_HYBRID if state.get("model", "hybrid") == "hybrid" else CHAIN_WORKFLOWS
 
     if seg_idx == 1:
-        wf = copy.deepcopy(load_workflow(CHAIN_WORKFLOWS["initial"]))
+        wf = copy.deepcopy(load_workflow(wf_map["initial"]))
         apply_prompt(wf, prompt)
         apply_length(wf, seg_length)
         apply_size(wf, width, height)
         _replace_scalar(wf, "{{seed}}", seed)
         _replace_scalar(wf, "{{steps}}", steps)
     else:
-        wf = copy.deepcopy(load_workflow(CHAIN_WORKFLOWS["segment"]))
+        wf = copy.deepcopy(load_workflow(wf_map["segment"]))
         apply_chain_params(wf, prompt, seg_length, steps, seed)
         apply_size(wf, width, height)
         # context：上一段交付尾部 22 帧 →（可选彩噪）→ 上传
@@ -469,6 +477,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="MiniMax H3 链式长视频生成")
     parser.add_argument("--images", default="", help="身份参考图标识符，逗号分隔（1-4 张，作 <Picture N>）")
     parser.add_argument("--source-video", default="", help="源视频标识符（可选，作 <Video 1> 角色替换）")
+    parser.add_argument("--model", choices=["hybrid", "official"], default="hybrid",
+                        help="模型版本：hybrid=融合模型（默认），official=官方 ref2va")
     parser.add_argument("--prompt", default="", help="六段式提示词（含 <Picture N> / <Video 1> 引用）")
     parser.add_argument("--segments", type=int, default=2, help="总段数（默认 2）")
     parser.add_argument("--duration", type=float, default=5.0, help="每段时长（秒，仅纯续写模式有效）")
@@ -599,6 +609,7 @@ def main() -> None:
                 "seed": args.seed if args.seed else random.getrandbits(63),
                 "steps": args.steps,
                 "noise": args.noise,
+                "model": args.model,
                 "no_lora": args.no_lora,
                 "legacy_sampler": args.legacy_sampler,
                 "keep_audio": args.keep_audio,
