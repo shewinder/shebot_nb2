@@ -41,7 +41,7 @@
   "class_type": "MiniMaxH3SigmaShift",
   "inputs": {
    "model": [
-    "5",
+    "70",
     0
    ],
    "shift_video": 12.0,
@@ -170,6 +170,17 @@
   "class_type": "LoadImage",
   "inputs": {
    "image": "{{input_image_2}}"
+  }
+ },
+ "70": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "model": [
+    "5",
+    0
+   ],
+   "lora_name": "MysticXXX_MMH3-V4-ref2va.safetensors",
+   "strength_model": 0.5
   }
  }
 }

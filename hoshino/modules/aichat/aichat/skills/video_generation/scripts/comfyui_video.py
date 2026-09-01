@@ -405,7 +405,10 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
         if not entry:
             # 不在历史：查队列是否仍在执行/排队；都不在 = 任务已丢失（如服务器重启）
             q_result = http_get(f"{base}/queue", timeout=10)
-            q = q_result.get("json", {}) if q_result.get("status") == 200 else {}
+            if q_result.get("status") != 200:
+                # 队列查询失败（ComfyUI 忙/网络抖动）：无法确认任务状态，继续轮询而非误判丢失
+                continue
+            q = q_result.get("json", {}) or {}
             in_queue = any(
                 prompt_id in (item[1] if isinstance(item, list) and len(item) > 1 else ())
                 for item in q.get("queue_running", []) + q.get("queue_pending", [])

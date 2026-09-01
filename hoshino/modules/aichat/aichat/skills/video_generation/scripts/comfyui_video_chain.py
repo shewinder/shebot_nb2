@@ -454,6 +454,7 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
     # 对照实验参数
     if state.get("no_lora"):
         wf.pop("60", None)
+        wf.pop("70", None)  # Mystic 画风 LoRA（可选）
         wf.pop("61", None)
         wf["15"]["inputs"]["model"] = ["1", 0]
     if state.get("legacy_sampler"):
