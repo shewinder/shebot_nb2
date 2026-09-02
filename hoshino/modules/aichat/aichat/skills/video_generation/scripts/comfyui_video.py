@@ -324,8 +324,12 @@ def apply_latent_upscale(workflow: Dict[str, Any], low_w: int, low_h: int,
 
 # 分辨率档位 → 16:9 基准像素量上限
 RESOLUTION_PIXELS = {
+    "360p": 640 * 384,     # 低清快速档（32 对齐近似 16:9）
     "480p": 864 * 480,     # 快速档（默认）
+    "540p": 960 * 544,     # 中档
+    "720p": 1280 * 704,    # 高清档
     "768p": 1344 * 768,    # 高清档（约 3-5 倍耗时）
+    "1080p": 1920 * 1088,  # 超高清档（很慢，16GB 显存有 OOM 风险）
 }
 MAX_PIXELS = RESOLUTION_PIXELS["480p"]
 
@@ -706,7 +710,10 @@ def main() -> None:
         _apply_ref_images(wf, uploaded)
     else:
         # t2v：档位 16:9 基准尺寸（32 对齐）
-        base_sizes = {"480p": (864, 480), "768p": (1344, 768)}
+        base_sizes = {
+            "360p": (640, 384), "480p": (864, 480), "540p": (960, 544),
+            "720p": (1280, 704), "768p": (1344, 768), "1080p": (1920, 1088),
+        }
         final_w, final_h = base_sizes[eff_resolution]
         apply_size(wf, *base_sizes[eff_resolution])
 
