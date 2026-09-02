@@ -64,6 +64,7 @@ async def build_reply(
             text = content[pos:m.start()]
             if text.strip():
                 parts.append(ReplyPart(kind="text", text=text))
+        pos = m.end()
 
         if m.group(1):  # 图片/视频标识符
             norm = f"<{m.group(1)}>"
@@ -91,8 +92,6 @@ async def build_reply(
                 referenced.add(norm)
         else:  # @标识符
             parts.append(ReplyPart(kind="at", qq_id=int(m.group(2))))
-
-        pos = m.end()
 
     if pos < len(content):
         text = content[pos:]

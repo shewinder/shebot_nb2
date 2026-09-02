@@ -74,15 +74,30 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_dedup(self):
         s = self._session_with({"<ai_image_1>": {}})
-        parts = await build_reply("a<ai_image_1>b<ai_image_1>", s)
+        parts = await build_reply("a<ai_image_1>b<ai_image_1>c", s)
         images = [p for p in parts if p.kind == "image"]
         self.assertEqual(len(images), 1)
+        self.assertEqual("".join(p.text for p in parts if p.kind == "text"), "abc")
 
     async def test_turn_dedup(self):
         s = self._session_with({"<ai_image_1>": {}})
         s._turn_sent_images.add("<ai_image_1>")
         parts = await build_reply("a<ai_image_1>", s)
         self.assertNotIn("image", [p.kind for p in parts])
+
+    async def test_turn_dedup_does_not_repeat_text_between_identifiers(self):
+        identifiers = {f"<ai_image_{index}>": {} for index in range(1, 5)}
+        s = self._session_with(identifiers)
+        s._turn_sent_images.update({"<ai_image_1>", "<ai_image_2>", "<ai_image_3>"})
+        content = "四页成品如下：\n\n<ai_image_1> <ai_image_2> <ai_image_3> <ai_image_4>\n\n处理完成"
+
+        parts = await build_reply(content, s)
+
+        self.assertEqual([p.identifier for p in parts if p.kind == "image"], ["<ai_image_4>"])
+        self.assertEqual(
+            "".join(p.text for p in parts if p.kind == "text"),
+            "四页成品如下：\n\n\n\n处理完成",
+        )
 
     async def test_session_none_literal(self):
         parts = await build_reply("图<ai_image_1>", None)
