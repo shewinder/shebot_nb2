@@ -325,7 +325,7 @@ def apply_source_video(wf: Dict[str, Any], source_name: Optional[str]) -> None:
 
 def apply_generated_audio_output(wf: Dict[str, Any], continuation: bool) -> None:
     """解码 H3 音频，并与当前交付画面一起输出。"""
-    latent_node = "16"
+    latent_node = "81"  # turbo 链 SCA 输出
     decode_node = "109" if continuation else "21"
     output_node = "108" if continuation else "19"
     wf[decode_node] = {
@@ -645,10 +645,8 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
     if state.get("no_lora"):
         for node_id in ("5", "60", "70", "61"):
             wf.pop(node_id, None)
-        wf["15"]["inputs"]["model"] = ["1", 0]
-    if state.get("legacy_sampler"):
-        wf["13"]["inputs"]["sampler_name"] = "res_multistep"
-        wf["14"]["inputs"]["scheduler"] = "beta"
+        wf["83"]["inputs"]["model"] = ["1", 0]
+    # legacy_sampler 已随 turbo v4 升级移除（无 KSamplerSelect/BasicScheduler 可切）
     return wf
 
 

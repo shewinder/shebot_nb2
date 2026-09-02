@@ -286,37 +286,28 @@ def apply_latent_upscale(workflow: Dict[str, Any], low_w: int, low_h: int,
         "precision": "bf16",
     }}
 
-    if workflow.get("8", {}).get("class_type") == "KSampler":
-        # ---- ref：ReferenceToVideo 重编码条件 + KSampler 精炼 ----
-        workflow["90"]["inputs"]["latent"] = ["8", 0]
+    # Phase 2 conditioning：按放大尺寸重编码（ref 保留 ref_images，i2v 保留首尾帧锚定）
+    if workflow.get("7", {}).get("class_type") == "MiniMaxH3ReferenceToVideo":
+        # ---- ref：ReferenceToVideo 副本重编码参考条件 ----
         cond_inputs = dict(workflow["7"]["inputs"])
         cond_inputs["prompt"] = prompt
         cond_inputs["width"] = hi_w
         cond_inputs["height"] = hi_h
         cond_inputs["length"] = length
         workflow["96"] = {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": cond_inputs}
-        refine = dict(workflow["8"]["inputs"])
-        refine["positive"] = ["96", 0]
-        refine["latent_image"] = ["90", 0]
-        refine["steps"] = LATENT_UPSCALE_REFINE_STEPS
-        refine["denoise"] = LATENT_UPSCALE_REFINE_DENOISE
-        workflow["97"] = {"class_type": "KSampler", "inputs": refine}
-        workflow["9"]["inputs"]["samples"] = ["97", 0]
-        workflow["10"]["inputs"]["samples"] = ["97", 0]
-        return
+    else:
+        # ---- t2v/i2v：ImageToVideo 重编码文本/锚定条件 ----
+        cond_inputs = {
+            "clip": ["2", 0], "vae": ["3", 0], "prompt": prompt,
+            "width": hi_w, "height": hi_h, "length": length,
+        }
+        if "13" in workflow:  # i2v 首帧
+            cond_inputs["first_frame"] = ["13", 0]
+        if "14" in workflow:  # i2v 尾帧
+            cond_inputs["last_frame"] = ["14", 0]
+        workflow["96"] = {"class_type": "MiniMaxH3ImageToVideo", "inputs": cond_inputs}
 
-    # ---- t2v/i2v：ImageToVideo 重编码条件 + TurboSampler 精炼 ----
-    # Phase 2 conditioning：按放大尺寸重编码（i2v 保留首尾帧锚定）
-    cond_inputs = {
-        "clip": ["2", 0], "vae": ["3", 0], "prompt": prompt,
-        "width": hi_w, "height": hi_h, "length": length,
-    }
-    if "13" in workflow:  # i2v 首帧
-        cond_inputs["first_frame"] = ["13", 0]
-    if "14" in workflow:  # i2v 尾帧
-        cond_inputs["last_frame"] = ["14", 0]
-    workflow["96"] = {"class_type": "MiniMaxH3ImageToVideo", "inputs": cond_inputs}
-
+    # Phase 2 精炼采样统一 TurboSampler 链（ref/t2v/i2v 一致）
     workflow["91"] = {"class_type": "MiniMaxH3TurboSampler", "inputs": {}}
     workflow["92"] = {"class_type": "SamplerCustomAdvanced", "inputs": {
         "noise": ["93", 0], "guider": ["94", 0], "sampler": ["91", 0],
