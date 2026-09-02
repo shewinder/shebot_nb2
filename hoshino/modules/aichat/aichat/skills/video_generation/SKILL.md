@@ -1,16 +1,16 @@
 ---
 name: video_generation
-description: 当用户要求生成视频、做视频、让图片动起来、文生视频、图生视频时激活
+description: 当用户要求生成视频、做长视频、让图片动起来、文生视频、首尾帧图生视频、参考图角色保持或参考视频换人时激活
 disable-model_invocation: false
 ---
 
 # 视频生成 SKILL
 
-基于 **MiniMax H3**（本地 ComfyUI）的视频生成能力。支持文生视频（T2V）、图生视频（I2V）与角色参考（ref2va），**原生生成同步音轨**（对白/环境音/音乐）。
+基于 **MiniMax H3**（本地 ComfyUI）的视频生成能力。支持 T2V、I2V、FL2V、Ref2VA 与参考视频角色替换，支持通过 Motion Context 生成长视频，**原生生成同步音轨**（对白/环境音/音乐）。
 
 ## 能力边界
 
-- 时长：**1-15 秒任意**（默认 2 秒，`--duration 10` 即 10 秒，帧数自动对齐模型网格）
+- 时长：单段 **1-15 秒**；超过单段上限时使用统一链式入口按场景生成长视频
 - 分辨率：**480p 快速档**（864×480，默认）/ **768p 高清档**（1344×768，约 3-5 倍耗时）；i2v 按输入图比例自适应，24fps MP4（含 AAC 音轨）
 - 出片：约 **1-2 分钟/条**（比传统模型快 3-5 倍）
 - 语义：自然语言提示词（**中文/英文均可**）
@@ -250,19 +250,49 @@ non_diegetic_music: <全英文配乐描述>
 - **声音字段全英文**：`overall_soundscape:` 内容全英文，最后一个句点后不换行直接续写 `non_diegetic_music:`，配乐内容也全英文
 - 480p 快速测试参数效果；确认后再用 768p 出成片
 
-## 链式长视频（角色替换 + 长片续写）
+## 统一链式长视频
 
-把一段**源视频的角色替换成指定角色**（或纯续写生成），支持超过单段上限的长视频（源视频按 124 帧窗口切段，段间 22 帧 Motion Context 衔接）。**执行脚本是 `scripts/comfyui_video_chain.py`（独立脚本，不是 comfyui_video.py 的任务）：**
+当用户要求超过单段时长的视频时，统一执行 `scripts/comfyui_video_chain.py`，不要分别调用多次 `comfyui_video.py` 后手工拼接。脚本使用 22 帧 Motion Context 连接相邻场景，并在同一个前台 LLM 会话中逐段续跑。
+
+| `--task` | 图片语义 | 生成语义 |
+|---|---|---|
+| `t2v` | 不提供图片 | 纯文字长视频 |
+| `i2v` | 恰好 1 张首帧图 | 首场景由该图开始，后续场景由 Context 续写 |
+| `fl2v` | 恰好 2 张，首帧+尾帧 | 第一张只约束开头，第二张只约束最后场景结尾 |
+| `ref` | 1-4 张角色/场景参考图 | 每个场景都保留 Ref2VA 参考约束 |
+| `edit` | 1-4 张参考图 + 1 个源视频 | 按源视频窗口继续现有角色替换链路 |
+
+**必须先写逐场景计划**：`--plan-json` 是 JSON 数组，每个场景独立指定 `prompt` / `length` / 可选 `seed`。`length` 是 H3 原始帧数，必须是 5-362 内的 `17k+5`；第 2 场景起至少 39 帧（含会被裁掉的 22 帧 Context）。124 帧时，第 1 场景交付 124 帧，后续每场景交付 102 帧。
+
+```json
+[
+  {"prompt": "<场景 1 完整提示词>", "length": 124, "seed": 1001},
+  {"prompt": "<从上一场景最后动作直接续写的完整提示词>", "length": 124, "seed": 1002}
+]
+```
+
+提示词格式按模式选择：`t2v/i2v/fl2v` 使用本 Skill 的 H3 三段式，`ref` 使用 Ref2VA 六段式，`edit` 使用下文的 video editing 六段式。每个场景都必须是可独立执行的完整提示词，同时用明确的延续动作承接上一场景。
 
 ```
+# 纯文字长视频
+execute_script(skill_name="video_generation", script_path="scripts/comfyui_video_chain.py",
+  args=["--task", "t2v", "--plan-json", "<场景数组 JSON>",
+        "--aspect-ratio", "16:9", "--resolution", "768p"], timeout=600)
+
+# 首尾帧长视频
+execute_script(skill_name="video_generation", script_path="scripts/comfyui_video_chain.py",
+  args=["--task", "fl2v", "--images", "<first_image>,<last_image>",
+        "--plan-json", "<场景数组 JSON>", "--resolution", "768p"], timeout=600)
+
 # 角色替换：源视频动作/场景/字幕 1:1 保留，人物换成参考图角色
 execute_script(skill_name="video_generation", script_path="scripts/comfyui_video_chain.py",
-  args=["--images", "<user_image_1>,<user_image_2>,<user_image_3>",
+  args=["--task", "edit", "--images", "<user_image_1>,<user_image_2>,<user_image_3>",
         "--source-video", "<user_video_1>",
-        "--prompt", "<video editing 六段式，见下>",
-        "--segments", "6", "--resolution", "768p", "--keep-audio"],
-  timeout=600)
+        "--plan-json", "<逐窗口 video editing 场景数组 JSON>",
+        "--resolution", "768p", "--keep-audio"], timeout=600)
 ```
+
+`t2v/i2v/fl2v/ref` 会解码每段 H3 生成音频，与画面一起裁切和拼接，并向下一段传递 22 帧音画上下文。`edit --keep-audio` 在成片阶段使用源视频原音轨覆盖生成音频。
 
 **前台无本地状态续跑机制（重要）**：链式任务由当前 LLM 会话持续执行，脚本每次只处理一个 ComfyUI prompt，LLM 必须保存并原样传回返回值中的 `state`：
 开始前请将 aichat 的 `max_tool_rounds` 配置调到足以覆盖全部分段调用和必要重试的值。
@@ -280,7 +310,7 @@ execute_script(skill_name="video_generation", script_path="scripts/comfyui_video
 - 禁止把链式任务"外包"给任何子代理、后台任务或脚本；`state` 只能在当前 LLM 工具调用上下文中传递
 - 若当前轮工具调用超时或中断，下一轮用**同一份** `state` 继续，不得重新发起首轮参数
 
-规则：
+`edit` 模式额外规则：
 - **提示词用 video editing 六段式**（链式替换专用，与 ref 的 `<Picture N>` 六段式、t2v/i2v 三段式均不同），顺序固定：
 
 ```
@@ -299,9 +329,9 @@ non_diegetic_music: <全英文>
 - **采样配置固定 euler + simple**（res_multistep/beta 会导致替换不稳定/失败/圣光/丢字幕，已实测定位）
 - 身份图 3 张左右（正面全身/侧面/脸部特写）
 - 源视频自动转 24fps 并按窗口切片（每段用对应时间片）；30fps 源无需预处理
-- 每段 124 帧窗口（5.17s）→ 交付 102 帧，段间自动衔接；`--segments` 控制段数（源 25s ≈ 6 段）；每段正文按"提示词规范"时长匹配（≈5 秒/段 → 3-4 镜）
+- 源视频自动按 124 帧窗口规划，脚本会用窗口帧数覆盖 `plan-json` 中的 `length`；场景数量决定最多处理多少个源视频窗口
 - `--keep-audio`：成片保留源视频原音轨（BGM/对白，时间轴 1:1 对齐；注意对白是原角色的声音）；声音字段仅作画面声效参考
-- 各段无 H3 生成音轨；时长：段数 × 2-7 分钟（720×960 4 步）
+- 时长：场景数 × 2-7 分钟（720×960 4 步）
 
 ## 超分（可选，默认不执行）
 

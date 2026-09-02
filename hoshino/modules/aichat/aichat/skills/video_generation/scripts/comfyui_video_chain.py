@@ -2,22 +2,23 @@
 """
 Author: SheBot
 Date: 2026-08-23
-Description: MiniMax H3 链式长视频生成（Motion Context 续写），供 video_generation SKILL 调用
+Description: MiniMax H3 统一链式长视频生成，供 video_generation SKILL 调用
 
 原理（参考 MacroSony/minimax-h3-chained-character-swap）：
-- 段 1 用 h3_chain_initial（无上下文），后续段用 h3_chain_segment
+- 支持 t2v / i2v / fl2v / ref / edit，共用逐场景计划和续跑协议
+- 段 1 无上下文，后续段使用 ChainContext
 - 每段以上一段交付视频的尾部 22 帧为 Motion Context（ChainContext 编码为
   latent token 钉在下一段时间轴头部），raw 输出前 22 帧为 context 复刻，
   由工作流内 LoopTrim 裁除，交付段可直接拼接
 - 彩噪 taper 注入（--noise on，默认）：context 前 19 帧 @0.45 注噪 +
   末 3 帧渐弱到 0.10，触发模型修复模式，防链式锐度衰减（实测 +8-9%）
-- 无源视频时（纯续写）移除 ref_videos 引用；角色替换时源视频作 <Video 1>
-- 各段无音轨（链式音频不连续），成片可用 assemble.py 统一加 BGM
+- 生成音频与画面一起裁切、保存和拼接，后续段同时继承音画上下文
+- edit 模式可以在最终拼接后恢复源视频音轨
 
 约定：
-- 身份参考图: --images（1-4 张，作 <Picture N>）
-- 源视频: --source-video（可选，作 <Video 1>）
-- 每段时长: --duration（秒，建议 >=5，默认 5）
+- 场景计划: --plan-json（JSON 数组，每项含 prompt / length / 可选 seed）
+- 图片: --images（i2v=1 张，fl2v=2 张，ref/edit=1-4 张）
+- 源视频: --source-video（仅 edit 模式，作 <Video 1>）
 """
 import argparse
 import copy
@@ -51,7 +52,7 @@ from comfyui_workflow_loader import (  # noqa: E402
 )
 from comfyui_video import (  # noqa: E402
     COMFYUI_BASE_URL, RESOLUTION_PIXELS, VideoStoreCore, H3_MIN_FRAMES, H3_MAX_FRAMES,
-    duration_to_frames, compute_target_size,
+    compute_target_size, compute_size_for_aspect,
     upload_image_to_comfyui, submit_task, poll_result,
     store_video, apply_length, apply_size, http_post,
 )
@@ -67,6 +68,14 @@ CHAIN_WORKFLOWS_HYBRID = {
     "initial": "h3_chain_initial_hybrid",
     "segment": "h3_chain_segment_hybrid",
 }
+
+IMAGE_WORKFLOWS = {
+    "t2v": {"official": "h3_t2v", "hybrid": "h3_t2v_hybrid"},
+    "i2v": {"official": "h3_i2v", "hybrid": "h3_i2v_hybrid"},
+    "fl2v": {"official": "h3_i2v", "hybrid": "h3_i2v_hybrid"},
+}
+
+TASKS = ("t2v", "i2v", "fl2v", "ref", "edit")
 
 CONTEXT_FRAMES = 22  # Motion Context 帧数（与工作流 ChainPlan context_length 一致）
 
@@ -217,7 +226,7 @@ def count_frames(ffmpeg: str, video: Path) -> int:
 
 def prepare_context(ffmpeg: str, src_video: Path, tail: int,
                     noise_on: bool, out_path: Path, seed: int) -> None:
-    """从交付视频提取尾部 tail 帧，可选彩噪 taper 注入，重编码 24fps 输出
+    """从交付视频提取尾部 tail 帧和音频，重编码为上下文视频。
 
     步骤：ffmpeg 抽全部帧 → 保留尾部 tail 帧 →（noise_on）PIL 注入色块 → 重编码
     """
@@ -248,16 +257,20 @@ def prepare_context(ffmpeg: str, src_video: Path, tail: int,
                     frame = opened.convert("RGB")
                 Image.blend(frame, noisy_template, amount).save(frame_path)
 
-        # 重命名连续序号后重编码（24fps，无音轨）
+        # 重命名连续序号后重编码，并保留同一时间窗的音频。
         keep_dir = tmp / "keep"
         keep_dir.mkdir()
         for i, f in enumerate(keep, 1):
             shutil.copy2(f, keep_dir / f"k_{i:04d}.png")
+        tail_seconds = tail / float(FRAME_RATE)
         subprocess.run(
             [ffmpeg, "-y", "-v", "error", "-framerate", str(FRAME_RATE),
              "-i", str(keep_dir / "k_%04d.png"),
-             "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", "-an",
-             str(out_path)],
+             "-sseof", str(-tail_seconds),
+             "-i", str(src_video), "-map", "0:v", "-map", "1:a?",
+             "-frames:v", str(tail), "-af", f"atrim=duration={tail_seconds}",
+             "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", str(out_path)],
             check=True, capture_output=True,
         )
 
@@ -316,15 +329,85 @@ def apply_source_video(wf: Dict[str, Any], source_name: Optional[str]) -> None:
     wf.pop("49", None)
 
 
+def apply_generated_audio_output(wf: Dict[str, Any], continuation: bool) -> None:
+    """解码 H3 音频，并与当前交付画面一起输出。"""
+    latent_node = "16"
+    decode_node = "109" if continuation else "21"
+    output_node = "108" if continuation else "19"
+    wf[decode_node] = {
+        "class_type": "VAEDecodeAudio",
+        "inputs": {"samples": [latent_node, 0], "vae": ["4", 0]},
+    }
+    if continuation:
+        wf["106"]["inputs"].update({
+            "audio": [decode_node, 0],
+            "fps": float(FRAME_RATE),
+            "match_tail": True,
+        })
+        images = ["106", 0]
+        audio = ["106", 1]
+    else:
+        images = ["17", 0]
+        audio = [decode_node, 0]
+    wf[output_node] = {
+        "class_type": "VHS_VideoCombine",
+        "inputs": {
+            "images": images,
+            "audio": audio,
+            "frame_rate": FRAME_RATE,
+            "loop_count": 0,
+            "filename_prefix": "h3_chain_bot/delivered_seg",
+            "format": "video/h264-mp4",
+            "pingpong": False,
+            "save_output": True,
+        },
+    }
+    if continuation:
+        wf.pop("107", None)
+    else:
+        wf.pop("18", None)
+
+
+def adapt_image_conditioning(wf: Dict[str, Any], task: str,
+                             uploaded: List[str], seg_idx: int,
+                             segments_total: int, model: str) -> None:
+    """把 Ref2VA 链模板适配为 T2VA/I2VA/FL2VA。"""
+    base = load_workflow(IMAGE_WORKFLOWS[task][model])
+    wf["1"] = copy.deepcopy(base["1"])
+    wf["5"] = copy.deepcopy(base["5"])
+    wf["70"] = copy.deepcopy(base["70"])
+    wf["61"]["inputs"]["model"] = ["70", 0]
+    wf.pop("60", None)
+    inputs: Dict[str, Any] = {
+        "clip": ["2", 0],
+        "vae": ["3", 0],
+        "prompt": wf["20"]["inputs"]["prompt"],
+        "width": wf["20"]["inputs"]["width"],
+        "height": wf["20"]["inputs"]["height"],
+        "length": wf["20"]["inputs"]["length"],
+    }
+    for node_id in ("40", "41", "42", "43", "49", "50"):
+        wf.pop(node_id, None)
+    if task in ("i2v", "fl2v") and seg_idx == 1:
+        wf["40"] = {"class_type": "LoadImage", "inputs": {"image": uploaded[0]}}
+        inputs["first_frame"] = ["40", 0]
+    if task == "fl2v" and seg_idx == segments_total:
+        wf["41"] = {"class_type": "LoadImage", "inputs": {"image": uploaded[1]}}
+        inputs["last_frame"] = ["41", 0]
+    wf["20"] = {"class_type": "MiniMaxH3ImageToVideo", "inputs": inputs}
+
+
 def concat_videos(ffmpeg: str, paths: List[Path], out_path: Path) -> None:
-    """ffmpeg concat 拼接（统一重编码保证编码器一致）"""
+    """ffmpeg concat 拼接视频和生成音频。"""
     list_file = out_path.parent / "concat.txt"
     list_file.write_text("".join(f"file '{p}'\n" for p in paths), encoding="utf-8")
     try:
         subprocess.run(
             [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
-             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-             "-movflags", "+faststart", str(out_path)],
+             "-map", "0:v:0", "-map", "0:a:0?", "-fps_mode", "passthrough",
+             "-c:v", "libx264",
+             "-preset", "fast", "-crf", "20", "-c:a", "aac",
+             "-movflags", "+faststart", "-shortest", str(out_path)],
             check=True, capture_output=True,
         )
     except subprocess.CalledProcessError as e:
@@ -334,8 +417,52 @@ def concat_videos(ffmpeg: str, paths: List[Path], out_path: Path) -> None:
 
 # ---------- 无本地状态续跑 ----------
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 RUN_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _is_valid_h3_length(value: int) -> bool:
+    return H3_MIN_FRAMES <= value <= H3_MAX_FRAMES and (value - 5) % 17 == 0
+
+
+def _parse_plan(raw: str) -> List[Dict[str, Any]]:
+    """解析统一场景计划；每个场景拥有独立提示词、长度和可选 seed。"""
+    if not raw:
+        raise ValueError("必须提供 --plan-json")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--plan-json 不是有效 JSON: {exc.msg}") from exc
+    if isinstance(value, dict):
+        value = value.get("scenes")
+    if not isinstance(value, list):
+        raise ValueError("--plan-json 必须是场景数组或包含 scenes 数组的对象")
+    if not 1 <= len(value) <= 10:
+        raise ValueError("场景数仅支持 1-10 段")
+    scenes: List[Dict[str, Any]] = []
+    for index, item in enumerate(value, 1):
+        if not isinstance(item, dict) or not isinstance(item.get("prompt"), str):
+            raise ValueError(f"场景 {index} 必须包含非空 prompt")
+        prompt = item["prompt"].strip()
+        if not prompt:
+            raise ValueError(f"场景 {index} prompt 不能为空")
+        length = item.get("length")
+        if isinstance(length, bool) or not isinstance(length, int):
+            raise ValueError(f"场景 {index} length 必须是整数帧数")
+        if not _is_valid_h3_length(length):
+            raise ValueError(
+                f"场景 {index} length 必须是 {H3_MIN_FRAMES}-{H3_MAX_FRAMES} 内的 17k+5 帧")
+        scene_seed = item.get("seed")
+        if scene_seed is not None and (
+                isinstance(scene_seed, bool) or not isinstance(scene_seed, int)
+                or not 0 <= scene_seed < 2 ** 64):
+            raise ValueError(f"场景 {index} seed 必须是 uint64 整数")
+        scenes.append({
+            "prompt": prompt,
+            "length": length,
+            "seed": scene_seed,
+        })
+    return scenes
 
 
 def _state_video_path(store: VideoStoreCore, identifier: Any, field: str) -> Path:
@@ -366,9 +493,10 @@ def _validate_state(raw: str, session_id: str) -> Dict[str, Any]:
             or not isinstance(total, int) or not isinstance(done, int)
             or not 1 <= total <= 10 or not 0 <= done <= total):
         raise ValueError("state 分段进度非法")
-    if not isinstance(state.get("prompt"), str) or not state["prompt"].strip():
-        raise ValueError("state.prompt 非法")
-    for field in ("width", "height", "seed", "steps"):
+    task = state.get("task")
+    if task not in TASKS:
+        raise ValueError("state.task 非法")
+    for field in ("width", "height", "steps"):
         value = state.get(field)
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"state.{field} 非法")
@@ -376,17 +504,29 @@ def _validate_state(raw: str, session_id: str) -> Dict[str, Any]:
         raise ValueError("state 视频尺寸或采样步数非法")
     if state.get("noise") not in ("on", "off"):
         raise ValueError("state.noise 非法")
-    if state.get("model", "hybrid") not in ("hybrid", "official"):
+    if state.get("model") not in ("hybrid", "official"):
         raise ValueError("state.model 非法")
     for field in ("no_lora", "legacy_sampler", "keep_audio"):
         if not isinstance(state.get(field), bool):
             raise ValueError(f"state.{field} 非法")
-    if (not isinstance(state.get("segment_lengths"), list)
-            or len(state["segment_lengths"]) != total
-            or any(isinstance(length, bool) or not isinstance(length, int)
-                   or not H3_MIN_FRAMES <= length <= H3_MAX_FRAMES
-                   for length in state["segment_lengths"])):
-        raise ValueError("state.segment_lengths 非法")
+    scenes = state.get("scenes")
+    if not isinstance(scenes, list) or len(scenes) != total:
+        raise ValueError("state.scenes 与分段数不一致")
+    for index, scene in enumerate(scenes, 1):
+        if (not isinstance(scene, dict)
+                or not isinstance(scene.get("prompt"), str)
+                or not scene["prompt"].strip()):
+            raise ValueError(f"state.scenes[{index - 1}].prompt 非法")
+        for field in ("length", "seed"):
+            value = scene.get(field)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"state.scenes[{index - 1}].{field} 非法")
+        if not _is_valid_h3_length(scene["length"]):
+            raise ValueError(f"state.scenes[{index - 1}].length 非法")
+        if index > 1 and scene["length"] < CONTEXT_FRAMES + H3_MIN_FRAMES:
+            raise ValueError(f"state.scenes[{index - 1}].length 不足以承载上下文")
+        if not 0 <= scene["seed"] < 2 ** 64:
+            raise ValueError(f"state.scenes[{index - 1}].seed 非法")
     if (not isinstance(state.get("delivered"), list)
             or len(state["delivered"]) != done
             or any(not isinstance(identifier, str) or not identifier.strip()
@@ -398,27 +538,41 @@ def _validate_state(raw: str, session_id: str) -> Dict[str, Any]:
         raise ValueError("state.current_prompt_id 非法")
     if done == total and prompt_id is not None:
         raise ValueError("已完成任务不能保留 current_prompt_id")
-    if (not isinstance(state.get("uploaded_images"), list)
-            or not 1 <= len(state["uploaded_images"]) <= 4
+    uploaded = state.get("uploaded_images")
+    if (not isinstance(uploaded, list)
             or any(not isinstance(image, str) or not image.strip()
-                   for image in state["uploaded_images"])):
+                   for image in uploaded)):
         raise ValueError("state.uploaded_images 非法")
+    expected_images = {"t2v": 0, "i2v": 1, "fl2v": 2}
+    if task in expected_images and len(uploaded) != expected_images[task]:
+        raise ValueError(f"state.{task} 图片数量非法")
+    if task in ("ref", "edit") and not 1 <= len(uploaded) <= 4:
+        raise ValueError(f"state.{task} 需要 1-4 张参考图")
+    if task != "edit" and state["keep_audio"]:
+        raise ValueError("仅 edit state 可以保留源音轨")
     source_windows = state.get("source_windows")
     if source_windows is not None:
+        if task != "edit":
+            raise ValueError("仅 edit state 可以包含源视频")
         if (not isinstance(source_windows, list) or len(source_windows) != total
                 or any(not isinstance(window, list) or len(window) != 2
                        or any(isinstance(value, bool) or not isinstance(value, int)
                               or value < 0 for value in window)
-                       or window[1] < H3_MIN_FRAMES or window[1] > 124
+                       or not _is_valid_h3_length(window[1]) or window[1] > 124
                        for window in source_windows)):
             raise ValueError("state.source_windows 非法")
+        if any(scene["length"] != window[1]
+               for scene, window in zip(scenes, source_windows)):
+            raise ValueError("state.scenes 与源视频窗口长度不一致")
         if (not isinstance(state.get("source_24_video"), str)
                 or not state["source_24_video"].strip()
                 or not isinstance(state.get("source_original_video"), str)
                 or not state["source_original_video"].strip()):
             raise ValueError("state.source_24_video 缺失")
     elif state.get("source_24_video") is not None or state.get("source_original_video") is not None:
-        raise ValueError("纯续写 state 不应包含源视频")
+        raise ValueError("非 edit state 不应包含源视频")
+    if task == "edit" and source_windows is None:
+        raise ValueError("edit state 缺少源视频分段")
     return state
 
 
@@ -440,14 +594,16 @@ def output_state(state: Dict[str, Any], status: str, message: str,
 def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
                            store: VideoStoreCore, work_dir: Path) -> Dict[str, Any]:
     """构建第 seg_idx 段工作流，所有输入均由 state 中的标识符解析"""
-    seg_length = state["segment_lengths"][seg_idx - 1]
-    seed = state["seed"]
+    scene = state["scenes"][seg_idx - 1]
+    seg_length = scene["length"]
+    seed = scene["seed"]
     steps = state["steps"]
-    prompt = state["prompt"]
+    prompt = scene["prompt"]
     width, height = state["width"], state["height"]
     noise_on = state["noise"] == "on"
-    # 模型版本写入 state，续跑段间保持一致；老 state 无该字段时默认 hybrid
-    wf_map = CHAIN_WORKFLOWS_HYBRID if state.get("model", "hybrid") == "hybrid" else CHAIN_WORKFLOWS
+    task = state["task"]
+    model = state["model"]
+    wf_map = CHAIN_WORKFLOWS_HYBRID if model == "hybrid" else CHAIN_WORKFLOWS
 
     if seg_idx == 1:
         wf = copy.deepcopy(load_workflow(wf_map["initial"]))
@@ -456,6 +612,7 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
         apply_size(wf, width, height)
         _replace_scalar(wf, "{{seed}}", seed)
         _replace_scalar(wf, "{{steps}}", steps)
+        apply_generated_audio_output(wf, continuation=False)
     else:
         wf = copy.deepcopy(load_workflow(wf_map["segment"]))
         apply_chain_params(wf, prompt, seg_length, steps, seed)
@@ -467,9 +624,11 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
                         noise_on, ctx_path, seed + seg_idx)
         ctx_name = upload_video_to_comfyui(str(ctx_path))
         wf["101"]["inputs"]["file"] = ctx_name
+        wf["105"]["inputs"]["audio_vae"] = ["4", 0]
+        apply_generated_audio_output(wf, continuation=True)
 
     # 源视频切片（角色替换模式）
-    if state.get("source_windows"):
+    if task == "edit":
         seg_start, seg_window = state["source_windows"][seg_idx - 1]
         src_24_path = _state_video_path(store, state["source_24_video"], "source_24_video")
         slice_path = work_dir / f"{state['run_id']}_src_seg_{seg_idx}.mp4"
@@ -478,18 +637,22 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
     else:
         source_name = None
 
-    # 对照实验参数
+    if task in ("ref", "edit"):
+        apply_identity_images(wf, state["uploaded_images"])
+        apply_source_video(wf, source_name)
+    else:
+        adapt_image_conditioning(
+            wf, task, state["uploaded_images"], seg_idx,
+            state["segments_total"], model)
+
+    # 对照实验参数必须在 task 适配后应用。
     if state.get("no_lora"):
-        wf.pop("60", None)
-        wf.pop("70", None)  # Mystic 画风 LoRA（可选）
-        wf.pop("61", None)
+        for node_id in ("5", "60", "70", "61"):
+            wf.pop(node_id, None)
         wf["15"]["inputs"]["model"] = ["1", 0]
     if state.get("legacy_sampler"):
         wf["13"]["inputs"]["sampler_name"] = "res_multistep"
         wf["14"]["inputs"]["scheduler"] = "beta"
-
-    apply_identity_images(wf, state["uploaded_images"])
-    apply_source_video(wf, source_name)
     return wf
 
 
@@ -503,13 +666,13 @@ def submit_next_segment(state: Dict[str, Any], ffmpeg: str, store: VideoStoreCor
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MiniMax H3 链式长视频生成")
-    parser.add_argument("--images", default="", help="身份参考图标识符，逗号分隔（1-4 张，作 <Picture N>）")
-    parser.add_argument("--source-video", default="", help="源视频标识符（可选，作 <Video 1> 角色替换）")
+    parser.add_argument("--task", choices=TASKS, default="", help="生成模式（首次调用必填）")
+    parser.add_argument("--plan-json", default="", help="逐场景 prompt/length/seed 数组")
+    parser.add_argument("--images", default="", help="图片标识符，逗号分隔")
+    parser.add_argument("--source-video", default="", help="edit 模式的源视频标识符")
     parser.add_argument("--model", choices=["hybrid", "official"], default="hybrid",
-                        help="模型版本：hybrid=融合模型（默认），official=官方 ref2va")
-    parser.add_argument("--prompt", default="", help="六段式提示词（含 <Picture N> / <Video 1> 引用）")
-    parser.add_argument("--segments", type=int, default=2, help="总段数（默认 2）")
-    parser.add_argument("--duration", type=float, default=5.0, help="每段时长（秒，仅纯续写模式有效）")
+                        help="模型版本：hybrid=融合模型（默认），official=官方模型")
+    parser.add_argument("--aspect-ratio", default="16:9", help="t2v 画幅，默认 16:9")
     parser.add_argument("--resolution", choices=list(RESOLUTION_PIXELS.keys()), default="480p")
     parser.add_argument("--noise", choices=["on", "off"], default="on")
     parser.add_argument("--steps", type=int, default=4)
@@ -588,20 +751,29 @@ def main() -> None:
                 output_state(state, "partial", "下一段已提交，请原样传回 state 查询进度")
                 return
 
-            if not args.prompt:
-                output_error("--prompt 参数必填")
-                return
-            if not args.images:
-                output_error("需要提供 --images 身份参考图标识符")
-                return
-            if not 1 <= args.segments <= 10:
-                output_error("--segments 仅支持 1-10 段")
-                return
-            if not 1.0 <= args.duration <= 15.0:
-                output_error("每段时长仅支持 1-15 秒")
+            if not args.task:
+                output_error("首次调用必须提供 --task")
                 return
             if args.steps <= 0:
                 output_error("--steps 必须是正整数")
+                return
+            if not 0 <= args.seed < 2 ** 64:
+                output_error("--seed 必须是 uint64 整数")
+                return
+            if args.task == "edit" and not args.source_video.strip():
+                output_error("edit 模式必须提供 --source-video")
+                return
+            if args.task != "edit" and args.source_video.strip():
+                output_error("仅 edit 模式支持 --source-video")
+                return
+            if args.keep_audio and args.task != "edit":
+                output_error("--keep-audio 仅用于 edit 模式")
+                return
+
+            scenes = _parse_plan(args.plan_json)
+            if any(index > 0 and scene["length"] < CONTEXT_FRAMES + H3_MIN_FRAMES
+                   for index, scene in enumerate(scenes)):
+                output_error("续写场景至少需要 39 帧（含 22 帧上下文）")
                 return
 
             image_paths: List[str] = []
@@ -615,12 +787,20 @@ def main() -> None:
                 else:
                     output_error(f"未找到图片标识符: {ident}")
                     return
-            if not 1 <= len(image_paths) <= 4:
-                output_error("身份参考图需要 1-4 张")
+            required_images = {"t2v": 0, "i2v": 1, "fl2v": 2}
+            if args.task in required_images and len(image_paths) != required_images[args.task]:
+                output_error(f"{args.task} 模式需要 {required_images[args.task]} 张图片")
+                return
+            if args.task in ("ref", "edit") and not 1 <= len(image_paths) <= 4:
+                output_error(f"{args.task} 模式需要 1-4 张参考图")
                 return
 
-            width, height = compute_target_size(image_paths[0],
-                                                max_pixels=RESOLUTION_PIXELS[args.resolution])
+            if args.task == "t2v":
+                width, height = compute_size_for_aspect(
+                    args.aspect_ratio, max_pixels=RESOLUTION_PIXELS[args.resolution])
+            else:
+                width, height = compute_target_size(
+                    image_paths[0], max_pixels=RESOLUTION_PIXELS[args.resolution])
             run_id = uuid.uuid4().hex[:12]
             uploaded_images = []
             for i, image_path in enumerate(image_paths, 1):
@@ -628,18 +808,23 @@ def main() -> None:
                 shutil.copy2(image_path, upload_path)
                 uploaded_images.append(upload_image_to_comfyui(str(upload_path)))
 
-            state = {
+            base_seed = args.seed if args.seed else random.getrandbits(63)
+            for index, scene in enumerate(scenes):
+                if scene["seed"] is None:
+                    scene["seed"] = (base_seed + index) % (2 ** 64)
+
+            initial_state: Dict[str, Any] = {
                 "version": STATE_VERSION,
+                "task": args.task,
                 "run_id": run_id,
                 "session_id": session_id,
-                "prompt": args.prompt,
-                "segments_total": args.segments,
+                "scenes": scenes,
+                "segments_total": len(scenes),
                 "segments_done": 0,
                 "current_prompt_id": None,
                 "delivered": [],
                 "width": width,
                 "height": height,
-                "seed": args.seed if args.seed else random.getrandbits(63),
                 "steps": args.steps,
                 "noise": args.noise,
                 "model": args.model,
@@ -647,38 +832,35 @@ def main() -> None:
                 "legacy_sampler": args.legacy_sampler,
                 "keep_audio": args.keep_audio,
                 "uploaded_images": uploaded_images,
-                "segment_lengths": [],
                 "source_windows": None,
                 "source_24_video": None,
                 "source_original_video": None,
             }
 
-            if args.source_video:
+            if args.task == "edit":
                 source_id = args.source_video.strip()
                 source_path = _state_video_path(store, source_id, "source_video")
-                state["source_original_video"] = source_id
+                initial_state["source_original_video"] = source_id
                 src_24_path = work_dir / f"{run_id}_src_24fps.mp4"
                 convert_to_24fps(ffmpeg, source_path, src_24_path)
                 sw, sh = probe_video_size(ffmpeg, src_24_path)
-                state["width"], state["height"] = compute_target_size_wh(
+                initial_state["width"], initial_state["height"] = compute_target_size_wh(
                     sw, sh, RESOLUTION_PIXELS[args.resolution])
                 windows = plan_source_windows(count_frames(ffmpeg, src_24_path))
-                if len(windows) > args.segments:
-                    windows = windows[:args.segments]
+                if len(windows) > len(scenes):
+                    windows = windows[:len(scenes)]
                 if not windows:
                     output_error("源视频长度不足以生成有效分段")
                     return
-                state["source_windows"] = windows
-                state["segments_total"] = len(windows)
-                state["segment_lengths"] = [window for _, window in windows]
-                state["source_24_video"] = store_video(src_24_path.read_bytes())["identifier"]
-            else:
-                length = duration_to_frames(args.duration)
-                if args.segments > 1 and length < CONTEXT_FRAMES + H3_MIN_FRAMES:
-                    output_error("多段纯续写每段至少需要 39 帧（约 1.6 秒）")
-                    return
-                state["segment_lengths"] = [length] * args.segments
+                initial_state["source_windows"] = windows
+                initial_state["segments_total"] = len(windows)
+                initial_state["scenes"] = scenes[:len(windows)]
+                for scene, (_, window) in zip(initial_state["scenes"], windows):
+                    scene["length"] = window
+                initial_state["source_24_video"] = store_video(
+                    src_24_path.read_bytes())["identifier"]
 
+            state = initial_state
             submit_next_segment(state, ffmpeg, store, work_dir)
             output_state(state, "partial", "第 1 段已提交，请原样传回 state 查询进度")
     except (RuntimeError, ValueError, OSError) as e:
