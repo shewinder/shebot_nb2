@@ -61,12 +61,37 @@ TASK_WORKFLOW = {
     "ref": "h3_refimg",  # MiniMax H3 角色参考模式（ref2va，无锚定，首帧自然+角色跟随）
 }
 
-# 融合模型（fl2va 基座 + ref2va 后段 adaln_proj）：单模型通吃 t2v/i2v/ref
-TASK_WORKFLOW_HYBRID = {
-    "t2v": "h3_t2v_hybrid",
-    "i2v": "h3_i2v_hybrid",
-    "ref": "h3_refimg_hybrid",
+# 工作流模板共用，模型 checkpoint 由 --model 和任务类型决定。
+MODEL_CHECKPOINTS = {
+    "official": {
+        "fl2va": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "ref2va": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    },
+    "hybrid": {
+        "fl2va": "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
+        "ref2va": "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
+    },
 }
+
+
+def model_checkpoint(task: str, model: str) -> str:
+    """返回任务对应的模型 checkpoint 文件名。"""
+    family = "ref2va" if task == "ref" or task == "edit" else "fl2va"
+    try:
+        return MODEL_CHECKPOINTS[model][family]
+    except KeyError as e:
+        raise ValueError(f"不支持的模型或任务: model={model}, task={task}") from e
+
+
+def _replace_scalar(workflow: Dict[str, Any], placeholder: str, value: Any) -> None:
+    """替换工作流输入中的标量占位符。"""
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs", {})
+        for key, current in inputs.items():
+            if current == placeholder:
+                inputs[key] = value
 
 # H3 帧数网格：17k+5（24fps 下 124≈5.2s, 243≈10.1s）
 H3_MIN_FRAMES = 5
@@ -551,7 +576,7 @@ def main() -> None:
         output_error("--prompt 参数必填")
         return
 
-    workflow_name = (TASK_WORKFLOW_HYBRID if args.model == "hybrid" else TASK_WORKFLOW).get(args.task)
+    workflow_name = TASK_WORKFLOW.get(args.task)
     if not workflow_name:
         output_error(f"不支持的任务类型: {args.task}")
         return
@@ -564,6 +589,7 @@ def main() -> None:
 
     # 替换占位符
     apply_prompt(wf, args.prompt)
+    _replace_scalar(wf, "{{unet_name}}", model_checkpoint(args.task, args.model))
     if not 1.0 <= args.duration <= 15.0:
         output_error("时长仅支持 1-15 秒")
         return
@@ -627,12 +653,12 @@ def main() -> None:
         if multi:
             # 多图多帧锚定：以对应模型的 t2v 工作流为基础动态构造 AddGuide 链
             try:
-                t2v_workflow = TASK_WORKFLOW_HYBRID if args.model == "hybrid" else TASK_WORKFLOW
-                wf = copy.deepcopy(load_workflow(t2v_workflow["t2v"]))
+                wf = copy.deepcopy(load_workflow(TASK_WORKFLOW["t2v"]))
             except RuntimeError as e:
                 output_error(str(e))
                 return
             apply_prompt(wf, args.prompt)
+            _replace_scalar(wf, "{{unet_name}}", model_checkpoint(args.task, args.model))
             apply_length(wf, duration_to_frames(args.duration))
             apply_size(wf, width, height)
             apply_steps(wf, steps)

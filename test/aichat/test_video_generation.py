@@ -67,6 +67,11 @@ class TestVideoWorkflow(unittest.TestCase):
         self.assertIn("100", workflow)
         self.assertEqual(workflow["70"]["inputs"]["strength_model"], 0.25)
 
+    def test_i2v_official_model_uses_shared_template(self):
+        workflow = self._run_main("i2v", "img1", model="official")
+        self.assertEqual(workflow["1"]["inputs"]["unet_name"],
+                         "minimax_h3_fl2va_pruned_int8_convrot.safetensors")
+
     def test_ref_two_images_remain_two_reference_inputs(self):
         workflow = self._run_main("ref", "img1,img2", model="hybrid")
         inputs = workflow["7"]["inputs"]
@@ -76,7 +81,7 @@ class TestVideoWorkflow(unittest.TestCase):
         self.assertNotIn("last_frame", inputs)
 
     def test_latent_scale_requires_finite_value_between_one_and_four(self):
-        workflow = video.load_workflow("h3_t2v_hybrid")
+        workflow = video.load_workflow("h3_t2v")
         for scale in (0.0, 4.1, float("nan"), float("inf")):
             with self.subTest(scale=scale), self.assertRaisesRegex(ValueError, "1-4"):
                 video.apply_latent_upscale(workflow, 864, 480, "prompt", 5, scale)
@@ -201,6 +206,14 @@ class TestChainWorkflow(unittest.TestCase):
         self.assertEqual(workflow["19"]["class_type"], "VHS_VideoCombine")
         self.assertEqual(workflow["19"]["inputs"]["audio"], ["21", 0])
         self.assert_references_exist(workflow)
+
+    def test_t2v_official_uses_shared_chain_template(self):
+        state = self.make_state("t2v")
+        state["model"] = "official"
+        workflow = chain.build_segment_workflow(
+            1, state, "ffmpeg", object(), Path("/tmp"))
+        self.assertEqual(workflow["1"]["inputs"]["unet_name"],
+                         "minimax_h3_fl2va_pruned_int8_convrot.safetensors")
 
     def test_i2v_initial_uses_first_frame_only(self):
         workflow = self.build_initial("i2v", ["first.png"])

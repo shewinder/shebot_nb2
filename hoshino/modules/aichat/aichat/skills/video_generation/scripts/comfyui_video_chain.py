@@ -54,7 +54,7 @@ from comfyui_video import (  # noqa: E402
     COMFYUI_BASE_URL, RESOLUTION_PIXELS, VideoStoreCore, H3_MIN_FRAMES, H3_MAX_FRAMES,
     compute_target_size, compute_size_for_aspect,
     upload_image_to_comfyui, submit_task, poll_result,
-    store_video, apply_length, apply_size, http_post,
+    store_video, apply_length, apply_size, http_post, model_checkpoint,
 )
 
 # 链式工作流文件名（reference/ 下）
@@ -63,16 +63,10 @@ CHAIN_WORKFLOWS = {
     "segment": "h3_chain_segment",   # 续写段：22 帧 Motion Context + LoopTrim
 }
 
-# 融合模型版（fl2va 基座 + ref2va 后段 adaln_proj）
-CHAIN_WORKFLOWS_HYBRID = {
-    "initial": "h3_chain_initial_hybrid",
-    "segment": "h3_chain_segment_hybrid",
-}
-
 IMAGE_WORKFLOWS = {
-    "t2v": {"official": "h3_t2v", "hybrid": "h3_t2v_hybrid"},
-    "i2v": {"official": "h3_i2v", "hybrid": "h3_i2v_hybrid"},
-    "fl2v": {"official": "h3_i2v", "hybrid": "h3_i2v_hybrid"},
+    "t2v": "h3_t2v",
+    "i2v": "h3_i2v",
+    "fl2v": "h3_i2v",
 }
 
 TASKS = ("t2v", "i2v", "fl2v", "ref", "edit")
@@ -370,9 +364,9 @@ def apply_generated_audio_output(wf: Dict[str, Any], continuation: bool) -> None
 
 def adapt_image_conditioning(wf: Dict[str, Any], task: str,
                              uploaded: List[str], seg_idx: int,
-                             segments_total: int, model: str) -> None:
+                             segments_total: int) -> None:
     """把 Ref2VA 链模板适配为 T2VA/I2VA/FL2VA。"""
-    base = load_workflow(IMAGE_WORKFLOWS[task][model])
+    base = load_workflow(IMAGE_WORKFLOWS[task])
     wf["1"] = copy.deepcopy(base["1"])
     wf["5"] = copy.deepcopy(base["5"])
     wf["70"] = copy.deepcopy(base["70"])
@@ -603,7 +597,7 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
     noise_on = state["noise"] == "on"
     task = state["task"]
     model = state["model"]
-    wf_map = CHAIN_WORKFLOWS_HYBRID if model == "hybrid" else CHAIN_WORKFLOWS
+    wf_map = CHAIN_WORKFLOWS
 
     if seg_idx == 1:
         wf = copy.deepcopy(load_workflow(wf_map["initial"]))
@@ -643,7 +637,9 @@ def build_segment_workflow(seg_idx: int, state: Dict[str, Any], ffmpeg: str,
     else:
         adapt_image_conditioning(
             wf, task, state["uploaded_images"], seg_idx,
-            state["segments_total"], model)
+            state["segments_total"])
+
+    _replace_scalar(wf, "{{unet_name}}", model_checkpoint(task, model))
 
     # 对照实验参数必须在 task 适配后应用。
     if state.get("no_lora"):
