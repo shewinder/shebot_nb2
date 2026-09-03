@@ -1,5 +1,7 @@
 """Session 管理模块"""
 import asyncio
+import copy
+import json
 import re
 import shutil
 import threading
@@ -108,19 +110,28 @@ def format_choices_for_display(choices: Dict[int, str]) -> str:
 
 class Session:
     MAX_PENDING_INPUTS = 32
+    SNAPSHOT_VERSION = 1
+    MAX_PERSISTED_MESSAGES = 400
+    MAX_PERSISTED_STRING_LENGTH = 20000
+    INLINE_MEDIA_PATTERN = re.compile(
+        r"data:(?:image|video)/[^;\s]+;base64,[A-Za-z0-9+/=]+"
+    )
 
     def __init__(self, session_id: str, user_id: int,
                  persona: Optional[str] = None, group_id: Optional[int] = None,
-                 register: bool = False):
+                 register: bool = False, persistent: bool = False,
+                 load_existing: bool = False):
         if not session_id or Path(session_id).name != session_id or session_id in {".", ".."}:
             raise ValueError(f"非法 session_id: {session_id!r}")
         self.session_id = session_id
+        self.persistent = persistent
         self.persona = persona
         self.messages: List[Dict[str, Any]] = []
         self.last_active = time.time()
         self.continuous_mode = False
         self._session_dir = ImageStoreCore._resolve_session_dir(session_id)
-        self._clear_session_dir()
+        if not self.persistent:
+            self._clear_session_dir()
         self._image_store = ImageStore(session_id)
         # 视频存储（独立标识符 <ai_video_N> / <user_video_N>，与图片同属 session 目录）
         self._video_store = VideoStoreCore(session_id)
@@ -144,6 +155,10 @@ class Session:
         self._turn_id: Optional[str] = None
         self._pending_inputs: deque[PendingInput] = deque()
         self._pending_sequence = 0
+        self._persistence_lock = threading.Lock()
+
+        if self.persistent and load_existing:
+            self._load_snapshot()
 
         if register:
             session_manager.sessions[self.session_id] = self
@@ -161,6 +176,7 @@ class Session:
         """追加消息到历史"""
         self.messages.append(message)
         self.last_active = time.time()
+        self.save_snapshot()
 
     def add_message(self, role: str, content: Union[str, List[Dict[str, Any]]]):
         """添加标准 user/assistant 消息"""
@@ -174,6 +190,12 @@ class Session:
         """添加完整 API 格式消息（支持 tool_calls、tool 等）"""
         self._append_message(message)
 
+    def set_continuous_mode(self, enabled: bool) -> None:
+        """设置连续对话模式并保存会话状态"""
+        self.continuous_mode = bool(enabled)
+        self.last_active = time.time()
+        self.save_snapshot()
+
     def try_begin_turn(self) -> bool:
         """兼容旧调用方，原子登记当前会话的执行者。"""
         with self._turn_state_lock:
@@ -182,6 +204,7 @@ class Session:
             self._turn_active = True
             self._turn_id = uuid.uuid4().hex[:12]
             self.last_active = time.time()
+            self.save_snapshot()
             return True
 
     def claim_turn_or_enqueue(
@@ -201,6 +224,7 @@ class Session:
                 self._turn_active = True
                 self._turn_id = uuid.uuid4().hex[:12]
                 self.last_active = time.time()
+                self.save_snapshot()
                 return True, None, self._turn_id, preceding
             if len(self._pending_inputs) >= self.MAX_PENDING_INPUTS:
                 return False, None, self._turn_id, []
@@ -215,6 +239,7 @@ class Session:
                 sequence=self._pending_sequence,
             ))
             self.last_active = time.time()
+            self.save_snapshot()
             return False, self._pending_sequence, self._turn_id, []
 
     @property
@@ -253,6 +278,7 @@ class Session:
                 sequence=self._pending_sequence,
             ))
             self.last_active = time.time()
+            self.save_snapshot()
             return self._pending_sequence
 
     def drain_pending_inputs(self) -> List[PendingInput]:
@@ -262,6 +288,7 @@ class Session:
             self._pending_inputs.clear()
             if items:
                 self.last_active = time.time()
+                self.save_snapshot()
             return items
 
     def finish_turn_or_drain_pending_inputs(self) -> Optional[List[PendingInput]]:
@@ -271,9 +298,11 @@ class Session:
                 items = list(self._pending_inputs)
                 self._pending_inputs.clear()
                 self.last_active = time.time()
+                self.save_snapshot()
                 return items
             self._turn_active = False
             self._turn_id = None
+            self.save_snapshot()
             return None
 
     def requeue_pending_inputs(self, items: List[PendingInput]) -> None:
@@ -284,6 +313,7 @@ class Session:
             for item in reversed(items):
                 self._pending_inputs.appendleft(item)
             self.last_active = time.time()
+            self.save_snapshot()
 
     def pending_input_count(self) -> int:
         """返回当前待处理消息数量。"""
@@ -303,16 +333,19 @@ class Session:
         with self._turn_state_lock:
             count = len(self._pending_inputs)
             self._pending_inputs.clear()
+            self.save_snapshot()
             return count
     
     async def store_user_image(self, image_data: str, url: Optional[str] = None) -> str:
         entry = await self._image_store.store(image_data, "user", url=url)
         self.last_active = time.time()
+        self.save_snapshot()
         return entry.identifier
 
     async def store_ai_image(self, image_data: str, url: Optional[str] = None) -> str:
         entry = await self._image_store.store(image_data, "ai", url=url)
         self.last_active = time.time()
+        self.save_snapshot()
         return entry.identifier
     
     def resolve_image_identifier(self, identifier: str) -> Optional[str]:
@@ -329,6 +362,7 @@ class Session:
         """
         entry = self._video_store.store_bytes(data, "ai", "mp4")
         self.last_active = time.time()
+        self.save_snapshot()
         return entry.identifier
 
     async def store_user_video(self, data: bytes, url: Optional[str] = None) -> str:
@@ -338,6 +372,7 @@ class Session:
         """
         entry = self._video_store.store_bytes(data, "user", "mp4", url=url)
         self.last_active = time.time()
+        self.save_snapshot()
         return entry.identifier
 
     def resolve_video_file(self, identifier: str) -> Optional[Path]:
@@ -402,7 +437,129 @@ class Session:
         deleted = len(self.messages) - cut_idx
         del self.messages[cut_idx:]
         self.last_active = time.time()
+        self.save_snapshot()
         return deleted, actual
+
+    def _snapshot_path(self) -> Path:
+        return self._session_dir / "session.json"
+
+    @classmethod
+    def _snapshot_value(cls, value: Any) -> Any:
+        """将消息转换为有界 JSON 值，避免快照包含运行时对象或超大内联媒体。"""
+        if isinstance(value, str):
+            sanitized = cls.INLINE_MEDIA_PATTERN.sub(
+                "[inline media omitted from persisted session]", value
+            )
+            if len(sanitized) > cls.MAX_PERSISTED_STRING_LENGTH:
+                return sanitized[:cls.MAX_PERSISTED_STRING_LENGTH] + "...[truncated]"
+            return sanitized
+        if isinstance(value, dict):
+            return {str(k): cls._snapshot_value(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._snapshot_value(v) for v in value]
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return str(value)[:cls.MAX_PERSISTED_STRING_LENGTH]
+
+    @classmethod
+    def _recover_messages(cls, messages: Any) -> List[Dict[str, Any]]:
+        """恢复消息并丢弃快照末尾未完成的 tool calling 回合。"""
+        if not isinstance(messages, list):
+            return []
+        recovered: List[Dict[str, Any]] = []
+        for message in messages[-cls.MAX_PERSISTED_MESSAGES:]:
+            if not isinstance(message, dict) or not message.get("role"):
+                continue
+            recovered.append(copy.deepcopy(message))
+
+        # 历史长度裁剪可能从 tool 响应中间切入，孤立 tool 消息不能提交给下一次 API 请求。
+        while recovered and recovered[0].get("role") == "tool":
+            recovered.pop(0)
+
+        # 进程可能在工具调用中途退出；这类尾部不能作为下一次 API 请求的历史。
+        pending_call_ids: Set[str] = set()
+        cut_at: Optional[int] = None
+        for index, message in enumerate(recovered):
+            if message.get("role") == "assistant" and message.get("tool_calls"):
+                pending_call_ids = {
+                    str(call.get("id"))
+                    for call in message.get("tool_calls", [])
+                    if isinstance(call, dict) and call.get("id")
+                }
+                cut_at = index
+            elif message.get("role") == "tool" and pending_call_ids:
+                pending_call_ids.discard(str(message.get("tool_call_id", "")))
+                if not pending_call_ids:
+                    cut_at = None
+            elif pending_call_ids and message.get("role") != "tool":
+                break
+        if pending_call_ids and cut_at is not None:
+            recovered = recovered[:cut_at]
+        return recovered
+
+    def _load_snapshot(self) -> None:
+        """加载持久化快照；损坏或旧版本快照按空会话处理。"""
+        path = self._snapshot_path()
+        if not path.exists():
+            return
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                snapshot = json.load(handle)
+            if snapshot.get("version") != self.SNAPSHOT_VERSION:
+                logger.warning(f"{self._tag} 忽略未知版本会话快照: {path}")
+                return
+            self.persona = snapshot.get("persona")
+            self.messages = self._recover_messages(snapshot.get("messages"))
+            self.last_active = float(snapshot.get("last_active", self.last_active))
+            self.continuous_mode = bool(snapshot.get("continuous_mode", False))
+            self.active_skills = {
+                str(name) for name in snapshot.get("active_skills", [])
+                if isinstance(name, str)
+            }
+            self.total_prompt_tokens = int(snapshot.get("total_prompt_tokens", 0) or 0)
+            self.total_completion_tokens = int(snapshot.get("total_completion_tokens", 0) or 0)
+            self.total_tokens = int(snapshot.get("total_tokens", 0) or 0)
+            # 以下运行态明确重置，不从快照恢复。
+            self._turn_active = False
+            self._turn_id = None
+            self._pending_inputs.clear()
+            self._turn_sent_images.clear()
+        except Exception as exc:
+            logger.warning(f"{self._tag} 加载会话快照失败，将使用空会话: {exc}")
+
+    def save_snapshot(self) -> None:
+        """以临时文件原子替换方式保存主会话快照。"""
+        if not self.persistent:
+            return
+        snapshot = {
+            "version": self.SNAPSHOT_VERSION,
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "group_id": self.group_id,
+            "persona": self._snapshot_value(self.persona),
+            "messages": self._snapshot_value(self.messages[-self.MAX_PERSISTED_MESSAGES:]),
+            "last_active": self.last_active,
+            "continuous_mode": self.continuous_mode,
+            "active_skills": sorted(self.active_skills),
+            "total_prompt_tokens": self.total_prompt_tokens,
+            "total_completion_tokens": self.total_completion_tokens,
+            "total_tokens": self.total_tokens,
+        }
+        path = self._snapshot_path()
+        tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        with self._persistence_lock:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with tmp_path.open("w", encoding="utf-8") as handle:
+                    json.dump(snapshot, handle, ensure_ascii=False, separators=(",", ":"))
+                    handle.flush()
+                tmp_path.replace(path)
+            except Exception as exc:
+                logger.warning(f"{self._tag} 保存会话快照失败: {exc}")
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     def dispose(self) -> None:
         """统一清理会话资源：整个 session 目录 + MCP 状态 + 会话锁
@@ -493,6 +650,7 @@ class Session:
         
         self.active_skills.add(skill_name)
         self.last_active = time.time()
+        self.save_snapshot()
         logger.info(f"{self._tag} Session 激活 SKILL: {skill_name}")
         return True, f"SKILL '{skill_name}' 已激活", skill.content
     
@@ -501,6 +659,7 @@ class Session:
         if skill_name in self.active_skills:
             self.active_skills.discard(skill_name)
             self.last_active = time.time()
+            self.save_snapshot()
             return True
         return False
     
@@ -508,6 +667,7 @@ class Session:
         """停用所有 SKILL"""
         self.active_skills.clear()
         self.last_active = time.time()
+        self.save_snapshot()
     
     def is_skill_active(self, skill_name: str) -> bool:
         """检查指定 SKILL 是否已激活"""
@@ -523,6 +683,7 @@ class Session:
         self.total_completion_tokens += completion_tokens
         self.total_tokens += prompt_tokens + completion_tokens
         self.last_active = time.time()
+        self.save_snapshot()
     
 
 
@@ -710,6 +871,31 @@ class SessionManager:
                 logger.info(f"[GC] 清理过期会话 {session_id}")
                 self._remove_session(session_id)
                 removed += 1
+
+        # 重启后尚未懒加载到内存的主会话也需要遵守 session_timeout。
+        base_dir = ImageStoreCore.BASE_DIR.resolve()
+        if conf.session_timeout > 0 and base_dir.exists():
+            for session_dir in base_dir.iterdir():
+                if not session_dir.is_dir() or not (
+                    session_dir.name.startswith("group_")
+                    or session_dir.name.startswith("private_")
+                ):
+                    continue
+                if session_dir.name in self.sessions:
+                    continue
+                snapshot_path = session_dir / "session.json"
+                if not snapshot_path.exists():
+                    continue
+                try:
+                    with snapshot_path.open("r", encoding="utf-8") as handle:
+                        snapshot = json.load(handle)
+                    last_active = float(snapshot.get("last_active", 0))
+                    if last_active and time.time() - last_active > conf.session_timeout:
+                        shutil.rmtree(session_dir)
+                        removed += 1
+                        logger.info(f"[GC] 清理磁盘中的过期会话 {session_dir.name}")
+                except Exception as exc:
+                    logger.warning(f"[GC] 检查磁盘会话失败 {session_dir.name}: {exc}")
         return removed
 
     def get_session_id(self, user_id: int, group_id: Optional[int] = None) -> str:
@@ -728,6 +914,17 @@ class SessionManager:
         """获取已存在且未过期的 session，不存在或过期返回 None"""
         session_id = self.get_session_id(user_id, group_id)
         session = self.sessions.get(session_id)
+        if session is None:
+            snapshot_path = ImageStoreCore._resolve_session_dir(session_id) / "session.json"
+            if snapshot_path.exists():
+                session = Session(
+                    session_id,
+                    user_id,
+                    group_id=group_id,
+                    register=True,
+                    persistent=True,
+                    load_existing=True,
+                )
         if not session:
             return None
         if session.is_expired():
@@ -741,8 +938,20 @@ class SessionManager:
         session_id = self.get_session_id(user_id, group_id)
         if session_id in self.sessions:
             self._remove_session(session_id)
-        session = Session(session_id, user_id, persona=persona, group_id=group_id)
+        else:
+            # 内存已重启但磁盘仍有旧快照时，显式新建代表用户要求重置会话。
+            session_dir = ImageStoreCore._resolve_session_dir(session_id)
+            if session_dir.exists():
+                shutil.rmtree(session_dir)
+        session = Session(
+            session_id,
+            user_id,
+            persona=persona,
+            group_id=group_id,
+            persistent=True,
+        )
         self.sessions[session_id] = session
+        session.save_snapshot()
         return session
     
     def get_or_create_session(self, user_id: int, group_id: Optional[int] = None,
@@ -758,6 +967,13 @@ class SessionManager:
         if session_id in self.sessions:
             self._remove_session(session_id)
             return True
+        session_dir = ImageStoreCore._resolve_session_dir(session_id)
+        if session_dir.exists():
+            try:
+                shutil.rmtree(session_dir)
+                return True
+            except Exception as exc:
+                logger.warning(f"清理磁盘会话失败 {session_id}: {exc}")
         return False
 
 

@@ -16,7 +16,7 @@ async def enter_chat_mode(bot: Bot, event: Event):
 
     persona = persona_manager.get_persona(user_id, group_id)
     session = session_manager.get_or_create_session(user_id, group_id, persona)
-    session.continuous_mode = True
+    session.set_continuous_mode(True)
 
     msg = "已进入连续对话模式！\n现在可以直接发送消息，无需 # 前缀即可与AI对话。\n"
     msg += f"当前人格：{persona[:30]}..." if persona else "当前人格：默认"
@@ -42,7 +42,7 @@ async def exit_chat_mode(bot: Bot, event: Event):
 
     # 退出连续对话模式
     if session:
-        session.continuous_mode = False
+        session.set_continuous_mode(False)
     await exit_chat_mode_cmd.finish("已退出连续对话模式。\n现在需要使用 # 前缀来触发AI对话。")
 
 

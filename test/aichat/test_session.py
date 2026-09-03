@@ -4,6 +4,7 @@
   cd /root/bot/shebot_nb2
   .venv/bin/python test/aichat/test_session.py
 """
+import json
 import sys
 import tempfile
 import threading
@@ -22,7 +23,7 @@ nonebot.init()
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from hoshino.modules.aichat.aichat._image_store_core import ImageStoreCore  # noqa: E402
-from hoshino.modules.aichat.aichat.session import Session, session_manager  # noqa: E402
+from hoshino.modules.aichat.aichat.session import Session, conf as session_module_conf, session_manager  # noqa: E402
 
 
 class FakeImageStore:
@@ -307,6 +308,101 @@ class TestVideoSessionMethods(unittest.IsolatedAsyncioTestCase):
         finally:
             BASE_DIR = old_base
             tmp.cleanup()
+
+
+class TestSessionPersistence(unittest.TestCase):
+    """主会话快照的保存、恢复与运行态隔离。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_base = ImageStoreCore.BASE_DIR
+        ImageStoreCore.BASE_DIR = Path(self.tmp.name)
+        self.user_id = 981234
+        self.group_id = 987654
+        self.session_id = session_manager.get_session_id(self.user_id, self.group_id)
+        session_manager.sessions.pop(self.session_id, None)
+
+    def tearDown(self):
+        session_manager.sessions.pop(self.session_id, None)
+        ImageStoreCore.BASE_DIR = self.old_base
+        self.tmp.cleanup()
+
+    def test_main_session_survives_manager_restart(self):
+        session = session_manager.create_session(
+            self.user_id,
+            self.group_id,
+            persona="测试人格",
+        )
+        session.add_message("user", "你好")
+        session.add_raw_message({"role": "assistant", "content": "你好！"})
+        session.set_continuous_mode(True)
+        session.add_tokens(12, 8)
+
+        session_manager.sessions.pop(self.session_id)
+        restored = session_manager.get_session(self.user_id, self.group_id)
+
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        self.assertEqual(restored.persona, "测试人格")
+        self.assertEqual(restored.messages[-1]["content"], "你好！")
+        self.assertTrue(restored.continuous_mode)
+        self.assertEqual(restored.total_tokens, 20)
+        self.assertFalse(restored.turn_active)
+        self.assertEqual(restored.pending_input_count(), 0)
+
+    def test_incomplete_tool_call_tail_is_not_restored(self):
+        session = session_manager.create_session(self.user_id, self.group_id)
+        session.add_message("user", "执行任务")
+        session.add_raw_message({
+            "role": "assistant",
+            "tool_calls": [{"id": "call_1", "type": "function"}],
+            "content": None,
+        })
+
+        session_manager.sessions.pop(self.session_id)
+        restored = session_manager.get_session(self.user_id, self.group_id)
+
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        self.assertEqual([m["role"] for m in restored.messages], ["user"])
+
+    def test_corrupt_snapshot_falls_back_to_empty_session(self):
+        session_dir = ImageStoreCore._resolve_session_dir(self.session_id)
+        session_dir.mkdir(parents=True)
+        (session_dir / "session.json").write_text("{not-json", encoding="utf-8")
+
+        restored = session_manager.get_session(self.user_id, self.group_id)
+
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        self.assertEqual(restored.messages, [])
+
+    def test_snapshot_is_versioned_json(self):
+        session = session_manager.create_session(self.user_id, self.group_id)
+        payload = json.loads((session.session_dir / "session.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["version"], session.SNAPSHOT_VERSION)
+        self.assertEqual(payload["session_id"], self.session_id)
+
+    def test_sweep_removes_expired_unloaded_snapshot(self):
+        session = session_manager.create_session(self.user_id, self.group_id)
+        session.last_active = 1
+        session.save_snapshot()
+        session_manager.sessions.pop(self.session_id)
+
+        old_timeout = session_module_conf.session_timeout
+        session_module_conf.session_timeout = 1
+        try:
+            self.assertEqual(session_manager._sweep(), 1)
+            self.assertFalse(session.session_dir.exists())
+        finally:
+            session_module_conf.session_timeout = old_timeout
+
+    def test_clear_session_removes_unloaded_snapshot(self):
+        session = session_manager.create_session(self.user_id, self.group_id)
+        session_manager.sessions.pop(self.session_id)
+
+        self.assertTrue(session_manager.clear_session(self.user_id, self.group_id))
+        self.assertFalse(session.session_dir.exists())
 
 
 if __name__ == "__main__":

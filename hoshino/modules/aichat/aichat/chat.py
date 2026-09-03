@@ -427,6 +427,7 @@ async def _run_chat(
         )
     except Exception:
         del session.messages[history_checkpoint:]
+        session.save_snapshot()
         raise
     if not should_invoke:
         return True
@@ -475,6 +476,7 @@ async def _run_chat(
     except Exception:
         # 媒体准备或 API 编排异常时，回滚本批次并保留已吸收的插入消息。
         del session.messages[history_checkpoint:]
+        session.save_snapshot()
         session.requeue_pending_inputs(absorbed_pending)
         raise
 
@@ -484,6 +486,7 @@ async def _run_chat(
     if api_result.error and not api_result.content:
         # 仅回滚本批次；插入消息重新入队，等待下一次可用回合。
         del session.messages[history_checkpoint:]
+        session.save_snapshot()
         session.requeue_pending_inputs(absorbed_pending)
         await bot.send(event, f"AI服务暂时不可用，请稍后再试\n错误: {api_result.error}")
         return False
