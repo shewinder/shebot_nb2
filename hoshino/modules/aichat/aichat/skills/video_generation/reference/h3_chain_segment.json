@@ -398,7 +398,7 @@
     0
    ],
    "sigmas": [
-    "84",
+    "85",
     0
    ],
    "latent_image": [
@@ -433,6 +433,19 @@
     7
    ],
    "denoise": 1.0
+  }
+ },
+ "85": {
+  "class_type": "H3SigmaRefiner",
+  "inputs": {
+   "sigmas": [
+    "84",
+    0
+   ],
+   "extra_steps": 8,
+   "start_at_sigma": 0.7,
+   "end_at_sigma": 0.0,
+   "spacing": "cosine"
   }
  }
 }

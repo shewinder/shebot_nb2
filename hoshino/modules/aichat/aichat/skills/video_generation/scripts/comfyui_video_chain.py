@@ -669,7 +669,7 @@ def main() -> None:
     parser.add_argument("--aspect-ratio", default="16:9", help="t2v 画幅，默认 16:9")
     parser.add_argument("--resolution", choices=list(RESOLUTION_PIXELS.keys()), default="480p")
     parser.add_argument("--noise", choices=["on", "off"], default="on")
-    parser.add_argument("--steps", type=int, default=4)
+    parser.add_argument("--steps", type=int, default=8)
     parser.add_argument("--no-lora", action="store_true")
     parser.add_argument("--legacy-sampler", action="store_true")
     parser.add_argument("--keep-audio", action="store_true")

@@ -101,7 +101,7 @@ H3_MAX_FRAMES = 362  # 官方训练范围 124-362（5-15 秒）
 DEFAULT_STEPS = {
     "t2v": 8,   # turbo v4（4-8 步有效，8 步最稳）
     "i2v": 8,   # turbo v4（4-8 步有效，8 步最稳）
-    "ref": 4,   # ref2v_turbo_4step
+    "ref": 8,   # 统一 8 步（高动态防 motion-smear）
 }
 
 

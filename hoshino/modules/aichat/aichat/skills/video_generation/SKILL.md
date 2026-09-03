@@ -97,7 +97,7 @@ non_diegetic_music: 背景音乐描述……
 --guides "0,2.5,5"     # i2v 多图锚定时间点（秒，与图片数一致；缺省自动均分）
 --anchor first|last    # i2v 单图锚定位置（默认 first；last=图片作为视频尾帧）
 --aspect-ratio W:H     # ref 指定画幅（如 16:9、3:4；拼接参考图必填，见"拼接参考图"章节）
---steps N              # 采样步数（默认按任务与加速 LoRA 匹配：ref=4、t2v/i2v=8；一般不用改）
+--steps N              # 采样步数（默认全部 8 步；高动态/快速动作场景务必保持 8 步，4 步会出现运动模糊，不要手动传 4）
 --lora-strength 0-1    # MysticXXX LoRA 强度（t2v/i2v/ref 生效；0=关闭该 LoRA，默认 0.5；ref 用 ref2va 版）
 --latent-upscale       # 两阶段 latent 超分（t2v/i2v/ref）：低清生成→latent 放大→精炼，直接产出高清（见"超分"章节）
 --latent-scale 1-4     # latent 放大倍数（配合 --latent-upscale 使用，默认 2）
@@ -331,7 +331,7 @@ non_diegetic_music: <全英文>
 - 源视频自动转 24fps 并按窗口切片（每段用对应时间片）；30fps 源无需预处理
 - 源视频自动按 124 帧窗口规划，脚本会用窗口帧数覆盖 `plan-json` 中的 `length`；场景数量决定最多处理多少个源视频窗口
 - `--keep-audio`：成片保留源视频原音轨（BGM/对白，时间轴 1:1 对齐；注意对白是原角色的声音）；声音字段仅作画面声效参考
-- 时长：场景数 × 2-7 分钟（720×960 4 步）
+- 时长：场景数 × 3-8 分钟（默认 8 步 turbo v4；取决于分辨率档位）
 
 ## 超分（可选，默认不执行）
 
