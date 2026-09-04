@@ -97,11 +97,9 @@ async def handle_ai_chat(bot: Bot, event: Event):
     user_id = event.user_id
     group_id = getattr(event, 'group_id', None)
 
-    # 先检查是否有活跃 session（不创建）
-    session = session_manager.get_session(user_id, group_id)
-    in_continuous_mode = session.continuous_mode if session else False
-
     if msg.startswith('#'):
+        # 明确触发 aichat 时，超时快照才会按默认语义清理并新建会话。
+        session = session_manager.get_session(user_id, group_id)
         user_input = msg[1:].strip()
         # 检查快捷指令（支持参数覆盖，如 #角色扮演 model=WAI-illustrious）
         shortcut_name = user_input.split()[0] if user_input else ""
@@ -119,10 +117,11 @@ async def handle_ai_chat(bot: Bot, event: Event):
             if rendered:
                 user_input = rendered
                 logger.info(f"触发快捷指令「{shortcut.name}」")
-    elif in_continuous_mode:
-        user_input = msg
     else:
-        return
+        session = session_manager.get_continuous_session(user_id, group_id)
+        if session is None:
+            return
+        user_input = msg
 
     api_config = api_manager.get_api_config()
     if not api_config or not api_config.get("api_key"):
@@ -150,7 +149,7 @@ async def handle_ai_chat(bot: Bot, event: Event):
 
     persona = persona_manager.get_persona(user_id, group_id)
     # 同步获取或创建，避免并发首消息在检查与创建之间覆盖会话。
-    session = session_manager.get_or_create_session(user_id, group_id, persona)
+    session = session or session_manager.get_or_create_session(user_id, group_id, persona)
 
     is_owner, sequence, turn_id, preceding = session.claim_turn_or_enqueue(
         user_input, image_urls, video_urls, bot, event, msg,

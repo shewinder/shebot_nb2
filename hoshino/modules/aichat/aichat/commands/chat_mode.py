@@ -20,7 +20,7 @@ async def enter_chat_mode(bot: Bot, event: Event):
 
     msg = "已进入连续对话模式！\n现在可以直接发送消息，无需 # 前缀即可与AI对话。\n"
     msg += f"当前人格：{persona[:30]}..." if persona else "当前人格：默认"
-    msg += "\n\n提示：\n- 发送「退出对话模式」退出此模式\n- 发送「清除对话」清空当前对话历史\n- session过期后将自动退出此模式"
+    msg += "\n\n提示：\n- 发送「退出对话模式」退出此模式\n- 发送「清除对话」清空当前对话历史\n- session 超时后可发送「恢复对话」继续"
 
     await enter_chat_mode_cmd.finish(msg)
 
@@ -69,6 +69,35 @@ clear_cmd = sv.on_command(
     only_group=False,
     block=True,
 )
+
+
+resume_cmd = sv.on_command(
+    '恢复对话',
+    aliases=('恢复上下文', '继续上次对话'),
+    only_group=False,
+    block=True,
+)
+
+
+@resume_cmd.handle()
+async def resume_session(bot: Bot, event: Event):
+    user_id = event.user_id
+    group_id = getattr(event, 'group_id', None)
+
+    session, status = session_manager.resume_expired_session(user_id, group_id)
+    if status == "missing":
+        await resume_cmd.finish("没有找到可恢复的对话")
+        return
+    if status == "invalid":
+        await resume_cmd.finish("对话快照已损坏，无法恢复")
+        return
+    if status == "active":
+        await resume_cmd.finish("当前对话尚未超时，无需恢复")
+        return
+
+    assert session is not None
+    mode_hint = "可以直接继续发送消息" if session.continuous_mode else "请使用 # 前缀继续对话"
+    await resume_cmd.finish(f"已恢复上次对话，共 {len(session.messages)} 条历史消息；{mode_hint}")
 
 
 @clear_cmd.handle()
@@ -142,7 +171,7 @@ async def query_token(bot: Bot, event: Event):
     session = session_manager.get_session(user_id, group_id)
 
     if not session or session.total_tokens == 0:
-        await query_token_cmd.finish("📊 当前会话暂无 token 使用记录\n\n提示：\n- 请先与 AI 进行对话\n- Token 统计在 session 过期后重置")
+        await query_token_cmd.finish("📊 当前会话暂无 token 使用记录\n\n提示：\n- 请先与 AI 进行对话\n- 超时后可发送「恢复对话」保留原统计")
         return
 
     lines = [
@@ -150,7 +179,7 @@ async def query_token(bot: Bot, event: Event):
         f"💬 输入 Token：{session.total_prompt_tokens:,}",
         f"🤖 输出 Token：{session.total_completion_tokens:,}",
         f"📈 总计 Token：{session.total_tokens:,}",
-        "\n注：Token 统计在 session 过期后重置",
+        "\n注：超时后普通触发会重置统计，发送「恢复对话」可保留",
     ]
 
     # 全局统计（自进程启动以来）

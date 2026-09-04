@@ -156,6 +156,7 @@ class Session:
         self._pending_inputs: deque[PendingInput] = deque()
         self._pending_sequence = 0
         self._persistence_lock = threading.Lock()
+        self._snapshot_loaded = False
 
         if self.persistent and load_existing:
             self._load_snapshot()
@@ -519,6 +520,7 @@ class Session:
             self.total_prompt_tokens = int(snapshot.get("total_prompt_tokens", 0) or 0)
             self.total_completion_tokens = int(snapshot.get("total_completion_tokens", 0) or 0)
             self.total_tokens = int(snapshot.get("total_tokens", 0) or 0)
+            self._snapshot_loaded = True
             # 以下运行态明确重置，不从快照恢复。
             self._turn_active = False
             self._turn_id = None
@@ -554,6 +556,7 @@ class Session:
                     json.dump(snapshot, handle, ensure_ascii=False, separators=(",", ":"))
                     handle.flush()
                 tmp_path.replace(path)
+                self._snapshot_loaded = True
             except Exception as exc:
                 logger.warning(f"{self._tag} 保存会话快照失败: {exc}")
                 try:
@@ -577,13 +580,19 @@ class Session:
         except Exception:
             logger.exception(f"{self._tag} 清理视频缓存失败")
 
-        self.clear_pending_inputs()
-        self.end_turn()
+        self.release_runtime()
 
         try:
             self._clear_session_dir()
         except Exception:
             logger.exception(f"{self._tag} 清理会话目录失败")
+
+    def release_runtime(self) -> None:
+        """释放进程内运行态，保留会话快照和媒体文件。"""
+        with self._turn_state_lock:
+            self._pending_inputs.clear()
+            self._turn_active = False
+            self._turn_id = None
 
         mcp_sm = get_mcp_session_manager()
         if mcp_sm is not None:
@@ -592,7 +601,7 @@ class Session:
             except Exception:
                 pass
 
-        # 会话锁在会话销毁后不再需要（持锁中的任务持有的仍是原 Lock 引用，安全）
+        # 持锁中的任务仍持有原 Lock 引用；这里只移除后续查找入口。
         _session_locks.pop(self.session_id, None)
 
     def _clear_session_dir(self) -> None:
@@ -840,7 +849,7 @@ class SessionManager:
     # ========== 生命周期 GC ==========
 
     def start_gc(self, interval: int = 300) -> None:
-        """启动周期 GC 任务（幂等），清理过期会话"""
+        """启动周期 GC 任务（幂等），卸载过期会话的运行态。"""
         if self._gc_task is not None and not self._gc_task.done():
             return
         self._gc_task = asyncio.create_task(self._gc_loop(interval))
@@ -861,41 +870,16 @@ class SessionManager:
             self._sweep()
 
     def _sweep(self) -> int:
-        """清理过期的用户会话；任务会话（bg/sub/agent）由各自 finally 自清理，跳过"""
+        """卸载过期主会话的运行态，快照留待下次触发或手动恢复。"""
         removed = 0
         for session_id in list(self.sessions.keys()):
             if not (session_id.startswith("group_") or session_id.startswith("private_")):
                 continue
             session = self.sessions[session_id]
             if session.is_expired():
-                logger.info(f"[GC] 清理过期会话 {session_id}")
-                self._remove_session(session_id)
+                logger.info(f"[GC] 卸载过期会话 {session_id}，保留持久化快照")
+                self._unload_session(session_id)
                 removed += 1
-
-        # 重启后尚未懒加载到内存的主会话也需要遵守 session_timeout。
-        base_dir = ImageStoreCore.BASE_DIR.resolve()
-        if conf.session_timeout > 0 and base_dir.exists():
-            for session_dir in base_dir.iterdir():
-                if not session_dir.is_dir() or not (
-                    session_dir.name.startswith("group_")
-                    or session_dir.name.startswith("private_")
-                ):
-                    continue
-                if session_dir.name in self.sessions:
-                    continue
-                snapshot_path = session_dir / "session.json"
-                if not snapshot_path.exists():
-                    continue
-                try:
-                    with snapshot_path.open("r", encoding="utf-8") as handle:
-                        snapshot = json.load(handle)
-                    last_active = float(snapshot.get("last_active", 0))
-                    if last_active and time.time() - last_active > conf.session_timeout:
-                        shutil.rmtree(session_dir)
-                        removed += 1
-                        logger.info(f"[GC] 清理磁盘中的过期会话 {session_dir.name}")
-                except Exception as exc:
-                    logger.warning(f"[GC] 检查磁盘会话失败 {session_dir.name}: {exc}")
         return removed
 
     def get_session_id(self, user_id: int, group_id: Optional[int] = None) -> str:
@@ -909,28 +893,100 @@ class SessionManager:
         if session is not None:
             logger.debug(f"[_remove_session] session={session_id} 已从内存中删除")
             session.dispose()
+
+    def _unload_session(self, session_id: str) -> None:
+        """从内存卸载会话并释放运行态，不删除快照和媒体。"""
+        session = self.sessions.pop(session_id, None)
+        if session is not None:
+            session.release_runtime()
+
+    def _load_persisted_session(
+        self,
+        user_id: int,
+        group_id: Optional[int] = None,
+    ) -> Optional[Session]:
+        session_id = self.get_session_id(user_id, group_id)
+        snapshot_path = ImageStoreCore._resolve_session_dir(session_id) / "session.json"
+        if not snapshot_path.exists():
+            return None
+        return Session(
+            session_id,
+            user_id,
+            group_id=group_id,
+            persistent=True,
+            load_existing=True,
+        )
     
     def get_session(self, user_id: int, group_id: Optional[int] = None) -> Optional[Session]:
-        """获取已存在且未过期的 session，不存在或过期返回 None"""
+        """获取活跃 session；过期时仅卸载运行态，保留可恢复快照。"""
         session_id = self.get_session_id(user_id, group_id)
         session = self.sessions.get(session_id)
+        loaded = False
         if session is None:
-            snapshot_path = ImageStoreCore._resolve_session_dir(session_id) / "session.json"
-            if snapshot_path.exists():
-                session = Session(
-                    session_id,
-                    user_id,
-                    group_id=group_id,
-                    register=True,
-                    persistent=True,
-                    load_existing=True,
-                )
+            session = self._load_persisted_session(user_id, group_id)
+            loaded = session is not None
         if not session:
             return None
+        if loaded and not session._snapshot_loaded:
+            session.release_runtime()
+            return None
+        if session.is_expired():
+            if loaded:
+                session.release_runtime()
+            else:
+                self._unload_session(session_id)
+            return None
+        self.sessions[session_id] = session
+        return session
+
+    def get_continuous_session(
+        self,
+        user_id: int,
+        group_id: Optional[int] = None,
+    ) -> Optional[Session]:
+        """仅为连续模式探测会话，普通消息不会清理非连续的过期快照。"""
+        session_id = self.get_session_id(user_id, group_id)
+        session = self.sessions.get(session_id)
+        loaded = False
+        if session is None:
+            session = self._load_persisted_session(user_id, group_id)
+            loaded = session is not None
+        if session is None or not session._snapshot_loaded and loaded:
+            return None
+        if not session.continuous_mode:
+            if loaded:
+                session.release_runtime()
+            return None
+        self.sessions[session_id] = session
         if session.is_expired():
             self._remove_session(session_id)
             return None
         return session
+
+    def resume_expired_session(
+        self,
+        user_id: int,
+        group_id: Optional[int] = None,
+    ) -> Tuple[Optional[Session], str]:
+        """恢复超时会话，返回 (session, resumed|active|missing|invalid)。"""
+        session_id = self.get_session_id(user_id, group_id)
+        session = self.sessions.get(session_id)
+        if session is None:
+            session = self._load_persisted_session(user_id, group_id)
+        if session is None:
+            return None, "missing"
+        if not session._snapshot_loaded:
+            session.release_runtime()
+            return None, "invalid"
+        if not session.is_expired():
+            self.sessions[session_id] = session
+            return session, "active"
+
+        session.last_active = time.time()
+        session.save_snapshot()
+        self.sessions[session_id] = session
+        logger.info(f"恢复超时会话 {session_id}")
+        return session, "resumed"
     
     def create_session(self, user_id: int, group_id: Optional[int] = None,
                        persona: Optional[str] = None) -> Session:

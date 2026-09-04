@@ -366,16 +366,21 @@ class TestSessionPersistence(unittest.TestCase):
         assert restored is not None
         self.assertEqual([m["role"] for m in restored.messages], ["user"])
 
-    def test_corrupt_snapshot_falls_back_to_empty_session(self):
+    def test_corrupt_snapshot_is_not_loaded_as_active_session(self):
         session_dir = ImageStoreCore._resolve_session_dir(self.session_id)
         session_dir.mkdir(parents=True)
         (session_dir / "session.json").write_text("{not-json", encoding="utf-8")
 
         restored = session_manager.get_session(self.user_id, self.group_id)
 
-        self.assertIsNotNone(restored)
-        assert restored is not None
-        self.assertEqual(restored.messages, [])
+        self.assertIsNone(restored)
+        self.assertNotIn(self.session_id, session_manager.sessions)
+
+        restored, status = session_manager.resume_expired_session(
+            self.user_id, self.group_id
+        )
+        self.assertIsNone(restored)
+        self.assertEqual(status, "invalid")
 
     def test_snapshot_is_versioned_json(self):
         session = session_manager.create_session(self.user_id, self.group_id)
@@ -383,7 +388,67 @@ class TestSessionPersistence(unittest.TestCase):
         self.assertEqual(payload["version"], session.SNAPSHOT_VERSION)
         self.assertEqual(payload["session_id"], self.session_id)
 
-    def test_sweep_removes_expired_unloaded_snapshot(self):
+    def test_sweep_unloads_expired_session_but_keeps_snapshot(self):
+        session = session_manager.create_session(self.user_id, self.group_id)
+        session.add_message("user", "等待恢复")
+        session.last_active = 1
+        session.save_snapshot()
+
+        old_timeout = session_module_conf.session_timeout
+        session_module_conf.session_timeout = 1
+        try:
+            self.assertEqual(session_manager._sweep(), 1)
+            self.assertNotIn(self.session_id, session_manager.sessions)
+            self.assertTrue((session.session_dir / "session.json").exists())
+        finally:
+            session_module_conf.session_timeout = old_timeout
+
+    def test_next_aichat_trigger_replaces_expired_snapshot(self):
+        session = session_manager.create_session(self.user_id, self.group_id)
+        session.add_message("user", "即将过期")
+        session.last_active = 1
+        session.save_snapshot()
+        session_manager.sessions.pop(self.session_id)
+
+        old_timeout = session_module_conf.session_timeout
+        session_module_conf.session_timeout = 1
+        try:
+            self.assertIsNone(session_manager.get_session(self.user_id, self.group_id))
+            self.assertTrue((session.session_dir / "session.json").exists())
+
+            replacement = session_manager.get_or_create_session(
+                self.user_id, self.group_id
+            )
+            self.assertEqual(replacement.messages, [])
+            self.assertTrue((replacement.session_dir / "session.json").exists())
+        finally:
+            session_module_conf.session_timeout = old_timeout
+
+    def test_resume_expired_session_preserves_history_and_mode(self):
+        session = session_manager.create_session(self.user_id, self.group_id)
+        session.add_message("user", "继续这个话题")
+        session.set_continuous_mode(True)
+        session.last_active = 1
+        session.save_snapshot()
+        session_manager.sessions.pop(self.session_id)
+
+        old_timeout = session_module_conf.session_timeout
+        session_module_conf.session_timeout = 1
+        try:
+            restored, status = session_manager.resume_expired_session(
+                self.user_id, self.group_id
+            )
+            self.assertEqual(status, "resumed")
+            self.assertIsNotNone(restored)
+            assert restored is not None
+            self.assertEqual(restored.messages[-1]["content"], "继续这个话题")
+            self.assertTrue(restored.continuous_mode)
+            self.assertFalse(restored.is_expired())
+            self.assertTrue((restored.session_dir / "session.json").exists())
+        finally:
+            session_module_conf.session_timeout = old_timeout
+
+    def test_plain_message_probe_keeps_non_continuous_expired_snapshot(self):
         session = session_manager.create_session(self.user_id, self.group_id)
         session.last_active = 1
         session.save_snapshot()
@@ -392,8 +457,10 @@ class TestSessionPersistence(unittest.TestCase):
         old_timeout = session_module_conf.session_timeout
         session_module_conf.session_timeout = 1
         try:
-            self.assertEqual(session_manager._sweep(), 1)
-            self.assertFalse(session.session_dir.exists())
+            self.assertIsNone(
+                session_manager.get_continuous_session(self.user_id, self.group_id)
+            )
+            self.assertTrue((session.session_dir / "session.json").exists())
         finally:
             session_module_conf.session_timeout = old_timeout
 
