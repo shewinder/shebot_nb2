@@ -50,11 +50,11 @@ class ToolResult(TypedDict, total=False):
 
     使用辅助函数 ok() 和 fail() 创建，避免手写重复字典
 
-    图片发送机制：在 content 中包含图片标识符（如 <ai_image_1>），
-    系统会自动识别并发送对应图片。
+    媒体标识符是给 AI 和工具使用的内部句柄。只有回复中的显式
+    [[send_image:ai_image_1]] / [[send_video:ai_video_1]] 标记会发送媒体。
 
     Example:
-        return ok("图片已生成 <ai_image_1>", metadata={"id": 1})
+        return ok("图片已生成，内部句柄：<ai_image_1>", metadata={"id": 1})
         return fail("API 调用失败")
     """
     success: bool
@@ -67,15 +67,15 @@ def ok(content: str, metadata: Optional[Dict[str, Any]] = None) -> ToolResult:
     """创建成功的工具返回结果
 
     Args:
-        content: 给 AI 看的结果描述。如需发送图片，请在 content 中包含标识符
-                （如 "已生成图片 <ai_image_1>"），系统会自动识别并发送。
+        content: 给 AI 看的结果描述。媒体句柄应作为内部引用返回，是否发送
+            由 AI 在回复中使用显式 [[send_*:句柄]] 标记决定。
         metadata: 额外元数据（可选）
 
     Returns:
         ToolResult 字典
 
     Example:
-        # 在 content 中包含标识符来发送图片
+        # 返回内部句柄，是否发送由显式发送标记决定
         return ok("已成功生成图片 <ai_image_1>")
 
         # 多个图片

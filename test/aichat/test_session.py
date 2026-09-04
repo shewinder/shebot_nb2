@@ -248,14 +248,15 @@ class TestImageStoreCore(unittest.TestCase):
 
 
 class TestMediaPrompt(unittest.TestCase):
-    def test_media_identifiers_are_restricted_to_explicit_delivery(self):
+    def test_media_delivery_depends_only_on_explicit_syntax(self):
         prompt = Session.build_image_rules_prompt()
 
-        self.assertIn("只有在用户明确要求发送、展示或重新发送某个媒体", prompt)
-        self.assertIn("分析、描述、比较、确认收到图片或视频时", prompt)
-        self.assertIn("调用工具或子 Agent 时，可以按工具参数要求传入媒体标识符", prompt)
-        self.assertIn("删除回复中的所有图片和视频标识符", prompt)
-        self.assertNotIn("这是<user_image_1>，一只可爱的猫", prompt)
+        self.assertIn("媒体是否发送只由下列显式语法决定", prompt)
+        self.assertIn("[[send_image:ai_image_N]]", prompt)
+        self.assertIn("[[send_video:ai_video_N]]", prompt)
+        self.assertIn("裸句柄", prompt)
+        self.assertNotIn("最终回复", prompt)
+        self.assertNotIn("中间回复", prompt)
 
 
 class TestVideoStoreCore(unittest.TestCase):

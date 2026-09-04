@@ -1,6 +1,6 @@
 """视频分析工具：抽取临时帧并交给 vision subagent 分析。
 
-抽取帧只存在于本次 API 请求的内存中，不写入 ImageStore，因此不会触发回复管道的图片自动补发。
+抽取帧只存在于本次 API 请求的内存中，不写入 ImageStore，也不会产生可发送的图片句柄。
 """
 import asyncio
 import base64

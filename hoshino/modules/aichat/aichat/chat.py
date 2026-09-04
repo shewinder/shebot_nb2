@@ -80,7 +80,7 @@ async def send_response(
     enable_markdown: bool = False,
     markdown_min_length: int = 100,
 ) -> bool:
-    """统一发送 AI 回复内容，支持 Markdown 渲染、图片提取和图片标识符"""
+    """统一发送 AI 回复内容，支持 Markdown 渲染和显式媒体发送标记"""
     return await send_ai_response(
         content, session,
         group_id=getattr(event, 'group_id', None),
@@ -436,7 +436,7 @@ async def _run_chat(
             await send_response(
                 bot, event, content, session,
                 enable_markdown=conf.enable_markdown_render,
-                markdown_min_length=conf.markdown_min_length
+                markdown_min_length=conf.markdown_min_length,
             )
 
     async def before_next_request() -> List[Dict[str, Any]]:
@@ -479,8 +479,7 @@ async def _run_chat(
         session.requeue_pending_inputs(absorbed_pending)
         raise
 
-    # 工具图片输出已由 send_response 通过标识符处理，无需重复发送
-    # 注意：旧版 _image_urls 机制已废弃，请使用标识符机制 <ai_image_N>
+    # 媒体通过 [[send_*:...]] 显式交付，所有回复阶段使用同一规则。
 
     if api_result.error and not api_result.content:
         # 仅回滚本批次；插入消息重新入队，等待下一次可用回合。

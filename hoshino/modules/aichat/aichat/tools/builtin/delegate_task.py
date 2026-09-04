@@ -140,7 +140,7 @@ async def delegate_task(
             preactivate_skills=preactivate_skills or [],
         ))
 
-        # 把子会话图片重定位到父会话命名空间（含兜底补发），再释放子会话资源
+        # 把子会话媒体引用重定位到父会话命名空间，再释放子会话资源
         content = await rehome_images(agent_result, session)
         agent_result.session.dispose()
 

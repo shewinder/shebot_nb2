@@ -25,7 +25,7 @@ execute_script(skill_name="magnet-download", script_path="scripts/analyze.py",
                args=["magnet:?xt=urn:btih:xxx"])
 ```
 
-返回种子名称、大小、文件数、类型，以及 `screenshots` 数组（含 `<ai_image_N>` 标识符，图片已自动存储好，可直接引用）。
+返回种子名称、大小、文件数、类型，以及 `screenshots` 数组（含 `<ai_image_N>` 内部句柄，图片已自动存储好）。
 
 截图默认使用中等模糊半径 `6.0`，并在边缘加入少量随机像素扰动，确保每次处理后的文件哈希变化。可通过环境变量 `MAGNET_SCREENSHOT_BLUR_RADIUS` 调整默认值。单次验车可用 `--blur-radius` 覆盖，传 `0` 表示关闭模糊：
 
@@ -67,7 +67,7 @@ AI：[调用 analyze.py 验车]
     总大小: 8.50 GB
     文件数: 3
     Hash: abc123...
-    📸 截图: <ai_image_1> <ai_image_2> <ai_image_3>
+    📸 截图: [[send_image:ai_image_1]] [[send_image:ai_image_2]] [[send_image:ai_image_3]]
 
     要下载吗？
 

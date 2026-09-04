@@ -11,9 +11,10 @@
 - finally 中用 is 校验实例后才解除注册，双保险；
 - AgentResult 保留已解注册的子会话对象，供调用方发图/重定位/dispose。
 """
+import re
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -22,7 +23,7 @@ from .api import _build_api_config_dict, api_manager
 from .chat_executor import ChatExecutor, ChatResult
 from .config import Config
 from .infra import AppError
-from .reply import IMAGE_TOKEN_RE
+from .reply import MEDIA_TOKEN_RE, SEND_TOKEN_RE
 from .session import Session, session_manager
 
 conf = Config.get_instance('aichat')
@@ -266,59 +267,92 @@ async def _copy_image_to_parent(
     return await parent.store_ai_image(data_url, url=url)
 
 
+async def _copy_video_to_parent(
+    child: Session, parent: Session, identifier: str
+) -> Optional[str]:
+    """把子会话视频拷贝到父会话，返回父会话新标识符；失败返回 None"""
+    file_path = child.resolve_video_file(identifier)
+    if not file_path:
+        return None
+    try:
+        data = file_path.read_bytes()
+    except Exception:
+        return None
+    entry = child._video_store.get(identifier)
+    url = entry.url if entry else None
+    source = entry.source if entry else "ai"
+    if source == "user":
+        return await parent.store_user_video(data, url=url)
+    return await parent.store_ai_video_bytes(data)
+
+
 async def _rehome_one(
-    agent_result: AgentResult, parent: Session, identifier: str
+    agent_result: AgentResult,
+    parent: Session,
+    identifier: str,
+    media_kind: str = "image",
 ) -> str:
     """重定位单个标识符：溯源映射命中 → 零拷贝；否则拷贝；失败降级为占位符"""
-    if identifier in agent_result.image_map:
+    if media_kind == "image" and identifier in agent_result.image_map:
         return agent_result.image_map[identifier]
 
-    new_id = await _copy_image_to_parent(agent_result.session, parent, identifier)
+    if media_kind == "video":
+        new_id = await _copy_video_to_parent(agent_result.session, parent, identifier)
+    else:
+        new_id = await _copy_image_to_parent(agent_result.session, parent, identifier)
     if new_id:
         return new_id
 
-    logger.warning(f"[AgentLoop] 图片重定位失败，降级为占位符: {identifier}")
-    return "[图片]"
+    placeholder = "[视频]" if media_kind == "video" else "[图片]"
+    logger.warning(f"[AgentLoop] 媒体重定位失败，降级为占位符: {identifier}")
+    return placeholder
 
 
 async def rehome_images(
     agent_result: AgentResult,
     parent: Session,
-    *,
-    auto_attach: bool = True,
 ) -> str:
-    """把子 Agent 结果文本中的图片标识符重定位到父会话命名空间
+    """把子 Agent 结果文本中的媒体标识符重定位到父会话命名空间
 
-    返回重写后的文本。子会话中"本轮创建但未被引用"的 ai 图片
-    在 auto_attach=True 时一并拷贝并追加（兜底补发）。
+    返回重写后的文本。裸句柄只重定位，显式发送标记重定位后保留发送语义。
+    未被引用的媒体不会自动追加。
     """
     content = agent_result.result.content or ""
-    child = agent_result.session
-    referenced: Set[str] = set()
-
     parts: List[str] = []
     pos = 0
-    for m in IMAGE_TOKEN_RE.finditer(content):
+    relocated_media: Dict[Tuple[str, str], str] = {}
+    rehome_re = re.compile(
+        SEND_TOKEN_RE.pattern + r"|" + MEDIA_TOKEN_RE.pattern,
+        re.IGNORECASE,
+    )
+    for m in rehome_re.finditer(content):
         parts.append(content[pos:m.start()])
-        norm = f"<{m.group(1)}>"
-        parts.append(await _rehome_one(agent_result, parent, norm))
-        referenced.add(norm)
+        if m.group(1):
+            media_kind = m.group(1).lower()
+            norm = f"<{m.group(2).lower()}>"
+            is_video = "_video_" in norm
+            expected_kind = "video" if is_video else "image"
+            if media_kind != expected_kind:
+                parts.append("[视频]" if is_video else "[图片]")
+            else:
+                cache_key = (media_kind, norm)
+                relocated = relocated_media.get(cache_key)
+                if relocated is None:
+                    relocated = await _rehome_one(agent_result, parent, norm, media_kind)
+                    relocated_media[cache_key] = relocated
+                if relocated.startswith("["):
+                    parts.append(relocated)
+                else:
+                    parts.append(f"[[send_{media_kind}:{relocated.strip('<>')}]]")
+        else:
+            norm = f"<{m.group(3).lower()}>"
+            media_kind = "video" if "_video_" in norm else "image"
+            cache_key = (media_kind, norm)
+            relocated = relocated_media.get(cache_key)
+            if relocated is None:
+                relocated = await _rehome_one(agent_result, parent, norm, media_kind)
+                relocated_media[cache_key] = relocated
+            parts.append(relocated)
         pos = m.end()
     parts.append(content[pos:])
-    content = "".join(parts)
-
-    if auto_attach:
-        threshold = getattr(child, "last_user_msg_at", 0.0)
-        extra: List[str] = []
-        for img in child._image_store.list_all():
-            if img.source != "ai" or img.created_at < threshold:
-                continue
-            if img.identifier in referenced:
-                continue
-            new_id = await _copy_image_to_parent(child, parent, img.identifier)
-            if new_id:
-                extra.append(new_id)
-        if extra:
-            content = (content.rstrip() + "\n" + " ".join(extra)) if content else " ".join(extra)
-
-    return content
+    return "".join(parts)

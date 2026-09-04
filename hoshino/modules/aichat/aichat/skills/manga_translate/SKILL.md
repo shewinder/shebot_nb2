@@ -126,4 +126,4 @@ execute_script(skill_name="manga_translate",
 
 ## 回复用户
 
-`inpaint_render` 已自动存储结果到 ImageStore，返回 `identifier`。**不要手动调用 store_images。** 直接引用脚本返回的标识符发送图片即可
+`inpaint_render` 已自动存储结果到 ImageStore，返回 `identifier`。**不要手动调用 store_images。** 需要交付图片时，在回复中使用 `[[send_image:ai_image_N]]`

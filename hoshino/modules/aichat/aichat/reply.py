@@ -1,14 +1,14 @@
 """Reply 管道 — 结构化回复的构建与发送
 
-把 AI 回复文本解析为有序的 ReplyPart 序列（text / image / at），
+把 AI 回复文本解析为有序的 ReplyPart 序列（text / image / video / at），
 替代 _send_util 里"裸正则拆分 + 静默丢弃"的做法。
 
 改进点（相对旧实现）：
 - 容错：容忍标识符两侧空白（< ai_image_1 >）；
 - 保序：图片/@ 保留在原文中的相对位置；
 - 降级：解析失败的标识符转字面文本 + warning（不再静默消失）；
-- 会话级去重：同轮已发送的图片不重复发（on_content 中间轮与最终回复之间）；
-- 兜底：本轮新创建但未被模型引用的 ai 图片自动补发。
+- 会话级去重：同轮已发送的媒体不重复发；
+- 显式发送：只有 [[send_image:...]] / [[send_video:...]] 才会发送媒体。
 """
 import base64
 import re
@@ -27,13 +27,22 @@ from .md_render import render_text_if_markdown
 if TYPE_CHECKING:
     from .session import Session
 
-# 图片/视频/at 标识符（容错空白）。IMAGE_TOKEN_RE 同时被 agent_loop.rehome_images 复用
-IMAGE_TOKEN_RE = re.compile(r"<\s*(user_image_\d+|ai_image_\d+)\s*>")
+# 裸媒体句柄仅供内部引用，不直接触发发送。
+MEDIA_TOKEN_RE = re.compile(
+    r"<\s*(user_image_\d+|ai_image_\d+|user_video_\d+|ai_video_\d+)\s*>"
+)
+# 显式媒体发送命令；命令类型与句柄类型在 build_reply 中校验。
+SEND_TOKEN_RE = re.compile(
+    r"\[\[\s*send_(image|video)\s*:\s*"
+    r"(user_image_\d+|ai_image_\d+|user_video_\d+|ai_video_\d+)\s*\]\]",
+    re.IGNORECASE,
+)
 # @ 仅匹配合法 QQ 号长度（5-11 位），避免模型解释语法时输出短数字被误触发
 AT_TOKEN_RE = re.compile(r"<\s*@(\d{5,11})\s*>")
 VIDEO_TOKEN_RE = re.compile(r"<\s*(user_video_\d+|ai_video_\d+)\s*>")
 TOKEN_RE = re.compile(
-    r"<\s*(user_image_\d+|ai_image_\d+|user_video_\d+|ai_video_\d+)\s*>|<\s*@(\d{5,11})\s*>"
+    SEND_TOKEN_RE.pattern + r"|<\s*@(\d{5,11})\s*>",
+    re.IGNORECASE,
 )
 
 
@@ -48,12 +57,11 @@ class ReplyPart:
 async def build_reply(
     content: str,
     session: Optional["Session"] = None,
-    *,
-    auto_attach: bool = True,
 ) -> List[ReplyPart]:
     """将回复文本解析为有序 ReplyPart 列表
 
-    session 为 None 时（后台发送的兜底场景）图片标识符降级为字面文本。
+    裸媒体句柄始终按普通文本处理；只有显式发送命令才解析媒体。
+    session 为 None 或媒体不存在时，显式发送命令降级为安全的句柄文本。
     """
     parts: List[ReplyPart] = []
     pos = 0
@@ -66,14 +74,20 @@ async def build_reply(
                 parts.append(ReplyPart(kind="text", text=text))
         pos = m.end()
 
-        if m.group(1):  # 图片/视频标识符
-            norm = f"<{m.group(1)}>"
+        if m.group(1):  # 显式图片/视频发送命令
+            media_kind = m.group(1).lower()
+            norm = f"<{m.group(2).lower()}>"
+            is_video = VIDEO_TOKEN_RE.fullmatch(norm) is not None
+            expected_kind = "video" if is_video else "image"
+            if media_kind != expected_kind:
+                logger.warning(f"发送命令与媒体类型不匹配，降级为字面文本: {m.group(0)}")
+                parts.append(ReplyPart(kind="text", text=norm))
+                continue
             if session is None:
                 parts.append(ReplyPart(kind="text", text=norm))
-            elif norm in referenced:
+            elif norm in referenced or norm in session._turn_sent_images:
                 continue
-            elif VIDEO_TOKEN_RE.fullmatch(norm):
-                # 视频标识符（用户/AI 视频）：查视频存储
+            elif is_video:
                 if session._video_store.get(norm) is None:
                     logger.warning(f"回复引用了不存在的视频标识符，降级为字面文本: {norm}")
                     parts.append(ReplyPart(kind="text", text=norm))
@@ -84,30 +98,17 @@ async def build_reply(
             elif session._image_store.get(norm) is None:
                 logger.warning(f"回复引用了不存在的图片标识符，降级为字面文本: {norm}")
                 parts.append(ReplyPart(kind="text", text=norm))
-            elif norm in session._turn_sent_images:
-                continue
             else:
                 parts.append(ReplyPart(kind="image", identifier=norm))
                 session._turn_sent_images.add(norm)
                 referenced.add(norm)
         else:  # @标识符
-            parts.append(ReplyPart(kind="at", qq_id=int(m.group(2))))
+            parts.append(ReplyPart(kind="at", qq_id=int(m.group(3))))
 
     if pos < len(content):
         text = content[pos:]
         if text.strip():
             parts.append(ReplyPart(kind="text", text=text))
-
-    if auto_attach and session is not None:
-        threshold = getattr(session, "last_user_msg_at", 0.0)
-        for img in session._image_store.list_all():
-            if img.source != "ai" or img.created_at < threshold:
-                continue
-            if img.identifier in referenced or img.identifier in session._turn_sent_images:
-                continue
-            parts.append(ReplyPart(kind="image", identifier=img.identifier))
-            session._turn_sent_images.add(img.identifier)
-            referenced.add(img.identifier)
 
     return parts
 

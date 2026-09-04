@@ -46,8 +46,8 @@ execute_script(skill_name="video_generation", script_path="scripts/video_tools.p
 ```
 
 - `--video`：会话内视频标识符（`<user_video_N>` / `<ai_video_N>`），路径由 `SKILL_VIDEOS` 自动注入，无需手写路径
-- 抽帧产物是 `<ai_image_N>`，在回复中引用即可让用户/模型看到该帧；需要判断视频内容时抽 2-4 个关键时间点的帧分别查看
-- 裁剪结果 `<ai_video_N>` 可直接引用交付或作为链式任务的 `--source-video`
+- 抽帧产物是 `<ai_image_N>`，仅作为模型内部引用；需要判断视频内容时抽 2-4 个关键时间点的帧分别查看
+- 裁剪结果 `<ai_video_N>` 可作为链式任务的 `--source-video`；需要交付时使用 `[[send_video:ai_video_N]]`
 
 ## 提示词规范（重要）
 
@@ -107,9 +107,9 @@ non_diegetic_music: 背景音乐描述……
 
 生成耗时 1-2 分钟，脚本单次等待最长 240 秒：
 
-1. **首次调用**：提交并等待。完成返回 `identifier`（如 `<ai_video_1>`），在回复中引用即可。
+1. **首次调用**：提交并等待。完成返回 `identifier`（如 `<ai_video_1>`），需要交付时在回复中使用 `[[send_video:ai_video_1]]`。
 2. **返回 `视频仍在生成中，请使用 --prompt-id xxx 继续查询`**：再次调用仅带 `--prompt-id xxx` 续查（幂等，可多次）。
-3. 收到 `<ai_video_N>` 后，在回复文本中引用（如"视频来了 <ai_video_1>"），系统自动发送。
+3. 收到 `<ai_video_N>` 后，需要交付时输出 `[[send_video:ai_video_N]]`；裸句柄不会发送。
 
 ## 使用示例
 
@@ -301,7 +301,7 @@ execute_script(skill_name="video_generation", script_path="scripts/comfyui_video
 3. 若仍返回 `partial`，保存最新 `state` 并立即重复 `--state` 调用；不要再次传首轮参数。
 4. 若返回带 `state` 的可重试错误，原样保留该 `state` 并重试一次；任务明确丢失或连续重试仍失败时才告知用户失败。
 5. 段完成时脚本会存储该段、提交下一段并返回更新后的 `state`。不得把中间 `<ai_video_N>` 当成品发送。
-6. 直到返回 `{"success": true, "identifier": "<ai_video_N>"}` 才结束工具调用；最终回复只输出该视频标识符，不附带其他文字，让当前会话把交付结果作为一条视频消息发送。
+6. 直到返回 `{"success": true, "identifier": "<ai_video_N>"}` 才结束工具调用；需要交付时输出 `[[send_video:ai_video_N]]`，不要输出裸句柄。
 7. 脚本不写 `chain_state`、锁文件或 `state.json`，也不使用 `--resume`；`state` 只保存在当前 LLM 工具上下文中，不能手工修改任何字段。
 
 **禁止偷懒（硬性规则，违反即任务失败）**：
@@ -374,7 +374,7 @@ execute_script(skill_name="video_generation",
 - 输入视频会先统一转换为 24fps 后再分块超分，保持原始时长；有音轨时从源视频重新合成，避免帧率变化造成音画错位
 - 首次调用会返回 `status=partial`、`progress` 和 `state`，不会等待整片完成；必须把完整 `state` 原样保存在当前对话上下文中
 - 后续调用使用 `args=["--state", "<上次返回的 state JSON>"]`，每次最多等待一个 24 帧块；`pending` 或 `partial` 都继续原样传回最新 `state`
-- 只有返回 `success=true` 且包含新标识符 `<ai_video_N>` 时才算完成，回复中引用该超分版交付
+- 只有返回 `success=true` 且包含新标识符 `<ai_video_N>` 时才算完成，使用 `[[send_video:ai_video_N]]` 交付超分版
 - 中间帧和块视频保存在当前会话 `tmp/upscale_<run_id>/`，不会占用 VideoStore 条目；会话失效时随 session 目录清理
 - 每次调用建议 `timeout=600`、`--wait 240`，避免单次工具调用超过执行上限；ComfyUI 任务丢失或失败时会返回 `status=error`，需要根据错误重新提交
 - 生成流程中不要主动建议超分；用户提出"不够清晰/放大"等要求时才使用

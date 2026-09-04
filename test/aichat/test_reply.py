@@ -1,7 +1,7 @@
 """reply 管道单元测试（build_reply 解析逻辑）
 
-覆盖：保序、空白容错、缺失标识符降级、消息内去重、会话级去重、
-session=None 字面降级、@ 解析、auto_attach 兜底补发。
+覆盖：显式媒体发送、裸句柄隔离、保序、空白容错、缺失标识符降级、
+消息内去重、会话级去重、session=None 降级和 @ 解析。
 
 需要 nonebot.init()（reply.py 依赖 hoshino 的 Message 等）。
 
@@ -10,7 +10,6 @@ session=None 字面降级、@ 解析、auto_attach 兜底补发。
   .venv/bin/python test/aichat/test_reply.py
 """
 import sys
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -54,7 +53,7 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
 
     async def test_order_preserved(self):
         s = self._session_with({"<ai_image_1>": {}})
-        parts = await build_reply("前<ai_image_1>后", s)
+        parts = await build_reply("前[[send_image:ai_image_1]]后", s)
         self.assertEqual([p.kind for p in parts], ["text", "image", "text"])
         self.assertEqual(parts[0].text, "前")
         self.assertEqual(parts[1].identifier, "<ai_image_1>")
@@ -62,19 +61,26 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
 
     async def test_whitespace_tolerance(self):
         s = self._session_with({"<ai_image_1>": {}})
-        parts = await build_reply("图 < ai_image_1 > 完", s)
+        parts = await build_reply("图[[ send_image : ai_image_1 ]]完", s)
         self.assertEqual([p.kind for p in parts], ["text", "image", "text"])
+
+    async def test_bare_identifiers_do_not_send(self):
+        s = self._session_with({"<ai_image_1>": {}})
+        content = "<user_image_1> <ai_image_1> <user_video_1> <ai_video_1>"
+        parts = await build_reply(content, s)
+        self.assertTrue(all(p.kind == "text" for p in parts))
+        self.assertEqual("".join(p.text for p in parts), content)
 
     async def test_missing_identifier_literal(self):
         s = self._session_with({})
-        parts = await build_reply("看 <ai_image_99>", s)
-        kinds = [p.kind for p in parts]
-        self.assertEqual(kinds, ["text", "text"])
-        self.assertIn("<ai_image_99>", parts[1].text)
+        parts = await build_reply("看 [[send_image:ai_image_99]]", s)
+        self.assertTrue(all(p.kind == "text" for p in parts))
+        self.assertIn("<ai_image_99>", "".join(p.text for p in parts))
 
     async def test_duplicate_dedup(self):
         s = self._session_with({"<ai_image_1>": {}})
-        parts = await build_reply("a<ai_image_1>b<ai_image_1>c", s)
+        parts = await build_reply(
+            "a[[send_image:ai_image_1]]b[[send_image:ai_image_1]]c", s)
         images = [p for p in parts if p.kind == "image"]
         self.assertEqual(len(images), 1)
         self.assertEqual("".join(p.text for p in parts if p.kind == "text"), "abc")
@@ -82,14 +88,18 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
     async def test_turn_dedup(self):
         s = self._session_with({"<ai_image_1>": {}})
         s._turn_sent_images.add("<ai_image_1>")
-        parts = await build_reply("a<ai_image_1>", s)
+        parts = await build_reply("a[[send_image:ai_image_1]]", s)
         self.assertNotIn("image", [p.kind for p in parts])
 
     async def test_turn_dedup_does_not_repeat_text_between_identifiers(self):
         identifiers = {f"<ai_image_{index}>": {} for index in range(1, 5)}
         s = self._session_with(identifiers)
         s._turn_sent_images.update({"<ai_image_1>", "<ai_image_2>", "<ai_image_3>"})
-        content = "四页成品如下：\n\n<ai_image_1> <ai_image_2> <ai_image_3> <ai_image_4>\n\n处理完成"
+        content = (
+            "四页成品如下：\n\n"
+            "[[send_image:ai_image_1]] [[send_image:ai_image_2]] "
+            "[[send_image:ai_image_3]] [[send_image:ai_image_4]]\n\n处理完成"
+        )
 
         parts = await build_reply(content, s)
 
@@ -100,7 +110,7 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_session_none_literal(self):
-        parts = await build_reply("图<ai_image_1>", None)
+        parts = await build_reply("图[[send_image:ai_image_1]]", None)
         self.assertTrue(all(p.kind == "text" for p in parts))
         self.assertIn("<ai_image_1>", "".join(p.text for p in parts))
 
@@ -118,26 +128,11 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(p.kind == "text" for p in parts))
         self.assertIn("<@123>", parts[0].text)
 
-    async def test_auto_attach(self):
+    async def test_unreferenced_new_image_is_not_attached(self):
         s = self._session_with(
             {"<ai_image_2>": {}},
-            [SimpleNamespace(source="ai", identifier="<ai_image_2>", created_at=time.time())],
+            [SimpleNamespace(source="ai", identifier="<ai_image_2>", created_at=1.0)],
         )
-        s.last_user_msg_at = time.time() - 1
-        parts = await build_reply("无引用", s)
-        images = [p for p in parts if p.kind == "image"]
-        self.assertEqual(len(images), 1)
-        self.assertEqual(images[0].identifier, "<ai_image_2>")
-
-    async def test_auto_attach_skips_old_and_user_source(self):
-        s = self._session_with(
-            {},
-            [
-                SimpleNamespace(source="ai", identifier="<ai_image_1>", created_at=time.time() - 100),
-                SimpleNamespace(source="user", identifier="<user_image_1>", created_at=time.time()),
-            ],
-        )
-        s.last_user_msg_at = time.time() - 1
         parts = await build_reply("无引用", s)
         self.assertEqual([p for p in parts if p.kind == "image"], [])
 
@@ -147,7 +142,7 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
         s = Session("reply_video_1", 1)
         fake_video_store = SimpleNamespace(get=lambda norm: SimpleNamespace(file_path=Path("v.mp4")) if norm == "<user_video_1>" else None)
         s._video_store = fake_video_store
-        parts = await build_reply("看这段<user_video_1>视频", s)
+        parts = await build_reply("看这段[[send_video:user_video_1]]视频", s)
         kinds = [p.kind for p in parts]
         self.assertEqual(kinds, ["text", "video", "text"])
         self.assertEqual(parts[1].identifier, "<user_video_1>")
@@ -155,9 +150,21 @@ class TestBuildReply(unittest.IsolatedAsyncioTestCase):
     async def test_missing_video_identifier_literal(self):
         s = Session("reply_video_2", 1)
         s._video_store = SimpleNamespace(get=lambda norm: None)
-        parts = await build_reply("看<ai_video_9>", s)
+        parts = await build_reply("看[[send_video:ai_video_9]]", s)
         self.assertTrue(all(p.kind == "text" for p in parts))
         self.assertIn("<ai_video_9>", "".join(p.text for p in parts))
+
+    async def test_explicit_send_marker_is_not_stage_limited(self):
+        s = self._session_with({"<ai_image_1>": {}})
+        parts = await build_reply("已生成[[send_image:ai_image_1]]", s)
+        self.assertEqual([p.kind for p in parts], ["text", "image"])
+
+    async def test_type_mismatch_is_not_sent(self):
+        s = Session("reply_mismatch", 1)
+        s._video_store = SimpleNamespace(get=lambda norm: SimpleNamespace() if norm == "<ai_video_1>" else None)
+        parts = await build_reply("[[send_image:ai_video_1]]", s)
+        self.assertTrue(all(p.kind == "text" for p in parts))
+        self.assertEqual("".join(p.text for p in parts), "<ai_video_1>")
 
 
 if __name__ == "__main__":

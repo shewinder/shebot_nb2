@@ -75,11 +75,11 @@ disable-model_invocation: false
 ```
 找到几张好看的图喵～
 
-1. 🎨 作品标题 <ai_image_1>
+1. 🎨 作品标题 [[send_image:ai_image_1]]
    👤 作者：作者名
    🏷️ 标签：少女、兽耳、治愈
 
-2. 🎨 作品标题 <ai_image_2>
+2. 🎨 作品标题 [[send_image:ai_image_2]]
    👤 作者：作者名
    🏷️ 标签：泳装、夏日
 ```
@@ -103,7 +103,7 @@ disable-model_invocation: false
 ```
 在找「猫耳」主题的图呢，找到这些喵～
 
-1. 🎨 猫耳少女 <ai_image_1>
+1. 🎨 猫耳少女 [[send_image:ai_image_1]]
    👤 作者：作者名
    🏷️ 猫耳、女仆装、蓝发
 ```
@@ -129,7 +129,7 @@ disable-model_invocation: false
 ```
 根据主人喜欢的「兽耳+少女」组合，找到这些喵～
 
-1. 🎨 作品标题 <ai_image_1>
+1. 🎨 作品标题 [[send_image:ai_image_1]]
    👤 作者：作者名
    💕 匹配偏好：兽耳、少女、治愈
 ```
@@ -170,7 +170,7 @@ disable-model_invocation: false
 ```
 从 Yande 高质量图库找到这些喵～（搜索标签：girl, swimsuit）
 
-1. 🎨 Yande 精选 <ai_image_1>
+1. 🎨 Yande 精选 [[send_image:ai_image_1]]
    👤 上传者：用户名
    ⭐ 质量分：95
    🏷️ 标签：catgirl, swimsuit, summer
@@ -212,7 +212,7 @@ disable-model_invocation: false
 - **Lolicon**: `i.pixiv.re` → `pixiv.shewinder.win`
 - **Yande**: `files.yande.re` → `files.shewinder.win`
 - 使用 `store_images` 下载，自动反和谐
-- 引用返回的 `<ai_image_N>` 标识符
+- 使用返回的裸句柄处理图片，需要交付时输出 `[[send_image:ai_image_N]]`
 
 ### 失败处理
 - API 无结果："没有找到呢，换个关键词试试？"

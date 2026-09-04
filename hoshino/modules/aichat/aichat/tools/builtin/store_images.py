@@ -178,22 +178,22 @@ class StoreImagesInput(BaseModel):
 
 1. 准备好图片的 URL 或本地文件路径
 2. 调用本工具存储图片
-3. 工具返回图片标识符（如 <ai_image_1>, <ai_image_2>）
-4. 在你的回复中包含这些标识符，系统会自动发送图片
+3. 工具返回图片标识符（如 <ai_image_1>, <ai_image_2>）作为内部句柄
+4. 需要交付时，在回复中使用 [[send_image:ai_image_N]] 显式发送
 
 ## 示例
 
 ### URL 下载
 store_images(urls=["https://example.com/image.jpg"])
-# 返回："已准备 1 张图片：<ai_image_1>"
+# 返回："已准备 1 张图片，内部句柄：<ai_image_1>"
 
 ### 本地文件
 store_images(paths=["screenshots/baidu.png"])
-# 返回："已准备 1 张图片：<ai_image_1>"
+# 返回："已准备 1 张图片，内部句柄：<ai_image_1>"
 
 ### 混合使用
 store_images(urls=["https://example.com/1.jpg"], paths=["local/2.png"])
-# 返回："已准备 2 张图片：<ai_image_1> <ai_image_2>"
+# 返回："已准备 2 张图片，内部句柄：<ai_image_1> <ai_image_2>"
 
 ## 注意事项
 
@@ -286,7 +286,7 @@ async def store_images(
     if failed_count > 0:
         result_lines.append(f"\n⚠️ {failed_count} 张图片存储失败")
 
-    result_lines.append("\n💡 在你的回复中包含上述标识符，用户就能看到图片")
+    result_lines.append("\n💡 需要交付时，请在回复中使用 [[send_image:ai_image_N]]")
 
     return ok(
         "\n".join(result_lines),

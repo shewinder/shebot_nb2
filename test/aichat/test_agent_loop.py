@@ -1,7 +1,7 @@
 """agent_loop 单元测试
 
 覆盖：成功路径与注册表清理、并发 session_id 唯一性、API 未配置、
-会话标志位、rehome_images 三条路径（映射命中/拷贝/降级）与 auto_attach。
+会话标志位、rehome_images 的映射/拷贝/降级和显式发送语法。
 
 需要 nonebot.init()（agent_loop 依赖 hoshino 链），LLM 用 MockTransport 注入。
 
@@ -11,7 +11,6 @@
 """
 import asyncio
 import sys
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -151,6 +150,8 @@ class TestRehomeImages(unittest.IsolatedAsyncioTestCase):
         parent._image_store = FakeImageStore()
         parent.store_ai_image = AsyncMock(return_value="<ai_image_50>")
         parent.store_user_image = AsyncMock(return_value="<user_image_50>")
+        parent.store_ai_video_bytes = AsyncMock(return_value="<ai_video_50>")
+        parent.store_user_video = AsyncMock(return_value="<user_video_50>")
         return parent
 
     def _make_child(self, entries=None, list_entries=None):
@@ -187,18 +188,57 @@ class TestRehomeImages(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out, "图 [图片]")
         parent.store_ai_image.assert_not_awaited()
 
-    async def test_auto_attach(self):
+    async def test_unreferenced_image_is_not_attached(self):
         parent = self._make_parent()
-        now = time.time()
-        img = SimpleNamespace(source="ai", identifier="<ai_image_7>", created_at=now)
+        img = SimpleNamespace(source="ai", identifier="<ai_image_7>", created_at=1.0)
         child = self._make_child(
             {"<ai_image_7>": {"data_url": "data:image/png;base64,BB", "source": "ai"}},
             [img],
         )
-        child.last_user_msg_at = now - 1
         agent_result = AgentResult(result=ChatResult(content="完成"), session=child)
         out = await rehome_images(agent_result, parent)
-        self.assertIn("<ai_image_50>", out)
+        self.assertEqual(out, "完成")
+
+    async def test_explicit_send_marker_is_rehomed(self):
+        parent = self._make_parent()
+        child = self._make_child(
+            {"<ai_image_1>": {"data_url": "data:image/png;base64,CC", "source": "ai"}}, []
+        )
+        agent_result = AgentResult(
+            result=ChatResult(content="成品 [[send_image:ai_image_1]]"),
+            session=child,
+        )
+        out = await rehome_images(agent_result, parent)
+        self.assertEqual(out, "成品 [[send_image:ai_image_50]]")
+
+    async def test_explicit_video_marker_is_rehomed(self):
+        parent = self._make_parent()
+        child = self._make_child()
+        child.resolve_video_file = lambda identifier: Path("video.mp4")
+        child._video_store = SimpleNamespace(
+            get=lambda identifier: SimpleNamespace(source="ai", url=None)
+        )
+        agent_result = AgentResult(
+            result=ChatResult(content="[[send_video:ai_video_1]]"),
+            session=child,
+        )
+        with patch.object(Path, "read_bytes", return_value=b"video"):
+            out = await rehome_images(agent_result, parent)
+        self.assertEqual(out, "[[send_video:ai_video_50]]")
+        parent.store_ai_video_bytes.assert_awaited_once_with(b"video")
+
+    async def test_duplicate_references_are_copied_once(self):
+        parent = self._make_parent()
+        child = self._make_child(
+            {"<ai_image_1>": {"data_url": "data:image/png;base64,DD", "source": "ai"}}, []
+        )
+        agent_result = AgentResult(
+            result=ChatResult(content="<ai_image_1> [[send_image:ai_image_1]]"),
+            session=child,
+        )
+        out = await rehome_images(agent_result, parent)
+        self.assertEqual(out, "<ai_image_50> [[send_image:ai_image_50]]")
+        parent.store_ai_image.assert_awaited_once()
 
 
 if __name__ == "__main__":

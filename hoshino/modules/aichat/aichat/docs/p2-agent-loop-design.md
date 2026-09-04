@@ -24,7 +24,7 @@
 
 1. 单一执行循环：`AgentTask`（规格）+ `run_agent_loop`（实现）取代 `run_agent`。
 2. 修掉上述两个 bug。
-3. 图片发送升级为 Reply 管道（保序/容错/兜底补发/会话级去重）。
+3. 图片发送升级为 Reply 管道（显式发送/保序/容错/会话级去重）。
 4. Session 生命周期内聚（`Session.dispose()` 统一清理）。
 
 ### 非目标（明确不做）
@@ -138,18 +138,16 @@ async def run_agent_loop(task: AgentTask) -> AgentResult:
 ```python
 async def rehome_images(
     agent_result: AgentResult, parent: Session,
-    *, image_map: Dict[str, str], auto_attach: bool = True,
 ) -> str:
     content = agent_result.result.content or ""
-    # 1. 提取 content 中的标识符（容错正则，与 Reply 管道共用）
-    # 2. 对每个标识符：
+    # 1. 提取 content 中的裸句柄和显式发送标记（与 Reply 管道共用规则）
+    # 2. 对每个裸句柄：
     #    a. 在 image_map（复制溯源映射）中 → 直接替换为父标识符，零拷贝
     #    b. 否则从子会话取 data_url → parent.store_ai_image(url=原url)
     #       → 替换为新的父标识符
     #    c. 拷贝/解析失败 → 降级为字面文本 "[图片]"（不再静默消失）
-    # 3. auto_attach：子会话中"本轮新增但未被 content 引用"的 ai 图片，
-    #    同样拷贝到父会话并追加标识符到 content 末尾
-    # 4. 返回重写后的 content
+    # 3. 对显式发送标记执行同样重定位，并保留 [[send_*:...]] 语义
+    # 4. 不自动追加未被引用的媒体；返回重写后的 content
 ```
 
 ### 5.3 生命周期约定
@@ -166,9 +164,9 @@ async def rehome_images(
 ```python
 @dataclass
 class ReplyPart:
-    kind: Literal["text", "image", "at"]
+    kind: Literal["text", "image", "video", "at"]
     text: str = ""                 # kind=text
-    identifier: str = ""           # kind=image（规范化后的标识符）
+    identifier: str = ""           # kind=image/video（规范化后的标识符）
     qq_id: int = 0                 # kind=at
 ```
 
@@ -179,15 +177,12 @@ async def build_reply(
     content: str,
     session: Optional[Session],
     *,
-    auto_attach: bool = True,
 ) -> List[ReplyPart]:
-    # 1. 容错 tokenize：<\s*(user_image_\d+|ai_image_\d+)\s*> 与 <\s*@(\d+)\s*>
-    #    规范化后按原文顺序切分 → 保序
-    # 2. image token：session 为 None → 降级为字面文本（不再无条件丢弃）；
+    # 1. 仅解析 [[send_image:...]] / [[send_video:...]] 与 @ 标记；裸媒体句柄不发送
+    # 2. session 为 None → 显式发送命令降级为文本；
     #    解析失败（编号不存在/文件丢失）→ 降级字面文本 + warning 日志
     # 3. 会话级去重：session._turn_sent_images（每轮 user 消息时重置）
-    # 4. auto_attach：session 存在时，把 created_at >= session.last_user_msg_at
-    #    且本轮未发送、未被引用的图片追加为 image part
+    # 4. 不自动补发未被显式引用的媒体
     # 5. 返回有序 parts
 ```
 
@@ -200,7 +195,6 @@ async def build_reply(
 
 ### 6.4 Session 新增字段
 
-- `last_user_msg_at: float`（`add_message` role=user 时刷新）
 - `_turn_sent_images: Set[str]`（Reply 管道去重状态）
 
 ## 7. Session 生命周期内聚
@@ -239,9 +233,9 @@ def dispose(self) -> None:
   - rehome：映射命中/未命中/降级三路径（用内存假 ImageStore）。
 - `test/aichat/test_reply.py`
   - 假 ImageStore（dict 实现 get/get_data_url/list_all），不落盘；
-  - 用例：`图<ai_image_1>文` 保序；`< ai_image_1 >` 容错；`<ai_image_99>`
-    降级字面文本；重复标识符去重；auto_attach 补发未引用新图；
-    `session=None` 时令牌转字面文本。
+  - 用例：裸 `<ai_image_1>` 不发送；`[[send_image:ai_image_1]]` 保序并发送；
+    缺失句柄降级字面文本；重复标识符去重；默认不自动补发；
+    `session=None` 时显式命令转字面文本。
 - 改造前先跑一遍三条路径的日志基线（本地 MockTransport），改造后 diff 对比。
 
 ## 10. 风险与回滚
@@ -258,6 +252,6 @@ def dispose(self) -> None:
 1. `max_history` 直接删除配置字段（Pydantic 模型里移除），不做任何兼容——
    与项目"不保留旧配置"原则一致，确认？
 2. `AgentResult.session` 保留子会话对象直到调用方 dispose——接受？
-3. auto_attach 的范围是"本轮 user 消息之后创建的图片"，背景/定时任务同样生效
+3. 未被显式发送标记引用的媒体不会自动发送，背景/定时任务同样遵循此规则
    （其 user 消息即任务文本）——接受？
 4. `_resolve_api_config` 的 `subagent_profiles[0]` 回落怪癖本轮保持不变——接受？

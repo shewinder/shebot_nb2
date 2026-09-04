@@ -146,9 +146,7 @@ class Session:
         self.user_id = user_id
         self.group_id = group_id
         self.agent_label: str = "main"  # 日志标识：main / sub:vision / sub:search
-        # Reply 管道状态：最近一条 user 消息时间（用于图片兜底补发）与
-        # 本轮已发送的图片标识符（会话级去重）
-        self.last_user_msg_at: float = time.time()
+        # 本轮已发送的媒体标识符（会话级去重）
         self._turn_sent_images: Set[str] = set()
         self._turn_state_lock = threading.Lock()
         self._turn_active = False
@@ -183,7 +181,6 @@ class Session:
         """添加标准 user/assistant 消息"""
         if role == "user":
             # 新一轮对话开始：重置发送去重状态
-            self.last_user_msg_at = time.time()
             self._turn_sent_images.clear()
         self._append_message({"role": role, "content": content})
 
@@ -389,16 +386,13 @@ class Session:
         """构建多媒体发送规则提示（固定内容，用于系统消息）"""
         return """
 【多媒体发送规则】
-图片和视频标识符是会话内部的资源句柄，不是普通引用文本。
+媒体是否发送只由下列显式语法决定，与回复处于哪个阶段无关。
 
 📷 图片/视频标识符：
-1. 只有在用户明确要求发送、展示或重新发送某个媒体，或当前任务已经生成/处理出需要交付的最终媒体成品时，才在最终回复中输出对应标识符
-2. 分析、描述、比较、确认收到图片或视频时，直接用“这张图片”“这个视频”等文字回答，不要输出任何媒体标识符
-3. 不要为了证明已经看过图片或视频而引用或重新发送它；不要把工具返回的标识符复制到普通说明文字中
-4. 调用工具或子 Agent 时，可以按工具参数要求传入媒体标识符；这不代表需要在最终回复中输出该标识符
-5. 发送媒体前确认这是用户要求的内容，或是本次任务需要交付的最终结果；中间产物、分析输入和未被要求展示的媒体不要发送
-6. 回复结束前检查：除非属于上述发送/交付场景，否则删除回复中的所有图片和视频标识符
-7. 图片标识符格式为 <user_image_N> 或 <ai_image_N>，视频标识符格式为 <user_video_N> 或 <ai_video_N>
+1. 裸句柄 <user_image_N>、<ai_image_N>、<user_video_N>、<ai_video_N> 只用于文字引用或工具参数，不会发送媒体
+2. 发送图片使用 [[send_image:user_image_N]] 或 [[send_image:ai_image_N]]
+3. 发送视频使用 [[send_video:user_video_N]] 或 [[send_video:ai_video_N]]
+4. 显式发送标记会在出站时被移除；未使用显式发送标记的媒体不会发送
 
 当需要向用户 @某人或戳一戳时，请遵循以下规则：
 
