@@ -1,6 +1,6 @@
 {
   "name": "video_generation",
-  "description": "AI 视频生成（MiniMax H3），支持 T2V、I2V、FL2V、Ref2VA、参考视频换人和链式长视频，原生音轨",
+  "description": "AI 视频生成（MiniMax H3），支持 T2V、I2V、FL2V、Ref2VA、参考视频换人、链式长视频与 H3 本地图像编辑，原生音轨",
   "allowed_tools": [
     "execute_script"
   ],

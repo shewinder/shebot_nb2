@@ -1,6 +1,6 @@
 ---
 name: video_generation
-description: 当用户要求生成视频、做长视频、让图片动起来、文生视频、首尾帧图生视频、参考图角色保持或参考视频换人时激活
+description: 当用户要求生成视频、做长视频、让图片动起来、文生视频、首尾帧图生视频、参考图角色保持、参考视频换人，或明确要求"用视频模型/本地模型"进行图像编辑（改图）时激活
 disable-model_invocation: false
 ---
 
@@ -332,6 +332,22 @@ non_diegetic_music: <全英文>
 - 源视频自动按 124 帧窗口规划，脚本会用窗口帧数覆盖 `plan-json` 中的 `length`；场景数量决定最多处理多少个源视频窗口
 - `--keep-audio`：成片保留源视频原音轨（BGM/对白，时间轴 1:1 对齐；注意对白是原角色的声音）；声音字段仅作画面声效参考
 - 时长：场景数 × 3-8 分钟（默认 8 步 turbo v4；取决于分辨率档位）
+
+## 图像编辑（H3 本地，仅当用户要求用视频模型/本地模型/无审核编辑时）
+
+**本地免费无审核**的图像编辑（区别于 image_generation 的 API 编辑）。仅当用户明确说"用视频模型/本地模型改图""无审核编辑"等时使用；普通"改图/编辑"仍走 image_generation。
+
+```
+execute_script(skill_name="video_generation",
+  script_path="scripts/h3_image_edit.py",
+  args=["--images", "<user_image_1>", "--prompt", "<编辑指令>", "--resolution", "480p"],
+  timeout=600)
+```
+
+- 原理：输入图作 i2v 首帧锚定生成 39 帧（≈1.6s）短视频，自动抽后段 3 帧按清晰度选最优交付 `<ai_image_N>`（PNG，480p 级，可按原图比例）
+- 提示词必须按"编辑版三段式"：`integrated_multimodal_description` 描述**编辑后的最终画面**（不是操作过程），显式列保留项（人物特征/光线/构图），必带 `static shot, no camera movement, pose unchanged`；`overall_soundscape: silent`、`non_diegetic_music: none`
+- 时长约 1.5-2 分钟；输出 `<ai_image_N>` 图片标识符
+- 默认不带 SigmaRefiner（静态编辑无需运动细化）；生成任务中途失联可 `--prompt-id` 续查
 
 ## 超分（可选，默认不执行）
 

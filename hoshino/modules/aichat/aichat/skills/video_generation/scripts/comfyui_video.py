@@ -416,6 +416,7 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
     interval = 3
     elapsed = 0
     consecutive_failures = 0
+    empty_streak = 0  # 连续确认"不在历史且不在队列"的次数（防完成间隙误判）
 
     while elapsed < wait_seconds:
         time.sleep(interval)
@@ -444,15 +445,25 @@ def poll_result(prompt_id: str, wait_seconds: int) -> Dict[str, Any]:
                 # 队列查询失败（ComfyUI 忙/网络抖动）：无法确认任务状态，继续轮询而非误判丢失
                 continue
             q = q_result.get("json", {}) or {}
+            if not isinstance(q, dict):
+                # 队列响应异常（json 解析失败）：无法确认任务状态，继续轮询而非误判丢失
+                continue
             in_queue = any(
                 prompt_id in (item[1] if isinstance(item, list) and len(item) > 1 else ())
                 for item in q.get("queue_running", []) + q.get("queue_pending", [])
             )
             if not in_queue:
-                return {"status": "error",
-                        "error": "任务已丢失（ComfyUI 可能重启过），请重新生成"}
+                # 任务完成后存在 queue 移出 -> history 写入的延迟窗口，
+                # 单次查空可能是间隙而非丢失：连续 2 次确认才判定
+                empty_streak += 1
+                if empty_streak >= 2:
+                    return {"status": "error",
+                            "error": "任务已丢失（ComfyUI 可能重启过），请重新生成"}
+                continue
+            empty_streak = 0
             continue
 
+        empty_streak = 0
         status = entry.get("status", {})
 
         # 执行错误
