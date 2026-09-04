@@ -340,7 +340,7 @@ non_diegetic_music: <全英文>
 ```
 execute_script(skill_name="video_generation",
   script_path="scripts/h3_image_edit.py",
-  args=["--images", "<user_image_1>", "--prompt", "<编辑指令>", "--resolution", "480p"],
+  args=["--images", "<user_image_1>", "--prompt", "<编辑指令>"],  # 默认 768p，静态稳定；480p 仅快速预览
   timeout=600)
 ```
 

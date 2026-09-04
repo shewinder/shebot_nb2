@@ -64,7 +64,8 @@ def main() -> None:
                         help="模型版本：hybrid=融合模型（默认），official=官方")
     parser.add_argument("--images", default="", help="输入图标识符（SKILL_IMAGES 解析，单张）")
     parser.add_argument("--prompt", default="", help="编辑指令（描述编辑后的最终画面）")
-    parser.add_argument("--resolution", choices=list(cv.RESOLUTION_PIXELS.keys()), default="480p")
+    parser.add_argument("--resolution", choices=list(cv.RESOLUTION_PIXELS.keys()), default="768p",
+                        help="输出档位（默认 768p：编辑静态稳定性更好；480p 仅快速预览）")
     parser.add_argument("--steps", type=int, default=8, help="采样步数（默认 8）")
     parser.add_argument("--lora-strength", type=float, default=0.5,
                         help="MysticXXX LoRA 强度（0=关闭，默认 0.5）")
