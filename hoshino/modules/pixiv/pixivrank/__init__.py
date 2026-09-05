@@ -447,8 +447,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     arg = str(event.get_message())
     try:
         n = int(arg)
-    except:
-        await bot.send(event, "not a number")
+    except ValueError:
         return
     if n < 1 or n > 15:
         await bot.send(event, "数字超限")
@@ -481,8 +480,7 @@ async def _(bot: Bot, event: GroupMessageEvent):
     arg = str(event.get_message())
     try:
         n = int(arg)
-    except:
-        await bot.send(event, "not a number")
+    except ValueError:
         return
     if n < 1 or n > 15:
         await bot.send(event, "数字超限")
