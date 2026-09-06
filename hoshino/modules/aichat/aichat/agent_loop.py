@@ -201,7 +201,12 @@ async def _run(task: AgentTask, session: Session) -> AgentResult:
             else:
                 logger.warning(f"[Agent:{task.label}] 预激活 SKILL 失败: {skill_name} — {msg}")
 
-    session.add_message("system", task.system_prompt)
+    # 任务提示并入首条 user 消息：若单独以 system 身份入历史，会与
+    # _build_messages_for_chat 生成的主 system 重复，且后者不在首位，
+    # 被严格模板（Qwen3.8 系）以 500 拒绝
+    task_prompt = (
+        f"{task.system_prompt}\n\n{task.task}" if task.system_prompt else task.task
+    )
 
     # 构建 user 消息：支持多模态图片传递
     new_ids: List[str] = []
@@ -223,16 +228,16 @@ async def _run(task: AgentTask, session: Session) -> AgentResult:
 
     if (new_ids or task.image_data_urls) and supports_multimodal:
         message_content = _build_multimodal_message(
-            task.task,
+            task_prompt,
             new_ids,
             session,
             image_data_urls=task.image_data_urls,
         )
         session.add_message("user", message_content)
     else:
-        prompt = task.task
+        prompt = task_prompt
         if new_ids:
-            prompt = f"{task.task}\n\n图片标识符：{' '.join(new_ids)}"
+            prompt = f"{task_prompt}\n\n图片标识符：{' '.join(new_ids)}"
         session.add_message("user", prompt)
 
     result = await ChatExecutor(session).chat(
