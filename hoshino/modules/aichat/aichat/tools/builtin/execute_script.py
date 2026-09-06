@@ -148,6 +148,14 @@ async def execute_script(
     env["PROJECT_ROOT"] = str(Path("").resolve())  # 项目根目录（bot启动目录）
     env["SKILL_NAME"] = skill_name
     env["SKILL_DIR"] = str(skill.directory)
+
+    # 注入调用者 QQ 号（供 Skill 脚本做用户级权限判断，如仅允许指定用户执行）
+    caller_uid = None
+    if event is not None:
+        caller_uid = getattr(event, "user_id", None)
+    if caller_uid is None and session is not None:
+        caller_uid = getattr(session, "user_id", None)
+    env["CALLER_USER_ID"] = str(caller_uid) if caller_uid is not None else ""
     
     # 注入 SESSION_ID（供 Skill 脚本操作 ImageStore）
     if session:
