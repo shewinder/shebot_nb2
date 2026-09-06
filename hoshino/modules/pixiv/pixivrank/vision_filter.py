@@ -371,9 +371,10 @@ async def _call_vision_score_batch(
             {"role": "user", "content": content_parts},
         ],
     }
+    request_timeout = max(1.0, getattr(conf, "vision_request_timeout", 600.0))
     retry_count = max(0, getattr(conf, "vision_retry_count", 2))
 
-    async with httpx.AsyncClient(timeout=180.0) as client:
+    async with httpx.AsyncClient(timeout=request_timeout) as client:
         for attempt in range(retry_count + 1):
             try:
                 resp = await client.post(request_url, headers=headers, json=payload)
@@ -505,6 +506,7 @@ async def vision_filter_images(
         "user_batch_size": user_batch_size,
         "max_request_chars": max_request_chars,
         "max_concurrency": max_concurrency,
+        "request_timeout": getattr(conf, "vision_request_timeout", 600.0),
         "retry_count": getattr(conf, "vision_retry_count", 2),
         "thresholds": thresholds,
         "users": [

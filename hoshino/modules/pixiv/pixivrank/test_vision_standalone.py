@@ -45,6 +45,7 @@ class _Config:
     vision_user_batch_size = 4
     vision_max_request_chars = 4000000
     vision_max_concurrency = 4
+    vision_request_timeout = 600.0
     vision_retry_count = 2
     vision_high_score_threshold = 70
     vision_low_score_threshold = 40
@@ -456,7 +457,8 @@ async def _call_vision_score_batch(
     print(json.dumps(_sanitize_api_payload(payload), ensure_ascii=False, indent=2))
     print("    --- 请求参数结束 ---")
 
-    async with httpx.AsyncClient(timeout=180.0) as client:
+    request_timeout = max(1.0, conf.vision_request_timeout)
+    async with httpx.AsyncClient(timeout=request_timeout) as client:
         for attempt in range(conf.vision_retry_count + 1):
             try:
                 resp = await client.post(request_url, headers=headers, json=payload)
@@ -567,6 +569,7 @@ async def vision_filter_images(
         "user_batch_size": conf.vision_user_batch_size,
         "max_request_chars": conf.vision_max_request_chars,
         "max_concurrency": conf.vision_max_concurrency,
+        "request_timeout": conf.vision_request_timeout,
         "retry_count": conf.vision_retry_count,
         "thresholds": {
             "high_score": conf.vision_high_score_threshold,
@@ -808,6 +811,7 @@ def load_config() -> None:
     conf.vision_user_batch_size = data.get("vision_user_batch_size", conf.vision_user_batch_size)
     conf.vision_max_request_chars = data.get("vision_max_request_chars", conf.vision_max_request_chars)
     conf.vision_max_concurrency = data.get("vision_max_concurrency", conf.vision_max_concurrency)
+    conf.vision_request_timeout = data.get("vision_request_timeout", conf.vision_request_timeout)
     conf.vision_retry_count = data.get("vision_retry_count", conf.vision_retry_count)
     conf.vision_high_score_threshold = data.get("vision_high_score_threshold", conf.vision_high_score_threshold)
     conf.vision_low_score_threshold = data.get("vision_low_score_threshold", conf.vision_low_score_threshold)

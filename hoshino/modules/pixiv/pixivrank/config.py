@@ -21,6 +21,7 @@ class Config(BaseConfig):
     vision_user_batch_size: int = 4  # 每批传给 vision 模型的用户数
     vision_max_request_chars: int = 4000000
     vision_max_concurrency: int = 4
+    vision_request_timeout: float = 600.0
     vision_retry_count: int = 2
     vision_high_score_threshold: int = 70
     vision_low_score_threshold: int = 40
