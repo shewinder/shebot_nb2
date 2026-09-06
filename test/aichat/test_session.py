@@ -258,6 +258,22 @@ class TestMediaPrompt(unittest.TestCase):
         self.assertNotIn("最终回复", prompt)
         self.assertNotIn("中间回复", prompt)
 
+    def test_multimodal_model_uses_direct_image_understanding(self):
+        prompt = Session.build_image_rules_prompt(True)
+
+        self.assertIn("支持多模态", prompt)
+        self.assertIn("直接观察当前消息中的图片", prompt)
+        self.assertIn("不要因为看到了图片标识符就调用 delegate_task(type=\"vision\")", prompt)
+        self.assertNotIn("当前对话模型不支持多模态", prompt)
+
+    def test_text_only_model_delegates_image_understanding(self):
+        prompt = Session.build_image_rules_prompt(False)
+
+        self.assertIn("不支持多模态", prompt)
+        self.assertIn("必须调用 delegate_task(type=\"vision\")", prompt)
+        self.assertIn("image_identifiers", prompt)
+        self.assertIn("不要声称自己看到了图片", prompt)
+
 
 class TestVideoStoreCore(unittest.TestCase):
     def test_lazy_dir_user_source_and_clear(self):

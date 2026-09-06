@@ -81,7 +81,10 @@ class ChatExecutor:
             tools: 显式指定工具列表。None=自动获取全量工具，[]=无工具
             max_rounds: 最大工具调用轮数。None=使用配置默认值
         """
-        messages = await self.session._build_messages_for_chat(event)
+        messages = await self.session._build_messages_for_chat(
+            event,
+            supports_multimodal=bool(api_config.get("supports_multimodal", False)),
+        )
 
         if tools is None and api_config.get("supports_tools", False):
             tools = await get_available_tools(session=self.session)

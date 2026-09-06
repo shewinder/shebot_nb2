@@ -382,9 +382,29 @@ class Session:
         return self._video_store.list_all()
 
     @staticmethod
-    def build_image_rules_prompt() -> str:
-        """构建多媒体发送规则提示（固定内容，用于系统消息）"""
-        return """
+    def build_image_rules_prompt(supports_multimodal: Optional[bool] = None) -> str:
+        """构建媒体规则及当前模型的图像理解提示。"""
+        capability_prompt = ""
+        if supports_multimodal is True:
+            capability_prompt = """
+【图像理解能力】
+当前对话模型支持多模态，用户消息中的图片会直接作为图片内容提供给你。
+1. 需要看图、识图或分析图片时，直接观察当前消息中的图片并回答。
+2. 不要因为看到了图片标识符就调用 delegate_task(type=\"vision\")；这会造成重复识图和不必要的延迟。
+3. 只有任务本身需要独立的搜索/分析子任务时才委托；图片理解不应重复交给视觉子 Agent。
+4. 如果当前上下文只有历史图片标识符而没有实际图片内容，不要假装看到了图片，应明确说明并请求用户重新发送。
+"""
+        elif supports_multimodal is False:
+            capability_prompt = """
+【图像理解能力】
+当前对话模型不支持多模态，不能直接读取或理解图片内容。
+1. 不要声称自己看到了图片，也不要根据图片标识符猜测画面内容。
+2. 用户要求看图、识图或分析图片时，必须调用 delegate_task(type=\"vision\")，并把相关图片标识符通过 image_identifiers 参数传给视觉子 Agent。
+3. 视觉子 Agent 返回分析结果后，再基于结果回答用户；如果视觉子 Agent 不可用，应明确说明无法完成图像分析。
+"""
+
+        return f"""
+{capability_prompt}
 【多媒体发送规则】
 媒体是否发送只由下列显式语法决定，与回复处于哪个阶段无关。
 
@@ -717,7 +737,11 @@ class Session:
         
         return f'<context type="environment" {" ".join(attrs)} />'
     
-    async def _build_messages_for_chat(self, event: Optional[Any] = None) -> List[Dict[str, Any]]:
+    async def _build_messages_for_chat(
+        self,
+        event: Optional[Any] = None,
+        supports_multimodal: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]:
         """构建用于 API 调用的消息列表
 
         System prompt 只保留静态核心指令（缓存友好）。
@@ -736,8 +760,8 @@ class Session:
         # 系统模式说明 + 执行规则（合并，先于角色设定以提升权重）
         parts.append(self.build_mode_prelude())
 
-        # 图片发送规则（功能规则）
-        parts.append(self.build_image_rules_prompt())
+        # 图片发送规则及模型能力分流（功能规则）
+        parts.append(self.build_image_rules_prompt(supports_multimodal))
 
         # 角色设定（persona 放后面，不影响工具执行规则的优先级）
         if self.persona:
