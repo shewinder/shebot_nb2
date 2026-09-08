@@ -74,6 +74,8 @@ def _build_api_config_dict(api_entry) -> Dict[str, Any]:
     config_dict = {
         **primary,
         "api": api_entry.api,
+        # 聚合组的顶层 model 仅作为逻辑名称，实际请求始终读取端点模型。
+        "model": api_entry.model,
         "endpoints": [build_endpoint(endpoint) for endpoint in endpoints],
     }
     return config_dict
@@ -88,23 +90,25 @@ class ApiManager:
             return False
         save_plugin_config("aichat", conf)
         return True
+
+    def is_current_api_group(self) -> bool:
+        """判断当前 API 是否为聚合组。"""
+        entry = conf.get_api_by_name(self.get_current_api())
+        return bool(entry and entry.endpoints)
     
     def get_current_model(self) -> str:
         api = self.get_current_api()
         entry = conf.get_api_by_name(api)
-        if not entry:
+        if not entry or entry.endpoints:
             return ""
-        return entry.endpoints[0].model if entry.endpoints else entry.model
+        return entry.model
     
     def set_current_model(self, model: str) -> bool:
         api = self.get_current_api()
         entry = conf.get_api_by_name(api)
-        if not entry:
+        if not entry or entry.endpoints:
             return False
-        if entry.endpoints:
-            entry.endpoints[0].model = model
-        else:
-            entry.model = model
+        entry.model = model
         save_plugin_config("aichat", conf)
         return True
     

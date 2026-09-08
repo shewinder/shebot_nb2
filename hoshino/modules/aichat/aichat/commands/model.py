@@ -7,10 +7,47 @@ from hoshino.permission import SUPERUSER
 from hoshino.typing import T_State
 
 from ..api import api_manager
-from ..config import Config
+from ..config import ApiEntry, Config, SubAgentProfile
 from ..service import sv
 
 conf = Config.get_instance('aichat')
+
+
+def _is_api_group(entry: Optional[ApiEntry]) -> bool:
+    """判断 API 是否配置了实际端点列表。"""
+    return bool(entry and entry.endpoints)
+
+
+def _api_model_label(entry: ApiEntry) -> str:
+    """生成 API 列表中的模型说明，避免把组首端点误显示为组模型。"""
+    if _is_api_group(entry):
+        return f"聚合组（{len(entry.endpoints)} 个端点）"
+    return f"模型: {entry.model}"
+
+
+def _endpoint_lines(entry: ApiEntry, indent: str = "   ") -> List[str]:
+    """生成聚合组端点说明。"""
+    lines: List[str] = []
+    for index, endpoint in enumerate(entry.endpoints, 1):
+        name = endpoint.name or f"端点{index}"
+        model = endpoint.model or "(未设置模型)"
+        lines.append(f"{indent}· {name} - {model}")
+    return lines
+
+
+def _profile_api_entry(profile: SubAgentProfile) -> Optional[ApiEntry]:
+    """解析子 Agent 实际使用的 API；空 api 表示继承当前 API。"""
+    api_name = profile.api or api_manager.get_current_api()
+    return conf.get_api_by_name(api_name)
+
+
+def _group_model_switch_message(api_name: str, entry: ApiEntry) -> str:
+    """说明聚合组不能通过模型命令修改。"""
+    return (
+        f"当前 API「{api_name}」是聚合组，不支持切换模型。\n"
+        f"模型由 endpoints 中的端点配置决定（共 {len(entry.endpoints)} 个）。\n"
+        "请直接修改配置文件中对应的 endpoints[].model。"
+    )
 
 switch_api_cmd = sv.on_command('切换API', aliases=('切换厂商', '选择API', '切换api'), permission=SUPERUSER, only_group=False)
 
@@ -29,7 +66,9 @@ async def switch_api(bot: Bot, event: Event):
         lines = ["可用 API 厂商："]
         for i, a in enumerate(apis, 1):
             mark = " (当前)" if a.api == current_api else ""
-            lines.append(f"{i}. {a.api}{mark} - 模型: {a.model}")
+            lines.append(f"{i}. {a.api}{mark} - {_api_model_label(a)}")
+            if _is_api_group(a):
+                lines.extend(_endpoint_lines(a))
         lines.append("\n请使用「切换API 厂商名」切换")
         await switch_api_cmd.finish("\n".join(lines))
         return
@@ -55,6 +94,14 @@ async def switch_api(bot: Bot, event: Event):
         return
 
     api_manager.set_current_api(target.api)
+    if _is_api_group(target):
+        lines = [
+            f"已切换 API 厂商为：{target.api}",
+            "当前为聚合组，模型由组内端点按顺序自动选择：",
+        ]
+        lines.extend(_endpoint_lines(target, indent="  "))
+        await switch_api_cmd.finish("\n".join(lines))
+        return
     await switch_api_cmd.finish(f"已切换 API 厂商为：{target.api}\n当前模型：{target.model}")
 
 
@@ -66,6 +113,11 @@ async def switch_model_handle(bot: Bot, event: Event, state: T_State):
     args: List[str] = str(event.message).strip().split(maxsplit=1)
 
     current_api: str = api_manager.get_current_api()
+    current_entry = conf.get_api_by_name(current_api)
+    if _is_api_group(current_entry):
+        await switch_model_cmd.finish(_group_model_switch_message(current_api, current_entry))
+        return
+
     old_model: str = api_manager.get_current_model()
 
     if len(args) >= 2:
@@ -89,8 +141,12 @@ async def switch_model_got(bot: Bot, event: Event, state: T_State):
         await switch_model_cmd.finish("已取消切换模型")
         return
 
-    current_api: str = state.get('current_api', '')
+    current_api: str = api_manager.get_current_api()
     old_model: str = state.get('old_model', '')
+    current_entry = conf.get_api_by_name(current_api)
+    if _is_api_group(current_entry):
+        await switch_model_cmd.finish(_group_model_switch_message(current_api, current_entry))
+        return
 
     if api_manager.set_current_model(model_name):
         await switch_model_cmd.finish(f"已切换模型：{old_model} → {model_name}\n当前 API 厂商：{current_api}")
@@ -108,6 +164,34 @@ async def search_model_handle(bot: Bot, event: Event):
 
     current_api: str = api_manager.get_current_api()
     current_model: str = api_manager.get_current_model()
+    current_entry = conf.get_api_by_name(current_api)
+
+    if _is_api_group(current_entry):
+        endpoint_items = [
+            (endpoint.name or f"端点{index}", endpoint.model)
+            for index, endpoint in enumerate(current_entry.endpoints, 1)
+        ]
+        if keyword:
+            endpoint_items = [
+                item for item in endpoint_items if keyword in (item[1] or "").lower()
+            ]
+        if not endpoint_items:
+            await search_model_cmd.finish(
+                f"未找到包含「{keyword}」的端点模型\n当前 API 厂商：{current_api}"
+            )
+            return
+
+        prefix: str = f"包含「{keyword}」的" if keyword else ""
+        lines: List[str] = [
+            f"{current_api} {prefix}端点模型（共 {len(endpoint_items)} 个）："
+        ]
+        for index, (name, model) in enumerate(endpoint_items[:30], 1):
+            lines.append(f"{index}. {name} - {model or '(未设置模型)'}")
+        if len(endpoint_items) > 30:
+            lines.append(f"... 还有 {len(endpoint_items) - 30} 个端点")
+        lines.append("\n聚合组不支持通过「切换模型」修改模型，请编辑 endpoints[].model")
+        await search_model_cmd.finish("\n".join(lines))
+        return
 
     models: List[str] = await api_manager.get_available_models()
     if not models:
@@ -145,20 +229,32 @@ current_model_cmd = sv.on_command('当前模型', aliases=('查看模型', '当�
 @current_model_cmd.handle()
 async def current_model(bot: Bot, event: Event):
     api_name = api_manager.get_current_api()
-    model_name = api_manager.get_current_model()
+    entry = conf.get_api_by_name(api_name)
 
-    lines = [
-        f"🤖 当前 API 厂商：{api_name}",
-        f"💬 对话模型：{model_name}",
-    ]
+    if _is_api_group(entry):
+        lines = [
+            f"🤖 当前 API 厂商：{api_name}",
+            "🧩 类型：聚合组",
+            f"💬 端点模型（按故障切换顺序，共 {len(entry.endpoints)} 个）：",
+        ]
+        lines.extend(_endpoint_lines(entry, indent="  "))
+    else:
+        model_name = api_manager.get_current_model()
+        lines = [
+            f"🤖 当前 API 厂商：{api_name}",
+            f"💬 对话模型：{model_name}",
+        ]
 
     if conf.subagent_profiles:
         lines.append(f"\n📦 子 Agent 模型配置：")
         for p in conf.subagent_profiles:
-            model_display = p.model
-            if not model_display and p.api:
-                entry = conf.get_api_by_name(p.api)
-                model_display = entry.model if entry else "默认"
+            profile_entry = _profile_api_entry(p)
+            if _is_api_group(profile_entry):
+                model_display = f"自动选择（聚合组，{len(profile_entry.endpoints)} 个端点）"
+            else:
+                model_display = p.model
+                if not model_display and p.api:
+                    model_display = profile_entry.model if profile_entry else "默认"
             mm = "🖼️" if p.supports_multimodal else ""
             lines.append(f"  · {p.name}: {model_display} ({p.api}) {mm}")
 
@@ -206,7 +302,9 @@ async def subapi(bot: Bot, event: Event):
         lines.append(f"\n可用 API 厂商：")
         for i, a in enumerate(apis, 1):
             mark = " ★当前" if a.api == target.api else ""
-            lines.append(f"  {i}. {a.api}{mark} - {a.model}")
+            lines.append(f"  {i}. {a.api}{mark} - {_api_model_label(a)}")
+            if _is_api_group(a):
+                lines.extend(_endpoint_lines(a, indent="     "))
         lines.append(f"\n使用「切换subapi {name} <api>」切换")
         await subapi_cmd.finish("\n".join(lines))
         return
@@ -235,10 +333,19 @@ async def subapi(bot: Bot, event: Event):
 
     old_api = target.api
     target.api = entry.api
-    target.model = entry.model  # 切 API 时自动跟进默认 model
+    # 聚合组不提供可覆盖的单一模型，清除旧值避免命令行显示造成误解。
+    target.model = "" if _is_api_group(entry) else entry.model
 
     save_plugin_config("aichat", conf)
 
+    if _is_api_group(entry):
+        lines = [
+            f"子Agent「{name}」API 已切换：{old_api or '(默认)'} → {entry.api}",
+            "当前为聚合组，模型由组内端点按顺序自动选择：",
+        ]
+        lines.extend(_endpoint_lines(entry, indent="  "))
+        await subapi_cmd.finish("\n".join(lines))
+        return
     await subapi_cmd.finish(
         f"子Agent「{name}」API 已切换：{old_api or '(默认)'} → {entry.api}\n"
         f"模型自动切换为：{entry.model}"
@@ -259,12 +366,15 @@ async def submodel_handle(bot: Bot, event: Event, state: T_State):
     if len(args) < 2:
         lines = ["📦 子Agent 配置："]
         for p in conf.subagent_profiles:
-            model_display = p.model
-            if not model_display and p.api:
-                entry = conf.get_api_by_name(p.api)
-                model_display = f"(继承: {entry.model})" if entry else "(继承主API)"
-            elif not model_display:
-                model_display = "(继承主API)"
+            entry = _profile_api_entry(p)
+            if _is_api_group(entry):
+                model_display = f"自动选择（聚合组，{len(entry.endpoints)} 个端点）"
+            else:
+                model_display = p.model
+                if not model_display and p.api:
+                    model_display = f"(继承: {entry.model})" if entry else "(继承主API)"
+                elif not model_display:
+                    model_display = "(继承主API)"
             lines.append(f"  · {p.name}: {model_display}")
         lines.append(f"\n使用「切换submodel <name> [model]」切换")
         await submodel_cmd.finish("\n".join(lines))
@@ -281,6 +391,14 @@ async def submodel_handle(bot: Bot, event: Event, state: T_State):
     if not target:
         available = ", ".join(p.name for p in conf.subagent_profiles)
         await submodel_cmd.finish(f"未找到名为 '{name}' 的子Agent 配置\n当前可用：{available}")
+        return
+
+    profile_entry = _profile_api_entry(target)
+    if _is_api_group(profile_entry):
+        await submodel_cmd.finish(
+            f"子Agent「{name}」使用的是聚合 API「{profile_entry.api}」，不支持单独切换模型。\n"
+            "模型由 endpoints 中的端点配置决定，请直接修改对应配置。"
+        )
         return
 
     if len(args) >= 3:
@@ -322,6 +440,13 @@ async def submodel_got(bot: Bot, event: Event, state: T_State):
 
     if not target:
         await submodel_cmd.finish("配置已变更，请重新操作")
+
+    profile_entry = _profile_api_entry(target)
+    if _is_api_group(profile_entry):
+        await submodel_cmd.finish(
+            f"子Agent「{name}」使用的是聚合 API「{profile_entry.api}」，不支持单独切换模型。\n"
+            "模型由 endpoints 中的端点配置决定，请直接修改对应配置。"
+        )
 
     old_model = target.model or "(继承)"
     target.model = model_name

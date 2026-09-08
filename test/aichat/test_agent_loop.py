@@ -36,7 +36,13 @@ from hoshino.modules.aichat.aichat.agent_loop import (  # noqa: E402
     run_agent_loop,
 )
 from hoshino.modules.aichat.aichat.chat_executor import ChatResult  # noqa: E402
-from hoshino.modules.aichat.aichat.config import Config  # noqa: E402
+from hoshino.modules.aichat.aichat.api import api_manager  # noqa: E402
+from hoshino.modules.aichat.aichat.config import (  # noqa: E402
+    ApiEndpoint,
+    ApiEntry,
+    Config,
+    SubAgentProfile,
+)
 from hoshino.modules.aichat.aichat.infra import AppError, llm_gateway as lg  # noqa: E402
 from hoshino.modules.aichat.aichat.session import Session, session_manager  # noqa: E402
 
@@ -142,6 +148,70 @@ class TestRunAgentLoop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.session._blocked_tools, frozenset({"web_search"}))
         self.assertTrue(result.session._subagent_locked_tools)
         self.assertEqual(result.session.agent_label, "sub:test")
+
+
+class TestAggregateApiModelSemantics(unittest.TestCase):
+    def setUp(self):
+        self.old_apis = conf.apis
+        self.old_current_api = conf.current_api
+        self.old_profiles = conf.subagent_profiles
+        conf.apis = [
+            ApiEntry(
+                api="vision",
+                model="vision-group",
+                endpoints=[
+                    ApiEndpoint(
+                        name="local",
+                        api_base="https://local",
+                        api_key="local-key",
+                        model="qwen3.8-27b",
+                        supports_multimodal=True,
+                    ),
+                    ApiEndpoint(
+                        name="fallback",
+                        api_base="https://fallback",
+                        api_key="fallback-key",
+                        model="kimi-k3",
+                        supports_multimodal=False,
+                    ),
+                ],
+            ),
+        ]
+        conf.current_api = "vision"
+
+    def tearDown(self):
+        conf.apis = self.old_apis
+        conf.current_api = self.old_current_api
+        conf.subagent_profiles = self.old_profiles
+
+    def test_group_model_is_read_only(self):
+        entry = conf.get_api_by_name("vision")
+        assert entry is not None
+        with patch("hoshino.modules.aichat.aichat.api.save_plugin_config") as save:
+            self.assertTrue(api_manager.is_current_api_group())
+            self.assertEqual(api_manager.get_current_model(), "")
+            self.assertFalse(api_manager.set_current_model("other-model"))
+
+        self.assertEqual(entry.model, "vision-group")
+        self.assertEqual(entry.endpoints[0].model, "qwen3.8-27b")
+        save.assert_not_called()
+
+    def test_profile_model_does_not_override_group(self):
+        conf.subagent_profiles = [
+            SubAgentProfile(
+                name="vision",
+                api="vision",
+                model="profile-model",
+                supports_multimodal=False,
+            )
+        ]
+        with patch.object(api_manager, "get_api_config", return_value={"api": "main"}):
+            resolved = agent_loop._resolve_api_config("vision")
+
+        assert resolved is not None
+        self.assertEqual(resolved["model"], "vision-group")
+        self.assertEqual(resolved["endpoints"][0]["model"], "qwen3.8-27b")
+        self.assertTrue(resolved["supports_multimodal"])
 
 
 class TestRehomeImages(unittest.IsolatedAsyncioTestCase):

@@ -42,6 +42,7 @@ class ApiEndpoint(BaseModel):
     name: str = ""
     api_base: str = "https://api.deepseek.com"
     api_key: str = ""
+    # 端点实际请求使用的模型。
     model: str = "deepseek-chat"
     supports_multimodal: Optional[bool] = None
     supports_tools: Optional[bool] = True
@@ -54,6 +55,7 @@ class ApiEntry(BaseModel):
     api: str = ""              # 厂商唯一标识（如 "kimi", "deepseek"）
     api_base: str = "https://api.deepseek.com"
     api_key: str = ""
+    # 单端点 API 的实际模型；endpoints 非空时仅作为聚合组逻辑名称。
     model: str = "deepseek-chat"
     supports_multimodal: Optional[bool] = None
     supports_tools: Optional[bool] = True
@@ -66,7 +68,8 @@ class SubAgentProfile(BaseModel):
     """子 Agent 模型配置"""
     name: str           # 标识，如 "search" / "vision"
     api: str = ""       # API 厂商名，空=跟随主 API
-    model: str = ""     # 模型名，空=使用 API 厂商默认模型
+    # 模型名，空=使用 API 厂商默认模型；API 为聚合组时该字段无效。
+    model: str = ""
     supports_multimodal: Optional[bool] = None  # 覆盖 API 厂商的多模态设置
     description: str = ""  # 用途描述（注入提示让 AI 选择）
     tool_names: List[str] = []           # 工具白名单，空=使用类型默认

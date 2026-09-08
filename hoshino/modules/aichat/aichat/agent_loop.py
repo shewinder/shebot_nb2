@@ -105,9 +105,10 @@ def _resolve_api_config(profile: Optional[str] = None) -> Optional[Dict[str, Any
         entry = conf.get_api_by_name(target.api)
         if entry:
             api_dict = _build_api_config_dict(entry)
-            if target.model:
+            # 聚合 API 的模型由 endpoints 决定，profile.model 仅对普通 API 生效。
+            if target.model and not entry.endpoints:
                 api_dict["model"] = target.model
-            if target.supports_multimodal is not None:
+            if target.supports_multimodal is not None and not entry.endpoints:
                 api_dict["supports_multimodal"] = target.supports_multimodal
             return api_dict
 
@@ -216,7 +217,10 @@ async def _run(task: AgentTask, session: Session) -> AgentResult:
             session, task.parent_session, task.image_identifiers
         )
 
-    supports_multimodal = api_config.get("supports_multimodal", False)
+    # 聚合组保留图片消息，具体端点是否支持由 ChatExecutor 在请求时适配。
+    supports_multimodal = bool(
+        api_config.get("supports_multimodal", False) or api_config.get("endpoints")
+    )
     if task.image_data_urls and not supports_multimodal:
         return AgentResult(
             result=ChatResult(
