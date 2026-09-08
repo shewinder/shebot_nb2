@@ -146,6 +146,8 @@ class Session:
         self.user_id = user_id
         self.group_id = group_id
         self.agent_label: str = "main"  # 日志标识：main / sub:vision / sub:search
+        # 逻辑 API 组当前成功端点索引；仅运行态保存，失败时才向后切换。
+        self._llm_endpoint_indices: Dict[str, int] = {}
         # 本轮已发送的媒体标识符（会话级去重）
         self._turn_sent_images: Set[str] = set()
         self._turn_state_lock = threading.Lock()

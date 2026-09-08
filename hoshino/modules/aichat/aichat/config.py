@@ -37,8 +37,20 @@ class MCPServerConfig(BaseModel):
     keywords: List[str] = []          # 触发关键词列表（可选，用于匹配用户意图）
 
 
+class ApiEndpoint(BaseModel):
+    """逻辑 API 组中的单个实际端点。"""
+    name: str = ""
+    api_base: str = "https://api.deepseek.com"
+    api_key: str = ""
+    model: str = "deepseek-chat"
+    supports_multimodal: Optional[bool] = None
+    supports_tools: Optional[bool] = True
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+
+
 class ApiEntry(BaseModel):
-    """单个厂商配置"""
+    """逻辑 API 配置；endpoints 非空时按顺序作为组内端点。"""
     api: str = ""              # 厂商唯一标识（如 "kimi", "deepseek"）
     api_base: str = "https://api.deepseek.com"
     api_key: str = ""
@@ -47,6 +59,7 @@ class ApiEntry(BaseModel):
     supports_tools: Optional[bool] = True
     max_tokens: Optional[int] = None  # None 表示不传给 API，使用模型默认值
     temperature: Optional[float] = None  # None 表示不传给 API，使用模型默认值
+    endpoints: List[ApiEndpoint] = []  # 组内端点，按配置顺序尝试
 
 
 class SubAgentProfile(BaseModel):

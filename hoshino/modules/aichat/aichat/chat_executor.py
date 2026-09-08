@@ -6,6 +6,7 @@
 - 将结果写回 Session
 """
 import asyncio
+import copy
 import json
 import re
 import time
@@ -58,6 +59,57 @@ class ChatExecutor:
     def __init__(self, session: "Session"):
         self.session = session
 
+    @staticmethod
+    def _remove_image_urls(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """为不支持多模态的组内端点移除图片内容，避免修改会话历史。"""
+        adapted = copy.deepcopy(messages)
+        for message in adapted:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            message["content"] = [
+                part for part in content
+                if not (isinstance(part, dict) and part.get("type") == "image_url")
+            ]
+        return adapted
+
+    @staticmethod
+    def _get_endpoints(api_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """读取逻辑 API 的实际端点；兼容旧的单端点配置。"""
+        endpoints = api_config.get("endpoints")
+        if isinstance(endpoints, list) and endpoints:
+            return [endpoint for endpoint in endpoints if isinstance(endpoint, dict)]
+        return [api_config]
+
+    def _endpoint_state_key(self, api_config: Dict[str, Any]) -> str:
+        """为会话内端点游标生成逻辑 API 标识。"""
+        return str(api_config.get("api") or api_config.get("api_base") or "default")
+
+    def _get_endpoint_order(
+        self,
+        api_config: Dict[str, Any],
+        endpoint_count: int,
+    ) -> List[int]:
+        """从会话上次成功端点开始尝试，并在失败后按顺序循环一遍。"""
+        if endpoint_count <= 0:
+            return []
+        state = getattr(self.session, "_llm_endpoint_indices", {})
+        current = state.get(self._endpoint_state_key(api_config), 0)
+        if not isinstance(current, int) or not 0 <= current < endpoint_count:
+            current = 0
+        return [
+            (current + offset) % endpoint_count
+            for offset in range(endpoint_count)
+        ]
+
+    def _remember_endpoint(self, api_config: Dict[str, Any], index: int) -> None:
+        """记录本次会话最后成功的端点。"""
+        state = getattr(self.session, "_llm_endpoint_indices", None)
+        if not isinstance(state, dict):
+            state = {}
+            self.session._llm_endpoint_indices = state
+        state[self._endpoint_state_key(api_config)] = index
+
     @property
     def _tag(self) -> str:
         label = getattr(self.session, 'agent_label', 'main')
@@ -86,7 +138,7 @@ class ChatExecutor:
             supports_multimodal=bool(api_config.get("supports_multimodal", False)),
         )
 
-        if tools is None and api_config.get("supports_tools", False):
+        if tools is None and api_config.get("supports_tools", True):
             tools = await get_available_tools(session=self.session)
 
         chat_context: Dict[str, Any] = {'session': self.session}
@@ -120,7 +172,7 @@ class ChatExecutor:
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> APIResponse:
         """单次 AI API 调用（经 LLMGateway：超时/重试/脱敏）"""
-        if not api_config or not api_config.get("api_key"):
+        if not api_config:
             logger.warning("AI API 未配置或密钥为空")
             return APIResponse(error=AppError("API 未配置", code="llm.unconfigured"))
 
@@ -128,66 +180,84 @@ class ChatExecutor:
             logger.error("消息列表为空")
             return APIResponse(error=AppError("消息列表为空", code="llm.empty_messages"))
 
-        call_tools = tools if (tools and api_config.get("supports_tools", False)) else None
-        if call_tools:
-            logger.debug(f"启用 Tool Calling，工具数量: {len(call_tools)}")
+        endpoints = self._get_endpoints(api_config)
+        last_error: Optional[AppError] = None
+        for endpoint_index in self._get_endpoint_order(api_config, len(endpoints)):
+            endpoint = endpoints[endpoint_index]
+            if not endpoint.get("api_key"):
+                last_error = AppError("API 未配置", code="llm.unconfigured")
+                continue
 
-        MAX_LOG_MESSAGES = 2
-        total_msgs = len(messages)
-        if total_msgs > MAX_LOG_MESSAGES:
-            log_messages = [{"role": "system", "content": f"...[省略 {total_msgs - MAX_LOG_MESSAGES} 条历史消息]..."}] + messages[-MAX_LOG_MESSAGES:]
-        else:
-            log_messages = messages
+            endpoint_messages = messages
+            if not endpoint.get("supports_multimodal", False):
+                endpoint_messages = self._remove_image_urls(messages)
 
-        log_payload = {
-            "model": api_config["model"],
-            "messages": sanitize(log_messages),
-        }
-        if "max_tokens" in api_config:
-            log_payload["max_tokens"] = api_config["max_tokens"]
-        if "temperature" in api_config:
-            log_payload["temperature"] = api_config["temperature"]
-        if call_tools:
-            log_payload["tools_count"] = len(call_tools)
+            call_tools = tools if (tools and endpoint.get("supports_tools", True)) else None
+            if call_tools:
+                logger.debug(f"启用 Tool Calling，工具数量: {len(call_tools)}")
 
-        logger.info(f"{self._tag} 调用 AI API: model={api_config['model']}, Payload: {log_json(truncate_log(log_payload))}")
+            MAX_LOG_MESSAGES = 2
+            total_msgs = len(endpoint_messages)
+            if total_msgs > MAX_LOG_MESSAGES:
+                log_messages = [{"role": "system", "content": f"...[省略 {total_msgs - MAX_LOG_MESSAGES} 条历史消息]..."}] + endpoint_messages[-MAX_LOG_MESSAGES:]
+            else:
+                log_messages = endpoint_messages
 
-        gateway = get_gateway(
-            api_config["api_base"],
-            api_config["api_key"],
-            max_retries=conf.llm_max_retries,
-            connect_timeout=conf.llm_connect_timeout,
-            read_timeout=conf.llm_read_timeout,
-        )
+            log_payload = {
+                "model": endpoint["model"],
+                "messages": sanitize(log_messages),
+            }
+            if "max_tokens" in endpoint:
+                log_payload["max_tokens"] = endpoint["max_tokens"]
+            if "temperature" in endpoint:
+                log_payload["temperature"] = endpoint["temperature"]
+            if call_tools:
+                log_payload["tools_count"] = len(call_tools)
 
-        try:
-            result = await gateway.chat(
-                messages,
-                model=api_config["model"],
-                tools=call_tools,
-                temperature=api_config.get("temperature"),
-                max_tokens=api_config.get("max_tokens"),
+            endpoint_name = endpoint.get("name") or endpoint.get("model", "unknown")
+            logger.info(f"{self._tag} 调用 AI API: endpoint={endpoint_name}, model={endpoint['model']}, Payload: {log_json(truncate_log(log_payload))}")
+
+            gateway = get_gateway(
+                endpoint["api_base"],
+                endpoint["api_key"],
+                max_retries=conf.llm_max_retries,
+                connect_timeout=conf.llm_connect_timeout,
+                read_timeout=conf.llm_read_timeout,
             )
-        except LLMError as e:
-            logger.error(f"{self._tag} AI API 调用失败: {e}")
-            return APIResponse(error=e)
 
-        logger.info(f"{self._tag} AI API 响应: {log_json(sanitize(result.raw))}")
+            try:
+                result = await gateway.chat(
+                    endpoint_messages,
+                    model=endpoint["model"],
+                    tools=call_tools,
+                    temperature=endpoint.get("temperature"),
+                    max_tokens=endpoint.get("max_tokens"),
+                )
+            except LLMError as e:
+                last_error = e
+                logger.error(f"{self._tag} AI API 调用失败（{endpoint_name}），尝试组内下一个端点: {e}")
+                continue
 
-        assistant_message: Optional[Dict[str, Any]] = None
-        if result.raw:
-            choices = result.raw.get("choices") or []
-            if choices:
-                assistant_message = choices[0].get("message")
+            self._remember_endpoint(api_config, endpoint_index)
 
-        return APIResponse(
-            content=result.content,
-            reasoning_content=result.reasoning_content,
-            tool_calls=result.tool_calls,
-            finish_reason=result.finish_reason or "",
-            assistant_message=assistant_message,
-            usage=result.usage,
-        )
+            logger.info(f"{self._tag} AI API 响应: {log_json(sanitize(result.raw))}")
+
+            assistant_message: Optional[Dict[str, Any]] = None
+            if result.raw:
+                choices = result.raw.get("choices") or []
+                if choices:
+                    assistant_message = choices[0].get("message")
+
+            return APIResponse(
+                content=result.content,
+                reasoning_content=result.reasoning_content,
+                tool_calls=result.tool_calls,
+                finish_reason=result.finish_reason or "",
+                assistant_message=assistant_message,
+                usage=result.usage,
+            )
+
+        return APIResponse(error=last_error or AppError("API 不可用", code="llm.unavailable"))
 
     async def _execute_tool_call(
         self,
@@ -335,7 +405,7 @@ class ChatExecutor:
         if max_tool_rounds is None:
             max_tool_rounds = conf.max_tool_rounds
 
-        if not tools or not api_config.get("supports_tools", False):
+        if not tools or not api_config.get("supports_tools", True):
             resp = await self._call_ai_api(messages, api_config, tools=None)
             return ChatResult(
                 content=resp.content,
@@ -351,7 +421,7 @@ class ChatExecutor:
         for round_num in range(max_tool_rounds):
             logger.debug(f"{self._tag} Tool calling 第 {round_num + 1} 轮")
 
-            if round_num > 0 and api_config.get("supports_tools", False) and not getattr(self.session, '_subagent_locked_tools', False):
+            if round_num > 0 and api_config.get("supports_tools", True) and not getattr(self.session, '_subagent_locked_tools', False):
                 tools = await get_available_tools(session=self.session)
                 logger.debug(f"{self._tag} [MCP] 第 {round_num + 1} 轮重新获取工具，共 {len(tools) if tools else 0} 个")
 

@@ -23,6 +23,8 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from hoshino.modules.aichat.aichat.chat_executor import ChatExecutor  # noqa: E402
 from hoshino.modules.aichat.aichat.config import Config  # noqa: E402
+from hoshino.modules.aichat.aichat.infra.errors import LLMTimeoutError  # noqa: E402
+from hoshino.modules.aichat.aichat.infra.llm_gateway import LLMResult  # noqa: E402
 from hoshino.modules.aichat.aichat.session import Session  # noqa: E402
 from hoshino.modules.aichat.aichat.tools import permission  # noqa: E402
 from hoshino.modules.aichat.aichat.tools.registry import ok, tool_registry  # noqa: E402
@@ -103,6 +105,56 @@ class TestExecutorTimeout(unittest.IsolatedAsyncioTestCase):
             self.assertIn("超时", parsed["error"])
         finally:
             conf.tool_timeout = old_timeout
+
+
+class TestEndpointGroup(unittest.IsolatedAsyncioTestCase):
+    async def test_fallback_removes_image_url_only_for_text_endpoint(self):
+        class FakeGateway:
+            def __init__(self, should_fail):
+                self.should_fail = should_fail
+                self.messages = None
+                self.calls = 0
+
+            async def chat(self, messages, **kwargs):
+                self.messages = messages
+                self.calls += 1
+                if self.should_fail:
+                    raise LLMTimeoutError("timeout")
+                return LLMResult(content="ok", raw={"choices": [{"message": {"role": "assistant", "content": "ok"}}]})
+
+        multimodal = FakeGateway(should_fail=True)
+        text_only = FakeGateway(should_fail=False)
+
+        def fake_get_gateway(api_base, api_key, **kwargs):
+            return multimodal if api_base == "https://mm" else text_only
+
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                {"type": "text", "text": "describe"},
+            ],
+        }]
+        api_config = {
+            "api": "pool",
+            "endpoints": [
+                {"name": "mm", "api_base": "https://mm", "api_key": "k", "model": "vision", "supports_multimodal": True},
+                {"name": "text", "api_base": "https://text", "api_key": "k", "model": "text", "supports_multimodal": False},
+            ],
+            "supports_tools": True,
+        }
+
+        executor = ChatExecutor(Session("group_fallback", 1))
+        with patch("hoshino.modules.aichat.aichat.chat_executor.get_gateway", side_effect=fake_get_gateway):
+            result = await executor._call_ai_api(messages, api_config)
+            second_result = await executor._call_ai_api(messages, api_config)
+
+        self.assertEqual(result.content, "ok")
+        self.assertEqual(second_result.content, "ok")
+        self.assertEqual(messages[0]["content"][0]["type"], "image_url")
+        self.assertEqual(text_only.messages[0]["content"], [{"type": "text", "text": "describe"}])
+        self.assertEqual(multimodal.calls, 1)
+        self.assertEqual(text_only.calls, 2)
 
 
 if __name__ == "__main__":

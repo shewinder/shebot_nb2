@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from hoshino.config import save_plugin_config
-from .config import Config
+from .config import ApiEndpoint, Config
 import httpx
 
 conf = Config.get_instance('aichat')
@@ -42,17 +42,40 @@ async def fetch_available_models(api_base: str, api_key: str) -> List[str]:
 
 
 def _build_api_config_dict(api_entry) -> Dict[str, Any]:
+    endpoints = api_entry.endpoints or [
+        ApiEndpoint(
+            name=api_entry.api,
+            api_base=api_entry.api_base,
+            api_key=api_entry.api_key,
+            model=api_entry.model,
+            supports_multimodal=api_entry.supports_multimodal,
+            supports_tools=api_entry.supports_tools,
+            max_tokens=api_entry.max_tokens,
+            temperature=api_entry.temperature,
+        )
+    ]
+
+    def build_endpoint(endpoint: ApiEndpoint) -> Dict[str, Any]:
+        config = {
+            "name": endpoint.name,
+            "api_base": endpoint.api_base,
+            "api_key": endpoint.api_key,
+            "model": endpoint.model,
+            "supports_multimodal": endpoint.supports_multimodal if endpoint.supports_multimodal is not None else False,
+            "supports_tools": endpoint.supports_tools if endpoint.supports_tools is not None else True,
+        }
+        if endpoint.max_tokens is not None:
+            config["max_tokens"] = endpoint.max_tokens
+        if endpoint.temperature is not None:
+            config["temperature"] = endpoint.temperature
+        return config
+
+    primary = build_endpoint(endpoints[0])
     config_dict = {
-        "api_base": api_entry.api_base,
-        "api_key": api_entry.api_key,
-        "model": api_entry.model,
-        "supports_multimodal": api_entry.supports_multimodal if api_entry.supports_multimodal is not None else False,
-        "supports_tools": api_entry.supports_tools if api_entry.supports_tools is not None else False,
+        **primary,
+        "api": api_entry.api,
+        "endpoints": [build_endpoint(endpoint) for endpoint in endpoints],
     }
-    if api_entry.max_tokens is not None:
-        config_dict["max_tokens"] = api_entry.max_tokens
-    if api_entry.temperature is not None:
-        config_dict["temperature"] = api_entry.temperature
     return config_dict
 
 
@@ -69,14 +92,19 @@ class ApiManager:
     def get_current_model(self) -> str:
         api = self.get_current_api()
         entry = conf.get_api_by_name(api)
-        return entry.model if entry else ""
+        if not entry:
+            return ""
+        return entry.endpoints[0].model if entry.endpoints else entry.model
     
     def set_current_model(self, model: str) -> bool:
         api = self.get_current_api()
         entry = conf.get_api_by_name(api)
         if not entry:
             return False
-        entry.model = model
+        if entry.endpoints:
+            entry.endpoints[0].model = model
+        else:
+            entry.model = model
         save_plugin_config("aichat", conf)
         return True
     
