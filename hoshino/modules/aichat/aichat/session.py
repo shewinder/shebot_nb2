@@ -116,6 +116,10 @@ class Session:
     INLINE_MEDIA_PATTERN = re.compile(
         r"data:(?:image|video)/[^;\s]+;base64,[A-Za-z0-9+/=]+"
     )
+    # 内联媒体落盘后已无内容可用于请求，标记为丢弃而非写占位符
+    _SNAPSHOT_DROP = object()
+    # content 全为内联媒体时丢弃后的兜底文本（消息 content 不能为空）
+    _SNAPSHOT_MEDIA_ONLY_TEXT = "[图片已省略]"
 
     def __init__(self, session_id: str, user_id: int,
                  persona: Optional[str] = None, group_id: Optional[int] = None,
@@ -471,9 +475,23 @@ class Session:
                 return sanitized[:cls.MAX_PERSISTED_STRING_LENGTH] + "...[truncated]"
             return sanitized
         if isinstance(value, dict):
-            return {str(k): cls._snapshot_value(v) for k, v in value.items()}
+            # 图片内容块只在当轮内存里有效，落盘后既无图片数据也无合法 URL，
+            # 保留下去会被下一次请求当作 image_url 发给模型（API 直接 400）
+            if value.get("type") == "image_url":
+                return cls._SNAPSHOT_DROP
+            result: Dict[str, Any] = {}
+            for key, item in value.items():
+                snapshot = cls._snapshot_value(item)
+                if snapshot is not cls._SNAPSHOT_DROP:
+                    result[str(key)] = snapshot
+            if isinstance(result.get("content"), list) and not result["content"]:
+                result["content"] = cls._SNAPSHOT_MEDIA_ONLY_TEXT
+            return result
         if isinstance(value, (list, tuple)):
-            return [cls._snapshot_value(v) for v in value]
+            return [
+                snapshot for snapshot in (cls._snapshot_value(item) for item in value)
+                if snapshot is not cls._SNAPSHOT_DROP
+            ]
         if value is None or isinstance(value, (bool, int, float)):
             return value
         return str(value)[:cls.MAX_PERSISTED_STRING_LENGTH]
