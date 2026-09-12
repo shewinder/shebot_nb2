@@ -29,7 +29,7 @@ from _common import (
 )
 from comfyui_workflow_loader import (
     load_workflow,
-    apply_prompt, apply_input_images, apply_size,
+    apply_prompt, apply_input_images, apply_size, apply_lora_weight,
     list_available_models,
 )
 
@@ -67,7 +67,8 @@ def upload_image_to_comfyui(image_path: str) -> str:
 def call_comfyui_generate(prompt: str,
                           aspect_ratio: str = "",
                           model_name: str = "",
-                          image_paths: Optional[List[str]] = None) -> Dict[str, Any]:
+                          image_paths: Optional[List[str]] = None,
+                          lora_weight: Optional[float] = None) -> Dict[str, Any]:
     """调用 ComfyUI 生成图片
 
     Args:
@@ -75,6 +76,7 @@ def call_comfyui_generate(prompt: str,
         aspect_ratio: 宽高比
         model_name: 工作流模型名（对应 reference/ 下的 .json 文件名）
         image_paths: 本地图片路径列表
+        lora_weight: LoRA 强度（None = 用工作流默认值；0 = 删除 LoRA 节点）
 
     Returns:
         {"success": True, "data": bytes} 或 {"success": False, "error": str}
@@ -101,6 +103,15 @@ def call_comfyui_generate(prompt: str,
 
     # 调整尺寸
     apply_size(wf, aspect_ratio)
+
+    # 动态调整 LoRA 强度（0 = 删除 LoRA 节点，直连上游）
+    if lora_weight is not None:
+        affected = apply_lora_weight(wf, lora_weight)
+        if affected:
+            action = "删除（直连上游）" if lora_weight <= 0 else f"强度 -> {lora_weight:g}"
+            print(f"[lora] 节点 {','.join(affected)} {action}", file=sys.stderr)
+        else:
+            print(f"[lora] 工作流 {model_name} 无 LoRA 节点，--lora-weight 忽略", file=sys.stderr)
 
     # 提交任务
     url = f"{base}/prompt"
@@ -171,7 +182,21 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--size", default="", help="分辨率")
     parser.add_argument("--api", default="", help="指定 API 配置名称")
     parser.add_argument("--model", default="", help="ComfyUI 工作流模型名（对应 reference/ 下的 .json 文件名）")
+    parser.add_argument("--lora-weight", default="", help="LoRA 强度，0~2；0 = 不使用 LoRA（删除节点）；省略 = 工作流默认值")
     return parser.parse_args()
+
+
+def _parse_lora_weight(raw: str) -> Optional[float]:
+    """解析 --lora-weight（空字符串 = 不指定，用工作流默认值）"""
+    if not raw.strip():
+        return None
+    try:
+        weight = float(raw)
+    except ValueError:
+        raise RuntimeError(f"--lora-weight 必须是数字: {raw}")
+    if not 0 <= weight <= 2:
+        raise RuntimeError(f"--lora-weight 取值范围 0 ~ 2: {raw}")
+    return weight
 
 
 def main() -> None:
@@ -179,6 +204,12 @@ def main() -> None:
 
     if not args.model:
         output_error("--model 参数必填")
+        return
+
+    try:
+        lora_weight = _parse_lora_weight(args.lora_weight)
+    except RuntimeError as e:
+        output_error(str(e))
         return
 
     # 解析图片标识符为本地路径
@@ -199,7 +230,8 @@ def main() -> None:
         args.prompt,
         aspect_ratio=args.aspect_ratio,
         model_name=args.model,
-        image_paths=image_paths if image_paths else None
+        image_paths=image_paths if image_paths else None,
+        lora_weight=lora_weight,
     )
 
     if not result.get("success"):

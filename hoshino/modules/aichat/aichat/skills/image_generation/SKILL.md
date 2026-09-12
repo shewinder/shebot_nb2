@@ -15,8 +15,9 @@ disable-model_invocation: false
 - ComfyUI 暂不支持（如图像编辑）
 - ComfyUI 不可用或报错
 
-**二次元/动漫场景一律优先 `anima_turbo_lora`**（2025 新架构，材质细节最强）；仅当它不可用/报错，或用户明确指定时，才用 WAI-illustrious / novaAnimeXL_ilV180。这些模型**均不支持写实/真人场景**（用户要求写实照片、真人肖像时不用）。
+**二次元/动漫场景一律优先 `anima_turbo_lora`**（Anima Turbo + 美学 LoRA，约 5 秒/张）。仅当 Anima 不可用/报错，或用户明确指定时，才用 WAI-illustrious / novaAnimeXL_ilV180。这些模型**均不支持写实/真人场景**（用户要求写实照片、真人肖像时不用）。
 - **画师风格**（用户说"XX 画风/风格"）→ prompt 里加 `@画师名`（小写、空格代下划线，如鬼针草 → `@chen bin`）；风格不够强时提高该标签权重，如 `(@chen bin:1.5)`
+- **LoRA 强度可调**（`anima_turbo_lora`）→ 加 `--lora-weight`：画面过于福利向/风格过重时降到 `0.6~0.8`；要更干净稳定的画面、或用户明确不要 LoRA 影响时用 `0`（等效纯净版 Turbo）
 - **动漫 NSFW** → 同上模型。**NSFW prompt 必带显露去遮挡标签组**：`completely nude, bare breasts, nipples, pussy, uncensored, arms at sides, legs apart, fully exposed, no covering`——美学 LoRA 有"安全化"倾向（用被子/手臂/头发遮挡关键部位），实测这组标签可完全消除遮挡；**真人/写实 NSFW（尤其特写解剖）不要用 Anima**，改用支持写实的通道
 
 **Cosplay 场景**：cosplay 指"真人 coser 扮演动漫角色"，属于**写实照片风格**，不是二次元动漫风格。应使用支持写实的模型，**不要**使用 WAI-illustrious。
@@ -26,8 +27,7 @@ disable-model_invocation: false
 | 模型 | 协议脚本 | Prompt 语言 | 特点与调优要点 | 能力 | 内容审查 |
 |------|---------|------------|---------------|------|----------|
 | WAI-illustrious | comfyui.py | **英文** | 动漫/二次元专用。英文标签式 prompt，加 `masterpiece, best quality, highly detailed` 和角色名标签 | 文生图 | 完全无审核 |
-| anima_turbo_lora | comfyui.py | **英文（Danbooru 标签）** | **Anima 首选**：Anima 2B Turbo + 美学 LoRA（`anima-highres-aesthetic-boost` @1.0，材质/细节增强，约 4-11 秒/张）。正向前缀 `masterpiece, best quality, score_7, safe, `；标签顺序 `[质量][1girl][角色][系列][@画师][外观][动作][环境]`；**画师风格用 `@画师名`**（小写、**空格代下划线**，如鬼针草 → `@chen bin`；实测下划线/括号原名无效）；**NSFW 必带显露去遮挡标签**（见下）；非商业许可 | 文生图 | 完全无审核 |
-| anima_turbo | comfyui.py | **英文（Danbooru 标签）** | Anima 2B Turbo 纯净版（无 LoRA）。协议同上。需要更"素"的画面或排查 LoRA 影响时用 | 文生图 | 完全无审核 |
+| anima_turbo_lora | comfyui.py | **英文（Danbooru 标签）** | **Anima 首选（唯一 Anima 工作流）**：Anima Turbo + 美学 LoRA（`anima-highres-aesthetic-boost` @1.0），10 步 + CFG 1 + er_sde，约 5 秒/张，`--lora-weight` 可调 0~2（0 = 纯净版）。协议：正向 `masterpiece, best quality, score_7, safe, ` 前缀；标签顺序 `[质量][1girl][角色][系列][@画师][外观][动作][环境]`；**画师风格用 `@画师名`**（小写、**空格代下划线**，如鬼针草 → `@chen bin`；下划线/括号原名无效，不够强时加权如 `(@chen bin:1.5)`）；**NSFW 必带显露去遮挡标签**（见下）；非商业许可 | 文生图 | 完全无审核 |
 | novaAnimeXL_ilV180 | comfyui.py | **英文** | 动漫/二次元，色彩鲜艳。同标签式英文 prompt，加 `anime style, vibrant colors, cel shading` | 文生图 | 完全无审核 |
 | illustriousxlMmmix_v80 | comfyui.py | **英文** | 基于 illustriousXL 的 Mmmix v8.0，增强写实风格。英文 prompt，加 `masterpiece, best quality, very aesthetic, latest`，自然语言 | 文生图 | 完全无审核 |
 | bytedance/seedream-v4/edit | atlascloud.py | 中文 | 通用高质量，写实/动漫均可。保留中文，加 `高清细节，精美画质，极致细腻` 和中文风格词 | 文生图, 单图编辑, 多张编辑 | 几乎无审核 |
@@ -101,6 +101,7 @@ AI 生成/存储的图片标识符出现在工具返回结果中。它们是内�
 - `--aspect-ratio` (可选): `1:1`, `4:3`, `3:4`, `16:9`, `9:16`, `2:3`, `3:2`
 - `--size` (可选): `512`, `1K`, `2K`, `4K`
 - `--model` (必填): 模型名称（动漫场景用 `anima_turbo_lora`；`reference/{model}.json` 为对应工作流）
+- `--lora-weight` (可选): LoRA 强度 `0 ~ 2`，省略 = 用工作流内置值（1.0）。**仅 `anima_turbo_lora` 有效**：`0` = 完全不使用 LoRA（脚本自动删除 LoRA 节点并直连上游，等效纯净版 Turbo）；`0.8` 等数值用于压低 LoRA 影响；无 LoRA 节点的工作流传了会被忽略
 - `timeout` (execute_script 参数): 生图任务建议设为 `300`（默认 180 秒，生图建议拉满）
 
 **通用调用示例**：

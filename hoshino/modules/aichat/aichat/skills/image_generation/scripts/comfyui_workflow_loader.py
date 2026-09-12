@@ -38,6 +38,13 @@ _LATENT_IMAGE_CLASSES = {
     "EmptyLatentImageSDXL",
 }
 
+# ---------- LoRA 节点类型 ----------
+# class_type -> {输出槽位: 对应的上游输入名}，用于删除节点时把下游改接上游
+_LORA_CLASSES: Dict[str, Dict[int, str]] = {
+    "LoraLoaderModelOnly": {0: "model"},
+    "LoraLoader": {0: "model", 1: "clip"},
+}
+
 
 def list_available_models() -> List[str]:
     """扫描 reference/ 目录，返回所有可用模型名（不含 .json 后缀）"""
@@ -117,3 +124,61 @@ def apply_size(workflow: Dict[str, Any], aspect_ratio: str) -> None:
             inputs["width"] = size["width"]
             inputs["height"] = size["height"]
             break
+
+
+def _is_link(value: Any) -> bool:
+    """判断是否为节点连线 [node_id, output_slot]"""
+    return (isinstance(value, list) and len(value) == 2
+            and isinstance(value[0], str) and isinstance(value[1], int))
+
+
+def _resolve_upstream(workflow: Dict[str, Any], link: List[Any],
+                      lora_ids: set) -> List[Any]:
+    """穿透（可能级联的）LoRA 节点，返回真正的上游连线"""
+    seen: set = set()
+    node_id, slot = link
+    while node_id in lora_ids and node_id in workflow and node_id not in seen:
+        seen.add(node_id)
+        input_key = _LORA_CLASSES[workflow[node_id]["class_type"]].get(slot)
+        if not input_key:
+            break
+        upstream = workflow[node_id].get("inputs", {}).get(input_key)
+        if not _is_link(upstream):
+            break
+        link = upstream
+        node_id, slot = link
+    return link
+
+
+def apply_lora_weight(workflow: Dict[str, Any], weight: float) -> List[str]:
+    """动态设置工作流中所有 LoRA 节点的强度
+
+    weight > 0 时写入 strength_model；weight <= 0 时删除 LoRA 节点，
+    并把下游连线改接到该节点的上游（等效于该工作流不带 LoRA 的版本）。
+
+    Returns:
+        受影响的 LoRA 节点 id 列表（工作流无 LoRA 节点时为空）
+    """
+    lora_ids = [nid for nid, node in workflow.items()
+                if isinstance(node, dict) and node.get("class_type") in _LORA_CLASSES]
+    if not lora_ids:
+        return []
+
+    if weight > 0:
+        for nid in lora_ids:
+            inputs: Dict[str, Any] = workflow[nid].setdefault("inputs", {})
+            inputs["strength_model"] = weight
+            if "strength_clip" in inputs:
+                inputs["strength_clip"] = weight
+        return lora_ids
+
+    lora_id_set = set(lora_ids)
+    for nid in lora_ids:
+        for node in workflow.values():
+            if not isinstance(node, dict):
+                continue
+            for key, value in node.get("inputs", {}).items():
+                if _is_link(value) and value[0] == nid:
+                    node["inputs"][key] = _resolve_upstream(workflow, value, lora_id_set)
+        del workflow[nid]
+    return lora_ids
