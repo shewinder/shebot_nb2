@@ -135,21 +135,20 @@ class MCPToolBridge:
         返回一个格式化的文本，列出所有可用的 MCP server，
         供 AI 根据用户意图选择激活。
 
-        default_active=True 的 server 会在会话创建时自动激活，
-        无需 AI 手动调用 activate_mcp_server。
+        实际可用工具以本轮工具列表为准。
 
         Returns:
             格式化文本，如果没有可用的 server 返回空字符串
         """
         servers = self.server_manager.list_server_metadata()
-        enabled_servers = [s for s in servers if s.get("enabled", True)]
+        visible_servers = [
+            s for s in servers
+            if s.get("enabled", True)
+            and (s.get("default_active", False) or s.get("auto_trigger", True))
+        ]
 
-        if not enabled_servers:
+        if not visible_servers:
             return ""
-
-        # 分离默认激活和按需激活的 server
-        default_servers = [s for s in enabled_servers if s.get("default_active", False)]
-        ondemand_servers = [s for s in enabled_servers if not s.get("default_active", False) and s.get("auto_trigger", True)]
 
         lines = [
             "=" * 40,
@@ -157,41 +156,20 @@ class MCPToolBridge:
             "=" * 40,
         ]
 
-        if default_servers:
-            lines.append("")
-            lines.append("🔌 已默认激活（工具可直接使用）：")
-            for server in default_servers:
-                desc = server.get("description") or server.get("name", server["id"])
-                lines.append(f"  • {server['id']}: {desc}")
+        lines.extend(["", "可用 MCP server："])
+        for server in visible_servers:
+            desc = server.get("description") or server.get("name", server["id"])
+            lines.append(f"  • {server['id']}: {desc}")
 
-        if ondemand_servers:
-            lines.append("")
-            lines.append("📋 按需激活（需要时使用 activate_mcp_server 激活）：")
-            for server in ondemand_servers:
-                desc = server.get("description") or server.get("name", server["id"])
-                lines.append(f"  • {server['id']}: {desc}")
-            lines.extend([
-                "",
-                "💡 使用指导：",
-                "1. 默认激活的 server 工具已可用，直接调用即可（格式：mcp_<server_id>_<工具名>）",
-                "2. 按需激活的 server 需要先用 activate_mcp_server 激活",
-                "3. 使用 MCP 工具时，直接调用 mcp_<server_id>_<工具名>，不要调用 execute_script！",
-                "4. 如果当前没有合适的 MCP server，按常规方式回答",
-                "5. 不要重复激活已激活的 MCP server",
-                "",
-                "🔧 使用方法：",
-                "  - 激活：activate_mcp_server(server_id=\"xxx\")",
-                "  - 调用 MCP 工具：mcp_xxx_toolname(args)",
-                "",
-                "⚠️ 注意：MCP 工具名称格式为 mcp_<server_id>_<原始工具名>，",
-                "   激活后请查看返回结果中的具体工具名称！",
-            ])
-        elif default_servers:
-            lines.extend([
-                "",
-                "💡 以上 MCP server 已默认激活，工具可直接调用（格式：mcp_<server_id>_<工具名>）",
-                "如需禁用某个 server，请使用 deactivate_mcp_server。",
-            ])
+        lines.extend([
+            "",
+            "使用指导：",
+            "1. 优先使用本轮工具列表中已有的工具；所需服务器的工具未提供时，可调用 activate_mcp_server 激活。",
+            "2. MCP 工具请按本轮工具列表中的实际名称直接调用。",
+            "3. 如果当前没有合适的 MCP server，按常规方式回答。",
+            "",
+            "激活：activate_mcp_server(server_id=\"xxx\")",
+        ])
 
         return "\n".join(lines)
     

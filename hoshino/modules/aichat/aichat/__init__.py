@@ -10,7 +10,7 @@ from .api import api_manager
 from .chat import handle_ai_chat
 from .config import Config
 from .infra import close_all_gateways
-from .mcp import init_mcp_session_manager, mcp_server_manager
+from .mcp import mcp_server_manager
 from .persona import persona_manager
 from .service import sv
 from .session import session_manager
@@ -46,10 +46,7 @@ async def init_mcp_servers():
         # 1. 初始化 server_manager（只保存配置）
         mcp_server_manager.initialize(conf.mcp_servers)
         
-        # 2. 创建并初始化 session_manager
-        init_mcp_session_manager()
-        
-        # 3. 预连接所有启用的 server（确保首次激活无延迟）
+        # 2. 预连接所有启用的 server（确保首次激活无延迟）
         logger.info("正在预连接所有 MCP servers...")
         
         async def _connect_one(server_config):

@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 @tool_registry.register(
     description="""激活 MCP server 以使用其工具（浏览器自动化、文件系统等）。
 
-当用户请求的功能需要 MCP server 时调用。激活后其工具在当前会话中可用，最多激活 3 个。
-部分 MCP server 已默认激活（default_active），无需再次调用此工具。
+当所需 MCP server 的工具未出现在本轮工具列表中时调用，激活数量受会话限额约束。
+本轮工具列表中已有的工具可直接使用，无需重复激活。
 """,
 )
 async def activate_mcp_server(
@@ -157,8 +157,7 @@ async def activate_mcp_server(
                 
                 result_lines.extend([
                     f"",
-                    f"⚠️ 注意：这些是 MCP 工具，不是 SKILL 工具！",
-                    f"不要调用 execute_script，直接使用上述 mcp_ 开头的工具名称。",
+                    "MCP 工具请按本轮工具列表中的实际名称直接调用。",
                 ])
             
             return ok(

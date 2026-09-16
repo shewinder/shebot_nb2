@@ -1,5 +1,3 @@
-from typing import Optional
-
 """MCP (Model Context Protocol) 支持模块
 
 为 aichat 提供 MCP 协议支持，允许连接外部 MCP servers 扩展 AI 能力。
@@ -14,15 +12,8 @@ Usage:
     conf = Config.get_instance('aichat')
     
     if conf.enable_mcp:
-        # 1. 初始化 server_manager（只保存配置，不连接）
+        # 会话管理器已在模块导入时创建并绑定，只需加载 server 配置
         mcp_server_manager.initialize(conf.mcp_servers)
-        
-        # 2. 创建 session_manager
-        from .mcp import MCPSessionManager
-        mcp_session_manager = MCPSessionManager(mcp_server_manager)
-        
-        # 3. 绑定到 tool_bridge
-        mcp_tool_bridge.set_session_manager(mcp_session_manager)
     
     # 获取 MCP server 摘要（用于 AI 选择）
     summary = mcp_tool_bridge.get_metadata_summary()
@@ -52,27 +43,15 @@ from .session_manager import MCPSessionManager
 # 工具桥接
 from .tool_bridge import MCPToolBridge, mcp_tool_bridge
 
-mcp_session_manager: MCPSessionManager = None  # type: ignore
+mcp_session_manager = MCPSessionManager(mcp_server_manager)
+mcp_tool_bridge.set_session_manager(mcp_session_manager)
 
-def init_mcp_session_manager() -> MCPSessionManager:
-    """初始化全局 MCP 会话管理器
-    
-    在 aichat 模块初始化时调用。
-    
-    Returns:
-        MCPSessionManager 实例
-    """
-    global mcp_session_manager
-    if mcp_session_manager is None:
-        mcp_session_manager = MCPSessionManager(mcp_server_manager)
-        mcp_tool_bridge.set_session_manager(mcp_session_manager)
-    return mcp_session_manager
 
-def get_mcp_session_manager() -> Optional[MCPSessionManager]:
+def get_mcp_session_manager() -> MCPSessionManager:
     """获取全局 MCP 会话管理器实例
     
     Returns:
-        MCPSessionManager 实例，如果未初始化则返回 None
+        MCPSessionManager 实例
     """
     return mcp_session_manager
 
@@ -88,7 +67,6 @@ __all__ = [
     # 会话管理器（渐进式加载）
     "MCPSessionManager",
     "mcp_session_manager",
-    "init_mcp_session_manager",
     "get_mcp_session_manager",
     # 工具桥接
     "MCPToolBridge",
