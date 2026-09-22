@@ -124,23 +124,10 @@ class SkillDiscovery:
             logger.warning(f"SKILL {directory} 缺少必需字段 name 或 description")
             return None
         
-        # 读取 _meta.json 中的额外元数据（如果存在）
-        meta_json = directory / "_meta.json"
-        extra_meta = {}
-        if meta_json.exists():
-            try:
-                import json
-                extra_meta = json.loads(meta_json.read_text(encoding='utf-8'))
-            except Exception as e:
-                logger.warning(f"读取 _meta.json 失败 {meta_json}: {e}")
-        
         # 构建 SkillMetadata
         skill_metadata = SkillMetadata(
             name=metadata['name'],
             description=metadata['description'],
-            source=extra_meta.get('source', 'local'),
-            version=extra_meta.get('version', metadata.get('version', '')),
-            enabled=extra_meta.get('enabled', True),
         )
         
         skill = Skill(

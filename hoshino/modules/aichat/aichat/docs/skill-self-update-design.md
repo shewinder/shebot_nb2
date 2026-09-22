@@ -14,7 +14,7 @@
 
 ## 2. 现状底座（P0-P4 已就绪，本设计直接复用）
 
-- SKILL 格式：`SKILL.md`（YAML frontmatter: name/description）+ `_meta.json` + `scripts/`
+- SKILL 格式：`SKILL.md`（YAML frontmatter: name/description）+ 可选的 `scripts/`
 - 双路径：内置（git 跟踪，只读）+ 用户路径 `data/skills`（gitignore，同名覆盖内置）
 - `skill_manager.reload()` 已实现（整表原子替换；会话激活只存名字，reload 后新内容自动生效）
 - 权限双层接线（P3）：schema 层过滤 + 执行层校验，`Config.tool_permissions` 可覆盖

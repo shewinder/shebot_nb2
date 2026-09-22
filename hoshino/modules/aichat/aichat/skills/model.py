@@ -12,9 +12,6 @@ class SkillMetadata:
     """SKILL 元数据"""
     name: str                          # 唯一标识
     description: str                   # 一句话描述
-    source: str = "local"              # 来源标识 (local/url)
-    version: str = ""                  # 版本号
-    enabled: bool = True               # 是否启用
 
 
 @dataclass

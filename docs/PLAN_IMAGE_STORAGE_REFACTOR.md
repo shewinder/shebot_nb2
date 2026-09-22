@@ -227,7 +227,6 @@ AI 调用 `execute_script` 执行后，确认输出包含正确的文件路径�
 ```
 image_generation/
 ├── SKILL.md          # 提示词指导 + 模型选择策略
-├── _meta.json        # allowed_tools: ["generate_image"]
 └── scripts/          # （预留，阶段 5 暂空或只放 prompt_enhance.py）
 ```
 
@@ -238,16 +237,7 @@ image_generation/
 - 尺寸/比例建议：人物 3:4、风景 16:9、头像 1:1
 - 图像编辑指导：如何引用 `<user_image_N>` 和 `<ai_image_N>`
 
-**_meta.json**：
-```json
-{
-  "name": "image_generation",
-  "description": "AI 图像生成与编辑，支持文生图、图生图、风格转换",
-  "allowed_tools": ["generate_image"],
-  "user_invocable": true,
-  "disable_model_invocation": false
-}
-```
+技能名称和描述统一在 `SKILL.md` 的 YAML frontmatter 中定义；工具权限由工具权限配置控制。
 
 > **注意**：`generate_image` 仍作为全局工具保留。Skill 激活后，AI 获得更详细的指导内容，但工具调用路径不变。
 
