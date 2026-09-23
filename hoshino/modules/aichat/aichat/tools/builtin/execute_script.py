@@ -147,7 +147,6 @@ async def execute_script(
     env = os.environ.copy()
     env["PROJECT_ROOT"] = str(Path("").resolve())  # 项目根目录（bot启动目录）
     env["SKILL_NAME"] = skill_name
-    env["SKILL_DIR"] = str(skill.directory)
 
     # 注入调用者 QQ 号（供 Skill 脚本做用户级权限判断，如仅允许指定用户执行）
     caller_uid = None
