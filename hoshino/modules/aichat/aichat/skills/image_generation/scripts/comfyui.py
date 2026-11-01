@@ -136,6 +136,7 @@ def call_comfyui_generate(prompt: str,
     timeout = 300
     interval = 2
     elapsed = 0
+    consecutive_failures = 0
 
     while elapsed < timeout:
         time.sleep(interval)
@@ -143,7 +144,13 @@ def call_comfyui_generate(prompt: str,
 
         hist_result = http_get(history_url)
         if "error" in hist_result:
+            # ComfyUI 失联（进程崩溃/重启）：任务已无法恢复，快速失败而非死等到超时
+            consecutive_failures += 1
+            if consecutive_failures >= 3:  # 约 6 秒连续失联即判定任务丢失
+                return {"success": False,
+                        "error": f"ComfyUI 失联（{hist_result['error'][:100]}），任务已丢失，请确认 ComfyUI 后重试"}
             continue
+        consecutive_failures = 0
 
         hist = hist_result.get("json", {})
         if not isinstance(hist, dict):

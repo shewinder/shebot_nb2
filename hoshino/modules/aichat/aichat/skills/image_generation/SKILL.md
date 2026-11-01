@@ -30,6 +30,8 @@ disable-model_invocation: false
 | anima_turbo_lora | comfyui.py | **英文（Danbooru 标签）** | **Anima 首选（唯一 Anima 工作流）**：Anima Turbo + 美学 LoRA（`anima-highres-aesthetic-boost` @1.0），10 步 + CFG 1 + er_sde，约 5 秒/张，`--lora-weight` 可调 0~2（0 = 纯净版）。协议：正向 `masterpiece, best quality, score_7, safe, ` 前缀；标签顺序 `[质量][1girl][角色][系列][@画师][外观][动作][环境]`；**画师风格用 `@画师名`**（小写、**空格代下划线**，如鬼针草 → `@chen bin`；下划线/括号原名无效，不够强时加权如 `(@chen bin:1.5)`）；**NSFW 必带显露去遮挡标签**（见下）；非商业许可 | 文生图 | 完全无审核 |
 | novaAnimeXL_ilV180 | comfyui.py | **英文** | 动漫/二次元，色彩鲜艳。同标签式英文 prompt，加 `anime style, vibrant colors, cel shading` | 文生图 | 完全无审核 |
 | illustriousxlMmmix_v80 | comfyui.py | **英文** | 基于 illustriousXL 的 Mmmix v8.0，增强写实风格。英文 prompt，加 `masterpiece, best quality, very aesthetic, latest`，自然语言 | 文生图 | 完全无审核 |
+| qwen_image_2_1 | comfyui.py | **中文/英文自然语言** | Qwen-Image-2.1（本地 7B int8 + Viggle 4 步 turbo LoRA，约 6-12 秒/张，1024 级）。**自然语言句子描述**（越具体越好，不需要标签堆砌/权重语法），中文支持好；图中文字渲染准确；输出含透明通道 | 文生图 | 完全无审核 |
+| qwen_image_2_1_edit | comfyui.py | **中文/英文自然语言** | Qwen-Image-2.1 编辑（本地，约 36-48 秒/张（25 步，质量优先不用 turbo LoRA））：单图编辑——换背景/改服装/改姿势/风格转换/NSFW 编辑；保持原图人物特征与构图。指令直接描述**改后的画面**并写明保留项（如"其他保持不变"） | 单图编辑 | 完全无审核 |
 | bytedance/seedream-v4/edit | atlascloud.py | 中文 | 通用高质量，写实/动漫均可。保留中文，加 `高清细节，精美画质，极致细腻` 和中文风格词 | 文生图, 单图编辑, 多张编辑 | 几乎无审核 |
 | openai/gpt-image-2/text-to-image | atlascloud.py | **中文/英文** | OpenAI 最新模型，文字渲染强。保留原语言，结构化描述，无需质量词 | 文生图, 单图编辑, 多张编辑 | 审核严格 |
 
@@ -38,7 +40,7 @@ disable-model_invocation: false
 1. **判断场景**：
    - **纯文生图**（用户只说"画一张 xxx"）→ 走 comfyui 或其他模型的文生图
    - **图像编辑**（用户明确要求"修改这张图""改图""换风格"等）→ 根据输入图片数量选择对应能力的模型：
-     - **1 张图** → 选择支持**单图编辑**的模型（`bytedance/seedream-v4/edit` / `gemini-3.1-flash-image-preview`）
+     - **1 张图** → 本地优先用 `qwen_image_2_1_edit`（ComfyUI，无审核、免费）；需要更高画质或云端能力时用 `bytedance/seedream-v4/edit` / `gemini-3.1-flash-image-preview`
      - **2 张及以上** → 选择支持**多张编辑**的模型（`bytedance/seedream-v4/edit` / `gemini-3.1-flash-image-preview`）
      - **默认优先本地 ComfyUI**；不可用时 fallback 到云端模型
 2. **Prompt 调优**：按照所选模型的调优策略处理 prompt（语言、质量词、风格词等）
