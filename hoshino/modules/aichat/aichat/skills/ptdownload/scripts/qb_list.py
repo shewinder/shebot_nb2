@@ -215,12 +215,18 @@ async def list_torrents() -> Dict[str, Any]:
 
 def main():
     parser = argparse.ArgumentParser(description='qBittorrent 任务列表')
+    parser.add_argument('--search', metavar='关键词', default='',
+                        help='只显示名称包含该关键词的任务（不区分大小写）')
     args = parser.parse_args()
 
     result = asyncio.run(list_torrents())
 
     if result.get('success'):
-        print(format_torrents(result.get('torrents', [])))
+        torrents = result.get('torrents', [])
+        if args.search:
+            keyword = args.search.lower()
+            torrents = [t for t in torrents if keyword in str(t.get('name', '')).lower()]
+        print(format_torrents(torrents))
     else:
         print(f"❌ 获取失败: {result.get('error')}")
 

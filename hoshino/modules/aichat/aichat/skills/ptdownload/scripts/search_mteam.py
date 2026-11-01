@@ -265,8 +265,12 @@ async def add_and_download(ids: list[str], category: str = "") -> Dict[str, Any]
     if details:
         print("\n".join(details), file=sys.stderr)
 
+    # success 表示「这批任务被正常处理了」，而不是「每条都成功」。
+    # 只要有一条添加成功或已存在就算成功：否则模型会把「4 成功 1 失败」当成整批失败，
+    # 逐条重试注定失败的种子（免费期已过 / 站点已下架），把工具轮数烧光。
+    # 失败明细仍通过 stdout 的 ⚠️ 文案与 stderr 的逐条详情交回给调用方。
     return {
-        "success": failed == 0,
+        "success": (ok + skipped) > 0,
         "count": len(ids),
         "ok": ok,
         "failed": failed,

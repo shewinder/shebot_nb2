@@ -59,8 +59,9 @@ execute_script(skill_name="pt-download", script_path="scripts/qb_add.py", args=[
 ### 查看下载进度
 
 ```python
-# 查看全部任务（AI 自行从结果中筛选，不要用 --search）
+# 查看全部任务（结果较多时可用 --search 按名称过滤，比全量输出后自行筛选更省 token）
 execute_script(skill_name="pt-download", script_path="scripts/qb_list.py")
+execute_script(skill_name="pt-download", script_path="scripts/qb_list.py", args=["--search", "News"])
 ```
 
 ## 注意事项
@@ -68,3 +69,8 @@ execute_script(skill_name="pt-download", script_path="scripts/qb_list.py")
 - 必须向用户展示资源来源站点（如 `[北洋园]`、`[M-Team]`）
 - M-Team 支持 `--free` 仅搜索免费种，也支持按种子 ID 下载
 - 下载前应先调用 `--list-categories` 获取 qb 当前分类列表
+- **批量 `--add` 中个别种子失败属正常**（免费期已过、站点已下架、qBittorrent 返回 Fails 等）：
+  失败项会出现在 stderr 的逐条详情里，**不要逐条重试**，直接在最终汇总中列出失败项即可
+- 批量 `--add` 一次失败不代表整批失败：命令退出码非 0 时先看 stdout 的
+  `✅/⚠️ N/M 已添加` 汇总，只有全部失败才需要重试
+- `qb_list.py` 只接受 `--search` 一个参数，其他参数会被 argparse 拒绝（退出码 2）
